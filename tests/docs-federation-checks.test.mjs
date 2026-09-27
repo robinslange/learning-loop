@@ -40,7 +40,7 @@ test('doctor names every federation check health-check.mjs actually runs', () =>
   // Derived from CHECK_IDS, so a second federation check has to be documented
   // the day it is added, and a check that is removed stops being required.
   const doc = readFileSync(join(SKILLS, 'doctor', 'SKILL.md'), 'utf8');
-  const federationChecks = Object.keys(CHECK_IDS).filter((id) => id.includes('federation'));
+  const federationChecks = [...CHECK_IDS].filter((id) => id.includes('federation'));
 
   assert.ok(
     federationChecks.length > 0,

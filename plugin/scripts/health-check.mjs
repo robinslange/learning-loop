@@ -15,7 +15,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import * as quick from './lib/health-checks/quick.mjs';
 import * as full from './lib/health-checks/full.mjs';
-import { makeCheck, SEVERITIES } from './lib/health-checks/types.mjs';
+import { checker } from './lib/health-checks/types.mjs';
 import { abiDriftSummary } from './check-deps.mjs';
 import { getPluginData, getVaultPath, getConfig } from './lib/config.mjs';
 import { pluginVersion } from './lib/plugin-meta.mjs';
@@ -131,45 +131,24 @@ export async function runQuickChecks(ctx = {}) {
 // missing entirely, or present with zero edges, while the vault has notes to
 // classify. Pure formatter; the runner collects the inputs.
 export function checkEdgesBackfill({ vaultNoteCount, dbExists, edgeCount, arguedEdgeCount } = {}) {
+  const c = checker('edges-backfill', 'Edges index', 'warn');
   if (!vaultNoteCount) {
-    return makeCheck({
-      id: 'edges-backfill',
-      name: 'Edges index',
-      status: SEVERITIES.ok,
-      severity: SEVERITIES.warn,
-      detail: 'no vault notes to index',
-      fix: null,
-    });
+    return c.ok('no vault notes to index');
   }
   if (!dbExists) {
-    return makeCheck({
-      id: 'edges-backfill',
-      name: 'Edges index',
-      status: SEVERITIES.fail,
-      severity: SEVERITIES.warn,
-      detail: `edges.db missing while the vault has ${vaultNoteCount} note(s)`,
-      fix: 'Run: node PLUGIN/scripts/backfill-edges.mjs',
-    });
+    return c.fail(
+      `edges.db missing while the vault has ${vaultNoteCount} note(s)`,
+      'Run: node PLUGIN/scripts/backfill-edges.mjs',
+    );
   }
   if (edgeCount === null) {
-    return makeCheck({
-      id: 'edges-backfill',
-      name: 'Edges index',
-      status: SEVERITIES.fail,
-      severity: SEVERITIES.warn,
-      detail: 'edges.db unreadable',
-      fix: 'Run: node PLUGIN/scripts/backfill-edges.mjs',
-    });
+    return c.fail('edges.db unreadable', 'Run: node PLUGIN/scripts/backfill-edges.mjs');
   }
   if (edgeCount === 0) {
-    return makeCheck({
-      id: 'edges-backfill',
-      name: 'Edges index',
-      status: SEVERITIES.fail,
-      severity: SEVERITIES.warn,
-      detail: `edges.db has zero edges while the vault has ${vaultNoteCount} note(s)`,
-      fix: 'Run: node PLUGIN/scripts/backfill-edges.mjs',
-    });
+    return c.fail(
+      `edges.db has zero edges while the vault has ${vaultNoteCount} note(s)`,
+      'Run: node PLUGIN/scripts/backfill-edges.mjs',
+    );
   }
   // edgeCount (all rows) decides the branches above: a comention-only vault
   // has a populated index and re-running backfill cannot change it, so it must
@@ -177,68 +156,36 @@ export function checkEdgesBackfill({ vaultNoteCount, dbExists, edgeCount, argued
   // always shown is how many argued edges the index holds.
   const argued = arguedEdgeCount ?? edgeCount;
   const comentions = edgeCount - argued;
-  return makeCheck({
-    id: 'edges-backfill',
-    name: 'Edges index',
-    status: SEVERITIES.ok,
-    severity: SEVERITIES.warn,
-    detail:
-      comentions > 0
-        ? `${argued} argued edge(s), ${comentions} co-mention(s)`
-        : `${argued} edge(s)`,
-    fix: null,
-  });
+  return c.ok(
+    comentions > 0 ? `${argued} argued edge(s), ${comentions} co-mention(s)` : `${argued} edge(s)`,
+  );
 }
 
 // Flags contradiction cycles in the argumentation graph: notes that dispute
 // each other in a loop. Knowledge state, not a dependency problem, so
 // formatMissingDeps excludes this id; /health renders it. Pure formatter.
 export function checkContradictionCycles({ dbExists, cycles } = {}) {
+  const c = checker('contradiction-cycles', 'Contradiction cycles', 'warn');
   if (!dbExists) {
-    return makeCheck({
-      id: 'contradiction-cycles',
-      name: 'Contradiction cycles',
-      status: SEVERITIES.ok,
-      severity: SEVERITIES.warn,
-      detail: 'no edges index to scan',
-      fix: null,
-    });
+    return c.ok('no edges index to scan');
   }
   if (cycles == null) {
     // Same collector failure checkEdgesBackfill reports: the db exists but
     // could not be read. Healthy is the one thing that is not.
-    return makeCheck({
-      id: 'contradiction-cycles',
-      name: 'Contradiction cycles',
-      status: SEVERITIES.fail,
-      severity: SEVERITIES.warn,
-      detail: 'edges.db unreadable',
-      fix: 'Run: node PLUGIN/scripts/backfill-edges.mjs',
-    });
+    return c.fail('edges.db unreadable', 'Run: node PLUGIN/scripts/backfill-edges.mjs');
   }
   if (cycles.length === 0) {
-    return makeCheck({
-      id: 'contradiction-cycles',
-      name: 'Contradiction cycles',
-      status: SEVERITIES.ok,
-      severity: SEVERITIES.warn,
-      detail: 'no contradiction cycles',
-      fix: null,
-    });
+    return c.ok('no contradiction cycles');
   }
   const shown = cycles
     .slice(0, 3)
     .map((c) => [...c.nodes, c.nodes[0]].join(' -> '))
     .join('; ');
   const more = cycles.length > 3 ? ` (+${cycles.length - 3} more)` : '';
-  return makeCheck({
-    id: 'contradiction-cycles',
-    name: 'Contradiction cycles',
-    status: SEVERITIES.fail,
-    severity: SEVERITIES.warn,
-    detail: `${cycles.length} contradiction cycle(s): ${shown}${more}`,
-    fix: 'Review with /learning-loop:gaps; full list: node PLUGIN/scripts/edges-cli.mjs cycles',
-  });
+  return c.fail(
+    `${cycles.length} contradiction cycle(s): ${shown}${more}`,
+    'Review with /learning-loop:gaps; full list: node PLUGIN/scripts/edges-cli.mjs cycles',
+  );
 }
 
 async function collectEdgesBackfillInputs({ pluginData, vaultRoot }) {
@@ -326,13 +273,11 @@ export async function runFullChecks(ctx = {}) {
       pluginName: 'episodic-memory',
       marketplace: 'superpowers-marketplace',
       installedPlugins,
-      severity: 'fail',
     }),
     full.checkPluginInstalled({
       pluginName: 'learning-loop',
       marketplace: 'learning-loop-marketplace',
       installedPlugins,
-      severity: 'fail',
     }),
     full.checkBinaryRuns({ binaryVersionOutput, exitCode: binaryExitCode }),
     full.checkWatchDaemon({ pidfileExists, pidIsAlive, pid }),

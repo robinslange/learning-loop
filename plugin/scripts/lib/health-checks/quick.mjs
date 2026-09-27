@@ -3,7 +3,7 @@
 
 import { closeSync, existsSync, openSync, readFileSync, statSync, mkdirSync } from 'node:fs';
 import { delimiter, join, dirname } from 'node:path';
-import { CHECK_IDS, SEVERITIES, makeCheck } from './types.mjs';
+import { checker } from './types.mjs';
 import {
   DATA_FILES,
   DATA_PATHS,
@@ -36,12 +36,6 @@ import {
   SHADOW_BACKEND_HEALTH_MIN_TOTAL,
 } from '../shadow-gate.mjs';
 
-// Re-exported from the writer that owns the naming. The scan basis must match
-// the filenames, which monthStr() builds in LOCAL time; computing these in UTC
-// made the reader miss the current month's file for the first hours of every
-// month east of UTC. Kept as a named export here for the existing callers.
-export { recentMonths };
-
 const VAULT_FOLDERS = [
   '0-inbox',
   '1-fleeting',
@@ -53,160 +47,78 @@ const VAULT_FOLDERS = [
 ];
 
 export function checkVaultPath({ vaultRoot } = {}) {
+  const c = checker('vault-path', 'Vault path', 'fail');
   if (!vaultRoot) {
-    return makeCheck({
-      id: CHECK_IDS['vault-path'],
-      name: 'Vault path',
-      status: SEVERITIES.fail,
-      severity: SEVERITIES.fail,
-      detail: 'not configured',
-      fix: 'Run /learning-loop:init to set your vault path',
-    });
+    return c.fail('not configured', 'Run /learning-loop:init to set your vault path');
   }
   if (!existsSync(vaultRoot)) {
-    return makeCheck({
-      id: CHECK_IDS['vault-path'],
-      name: 'Vault path',
-      status: SEVERITIES.fail,
-      severity: SEVERITIES.fail,
-      detail: `directory missing: ${vaultRoot}`,
-      fix: 'Restore the vault directory or run /learning-loop:init to pick a new path',
-    });
+    return c.fail(
+      `directory missing: ${vaultRoot}`,
+      'Restore the vault directory or run /learning-loop:init to pick a new path',
+    );
   }
-  return makeCheck({
-    id: CHECK_IDS['vault-path'],
-    name: 'Vault path',
-    status: SEVERITIES.ok,
-    severity: SEVERITIES.fail,
-    detail: vaultRoot,
-    fix: null,
-  });
+  return c.ok(vaultRoot);
 }
 
 export function checkVaultFolders({ vaultRoot } = {}) {
+  const c = checker('vault-folders', 'Vault folders', 'fail');
   if (!vaultRoot || !existsSync(vaultRoot)) {
-    return makeCheck({
-      id: CHECK_IDS['vault-folders'],
-      name: 'Vault folders',
-      status: SEVERITIES.fail,
-      severity: SEVERITIES.fail,
-      detail: 'vault path not available',
-      fix: 'Fix vault-path first',
-    });
+    return c.fail('vault path not available', 'Fix vault-path first');
   }
   const missing = VAULT_FOLDERS.filter((f) => !existsSync(join(vaultRoot, f)));
   if (missing.length === 0) {
-    return makeCheck({
-      id: CHECK_IDS['vault-folders'],
-      name: 'Vault folders',
-      status: SEVERITIES.ok,
-      severity: SEVERITIES.fail,
-      detail: '7/7 present',
-      fix: null,
-    });
+    return c.ok('7/7 present');
   }
-  return makeCheck({
-    id: CHECK_IDS['vault-folders'],
-    name: 'Vault folders',
-    status: SEVERITIES.fail,
-    severity: SEVERITIES.fail,
-    detail: `missing: ${missing.join(', ')}`,
-    fix: `Run /learning-loop:init to create missing folders: ${missing.join(', ')}`,
-  });
+  return c.fail(
+    `missing: ${missing.join(', ')}`,
+    `Run /learning-loop:init to create missing folders: ${missing.join(', ')}`,
+  );
 }
 
 export function checkVaultSystemFiles({ vaultRoot } = {}) {
+  const c = checker('vault-system-files', 'Vault system files', 'warn');
   if (!vaultRoot || !existsSync(vaultRoot)) {
-    return makeCheck({
-      id: CHECK_IDS['vault-system-files'],
-      name: 'Vault system files',
-      status: SEVERITIES.fail,
-      severity: SEVERITIES.warn,
-      detail: 'vault path not available',
-      fix: 'Fix vault-path first',
-    });
+    return c.fail('vault path not available', 'Fix vault-path first');
   }
   const missing = [];
   for (const f of ['_system/persona.md', '_system/capture-rules.md']) {
     if (!existsSync(join(vaultRoot, f))) missing.push(f);
   }
   if (missing.length === 0) {
-    return makeCheck({
-      id: CHECK_IDS['vault-system-files'],
-      name: 'Vault system files',
-      status: SEVERITIES.ok,
-      severity: SEVERITIES.warn,
-      detail: 'persona + capture rules present',
-      fix: null,
-    });
+    return c.ok('persona + capture rules present');
   }
-  return makeCheck({
-    id: CHECK_IDS['vault-system-files'],
-    name: 'Vault system files',
-    status: SEVERITIES.fail,
-    severity: SEVERITIES.warn,
-    detail: `missing: ${missing.join(', ')}`,
-    fix: 'Run /learning-loop:init Phase 2c to restore system file defaults',
-  });
+  return c.fail(
+    `missing: ${missing.join(', ')}`,
+    'Run /learning-loop:init Phase 2c to restore system file defaults',
+  );
 }
 
 export function checkBinaryExists({ pluginData, platform = process.platform } = {}) {
+  const c = checker('binary-exists', 'll-search binary', 'fail');
   if (!pluginData) {
-    return makeCheck({
-      id: CHECK_IDS['binary-exists'],
-      name: 'll-search binary',
-      status: SEVERITIES.fail,
-      severity: SEVERITIES.fail,
-      detail: 'plugin-data path not resolved',
-      fix: 'Run /learning-loop:init to download the binary',
-    });
+    return c.fail(
+      'plugin-data path not resolved',
+      'Run /learning-loop:init to download the binary',
+    );
   }
   // The name the DOWNLOADER writes, which differs by platform. `lib/binary.mjs`
   // already resolved it correctly, so semantic search worked while this check
   // reported the binary missing and offered to re-download it.
   const binPath = join(pluginData, 'bin', binaryFileName(platform));
   if (!existsSync(binPath)) {
-    return makeCheck({
-      id: CHECK_IDS['binary-exists'],
-      name: 'll-search binary',
-      status: SEVERITIES.fail,
-      severity: SEVERITIES.fail,
-      detail: `missing at ${binPath}`,
-      fix: 'Run /learning-loop:init to re-download the binary',
-    });
+    return c.fail(`missing at ${binPath}`, 'Run /learning-loop:init to re-download the binary');
   }
   try {
     const stat = statSync(binPath);
     // Same reason as the shims below: no meaningful 0o111 on a Windows `.exe`,
     // so existence is the only signal the mode bit could have added.
     if (platform !== 'win32' && !(stat.mode & 0o111)) {
-      return makeCheck({
-        id: CHECK_IDS['binary-exists'],
-        name: 'll-search binary',
-        status: SEVERITIES.fail,
-        severity: SEVERITIES.fail,
-        detail: 'not executable',
-        fix: `chmod +x ${binPath}`,
-      });
+      return c.fail('not executable', `chmod +x ${binPath}`);
     }
   } catch (err) {
-    return makeCheck({
-      id: CHECK_IDS['binary-exists'],
-      name: 'll-search binary',
-      status: SEVERITIES.fail,
-      severity: SEVERITIES.fail,
-      detail: `stat error: ${err.message}`,
-      fix: 'Run /learning-loop:init to re-download',
-    });
+    return c.fail(`stat error: ${err.message}`, 'Run /learning-loop:init to re-download');
   }
-  return makeCheck({
-    id: CHECK_IDS['binary-exists'],
-    name: 'll-search binary',
-    status: SEVERITIES.ok,
-    severity: SEVERITIES.fail,
-    detail: binPath,
-    fix: null,
-  });
+  return c.ok(binPath);
 }
 
 function stripV(s) {
@@ -214,26 +126,13 @@ function stripV(s) {
 }
 
 export function checkBinaryVersionFile({ pluginData, pluginVersion } = {}) {
+  const c = checker('binary-version-file', 'Binary version file', 'warn');
   if (!pluginData) {
-    return makeCheck({
-      id: CHECK_IDS['binary-version-file'],
-      name: 'Binary version file',
-      status: SEVERITIES.fail,
-      severity: SEVERITIES.warn,
-      detail: 'plugin-data not resolved',
-      fix: 'Fix plugin-data resolution first',
-    });
+    return c.fail('plugin-data not resolved', 'Fix plugin-data resolution first');
   }
   const verPath = DATA_FILES.binVersion(pluginData);
   if (!existsSync(verPath)) {
-    return makeCheck({
-      id: CHECK_IDS['binary-version-file'],
-      name: 'Binary version file',
-      status: SEVERITIES.fail,
-      severity: SEVERITIES.warn,
-      detail: 'missing',
-      fix: 'Run /learning-loop:init to re-download (writes .version)',
-    });
+    return c.fail('missing', 'Run /learning-loop:init to re-download (writes .version)');
   }
   try {
     const version = readFileSync(verPath, 'utf-8').trim();
@@ -242,45 +141,21 @@ export function checkBinaryVersionFile({ pluginData, pluginVersion } = {}) {
     const installed = stripV(version);
     const running = stripV(pluginVersion || '');
     if (isPlainSemver(installed) && isPlainSemver(running) && semverCmp(installed, running) < 0) {
-      return makeCheck({
-        id: CHECK_IDS['binary-version-file'],
-        name: 'Binary version file',
-        status: SEVERITIES.fail,
-        severity: SEVERITIES.warn,
-        detail: `binary v${installed} behind plugin v${running} — auto-update may be stuck`,
-        fix: 'Run node PLUGIN/scripts/download-binary.mjs manually and check network access',
-      });
+      return c.fail(
+        `binary v${installed} behind plugin v${running} — auto-update may be stuck`,
+        'Run node PLUGIN/scripts/download-binary.mjs manually and check network access',
+      );
     }
-    return makeCheck({
-      id: CHECK_IDS['binary-version-file'],
-      name: 'Binary version file',
-      status: SEVERITIES.ok,
-      severity: SEVERITIES.warn,
-      detail: version,
-      fix: null,
-    });
+    return c.ok(version);
   } catch (err) {
-    return makeCheck({
-      id: CHECK_IDS['binary-version-file'],
-      name: 'Binary version file',
-      status: SEVERITIES.fail,
-      severity: SEVERITIES.warn,
-      detail: `read error: ${err.message}`,
-      fix: 'Run /learning-loop:init to repair',
-    });
+    return c.fail(`read error: ${err.message}`, 'Run /learning-loop:init to repair');
   }
 }
 
 export function checkShimsExist({ home, platform = process.platform } = {}) {
+  const c = checker('shims-exist', 'CLI shims', 'fail');
   if (!home) {
-    return makeCheck({
-      id: CHECK_IDS['shims-exist'],
-      name: 'CLI shims',
-      status: SEVERITIES.fail,
-      severity: SEVERITIES.fail,
-      detail: 'HOME not set',
-      fix: 'Set $HOME',
-    });
+    return c.fail('HOME not set', 'Set $HOME');
   }
   const missing = [];
   for (const s of SHIM_NAMES) {
@@ -312,46 +187,25 @@ export function checkShimsExist({ home, platform = process.platform } = {}) {
     // reported four shims ready. Mirror the resolution instead of the file.
     const root = resolveShimRoot(home);
     if (!root) {
-      return makeCheck({
-        id: CHECK_IDS['shims-exist'],
-        name: 'CLI shims',
-        status: SEVERITIES.fail,
-        severity: SEVERITIES.fail,
-        detail: 'installed, but no resolved root ships scripts/shim.mjs — every shim exits 1',
+      return c.fail(
+        'installed, but no resolved root ships scripts/shim.mjs — every shim exits 1',
         // Deliberately not install-shims: rewriting four correct files that
         // resolve to a tree with no shim.mjs reproduces the same failure.
-        fix: 'Upgrade the plugin, or call scripts directly: node PLUGIN/scripts/<script>.mjs',
-      });
+        'Upgrade the plugin, or call scripts directly: node PLUGIN/scripts/<script>.mjs',
+      );
     }
-    return makeCheck({
-      id: CHECK_IDS['shims-exist'],
-      name: 'CLI shims',
-      status: SEVERITIES.ok,
-      severity: SEVERITIES.fail,
-      detail: `${SHIM_NAMES.join(' + ')} ready`,
-      fix: null,
-    });
+    return c.ok(`${SHIM_NAMES.join(' + ')} ready`);
   }
-  return makeCheck({
-    id: CHECK_IDS['shims-exist'],
-    name: 'CLI shims',
-    status: SEVERITIES.fail,
-    severity: SEVERITIES.fail,
-    detail: `missing: ${missing.join(', ')}`,
-    fix: 'Run node PLUGIN/scripts/install-shims.mjs --install',
-  });
+  return c.fail(
+    `missing: ${missing.join(', ')}`,
+    'Run node PLUGIN/scripts/install-shims.mjs --install',
+  );
 }
 
 export function checkLocalBinOnPath({ home, pathEnv, pathDelimiter = delimiter } = {}) {
+  const c = checker('local-bin-on-path', '~/.local/bin on PATH', 'warn');
   if (!home) {
-    return makeCheck({
-      id: CHECK_IDS['local-bin-on-path'],
-      name: '~/.local/bin on PATH',
-      status: SEVERITIES.fail,
-      severity: SEVERITIES.warn,
-      detail: 'HOME not set',
-      fix: 'Set $HOME',
-    });
+    return c.fail('HOME not set', 'Set $HOME');
   }
   const target = join(home, '.local', 'bin');
   // `path.delimiter`, not ':'. Windows separates PATH entries with ';', so
@@ -359,201 +213,97 @@ export function checkLocalBinOnPath({ home, pathEnv, pathDelimiter = delimiter }
   // and the drive letters make every entry contain a ':' of its own.
   const segments = (pathEnv || '').split(pathDelimiter);
   if (segments.includes(target)) {
-    return makeCheck({
-      id: CHECK_IDS['local-bin-on-path'],
-      name: '~/.local/bin on PATH',
-      status: SEVERITIES.ok,
-      severity: SEVERITIES.warn,
-      detail: target,
-      fix: null,
-    });
+    return c.ok(target);
   }
-  return makeCheck({
-    id: CHECK_IDS['local-bin-on-path'],
-    name: '~/.local/bin on PATH',
-    status: SEVERITIES.fail,
-    severity: SEVERITIES.warn,
-    detail: 'not on PATH',
-    fix: 'Add to your shell rc: export PATH="$HOME/.local/bin:$PATH"',
-  });
+  return c.fail('not on PATH', 'Add to your shell rc: export PATH="$HOME/.local/bin:$PATH"');
 }
 
 const CLAUDEMD_MARKER_RE = /<!--\s*learning-loop\s+v(\d+)\s*-->/;
 
-export function checkClaudemdSectionPresent({ home } = {}) {
-  if (!home) {
-    return makeCheck({
-      id: CHECK_IDS['claudemd-section-present'],
-      name: 'CLAUDE.md section',
-      status: SEVERITIES.fail,
-      severity: SEVERITIES.warn,
-      detail: 'HOME not set',
-      fix: 'Set $HOME',
-    });
-  }
+// { version } (null when the file has no marker), or { error, fix } when the
+// file cannot be read.
+function readClaudemdMarker(home) {
   const p = join(home, '.claude/CLAUDE.md');
   if (!existsSync(p)) {
-    return makeCheck({
-      id: CHECK_IDS['claudemd-section-present'],
-      name: 'CLAUDE.md section',
-      status: SEVERITIES.fail,
-      severity: SEVERITIES.warn,
-      detail: '~/.claude/CLAUDE.md not found',
+    return {
+      error: '~/.claude/CLAUDE.md not found',
       fix: 'Run /learning-loop:init Phase 5 to install',
-    });
+    };
   }
   try {
-    const body = readFileSync(p, 'utf-8');
-    if (CLAUDEMD_MARKER_RE.test(body)) {
-      return makeCheck({
-        id: CHECK_IDS['claudemd-section-present'],
-        name: 'CLAUDE.md section',
-        status: SEVERITIES.ok,
-        severity: SEVERITIES.warn,
-        detail: 'marker found',
-        fix: null,
-      });
-    }
-    return makeCheck({
-      id: CHECK_IDS['claudemd-section-present'],
-      name: 'CLAUDE.md section',
-      status: SEVERITIES.fail,
-      severity: SEVERITIES.warn,
-      detail: 'marker missing',
-      fix: 'Run /learning-loop:init Phase 5 to install the learning-loop section',
-    });
+    const m = CLAUDEMD_MARKER_RE.exec(readFileSync(p, 'utf-8'));
+    return { version: m ? m[1] : null };
   } catch (err) {
-    return makeCheck({
-      id: CHECK_IDS['claudemd-section-present'],
-      name: 'CLAUDE.md section',
-      status: SEVERITIES.fail,
-      severity: SEVERITIES.warn,
-      detail: `read error: ${err.message}`,
-      fix: 'Check ~/.claude/CLAUDE.md permissions',
-    });
+    return { error: `read error: ${err.message}`, fix: 'Check ~/.claude/CLAUDE.md permissions' };
   }
+}
+
+export function checkClaudemdSectionPresent({ home } = {}) {
+  const c = checker('claudemd-section-present', 'CLAUDE.md section', 'warn');
+  if (!home) {
+    return c.fail('HOME not set', 'Set $HOME');
+  }
+  const r = readClaudemdMarker(home);
+  if (r.error) {
+    return c.fail(r.error, r.fix);
+  }
+  if (r.version === null) {
+    return c.fail(
+      'marker missing',
+      'Run /learning-loop:init Phase 5 to install the learning-loop section',
+    );
+  }
+  return c.ok('marker found');
 }
 
 export function checkClaudemdSectionCurrent({ home, templateVersion } = {}) {
+  const c = checker('claudemd-section-current', 'CLAUDE.md section version', 'warn');
   if (!home || !templateVersion) {
-    return makeCheck({
-      id: CHECK_IDS['claudemd-section-current'],
-      name: 'CLAUDE.md section version',
-      status: SEVERITIES.fail,
-      severity: SEVERITIES.warn,
-      detail: 'missing inputs',
-      fix: 'Internal: check caller resolved templateVersion',
-    });
+    return c.fail('missing inputs', 'Internal: check caller resolved templateVersion');
   }
-  const p = join(home, '.claude/CLAUDE.md');
-  if (!existsSync(p)) {
-    return makeCheck({
-      id: CHECK_IDS['claudemd-section-current'],
-      name: 'CLAUDE.md section version',
-      status: SEVERITIES.fail,
-      severity: SEVERITIES.warn,
-      detail: 'CLAUDE.md missing',
-      fix: 'Run /learning-loop:init Phase 5',
-    });
+  const r = readClaudemdMarker(home);
+  if (r.error) {
+    return c.fail(r.error, r.fix);
   }
-  try {
-    const body = readFileSync(p, 'utf-8');
-    const m = CLAUDEMD_MARKER_RE.exec(body);
-    if (!m) {
-      return makeCheck({
-        id: CHECK_IDS['claudemd-section-current'],
-        name: 'CLAUDE.md section version',
-        status: SEVERITIES.fail,
-        severity: SEVERITIES.warn,
-        detail: 'marker missing',
-        fix: 'Run /learning-loop:init Phase 5',
-      });
-    }
-    const installed = m[1];
-    if (installed === String(templateVersion)) {
-      return makeCheck({
-        id: CHECK_IDS['claudemd-section-current'],
-        name: 'CLAUDE.md section version',
-        status: SEVERITIES.ok,
-        severity: SEVERITIES.warn,
-        detail: `v${installed}`,
-        fix: null,
-      });
-    }
-    return makeCheck({
-      id: CHECK_IDS['claudemd-section-current'],
-      name: 'CLAUDE.md section version',
-      status: SEVERITIES.fail,
-      severity: SEVERITIES.warn,
-      detail: `installed v${installed}, template v${templateVersion}`,
-      fix: 'Run /learning-loop:init Phase 5 to update the section',
-    });
-  } catch (err) {
-    return makeCheck({
-      id: CHECK_IDS['claudemd-section-current'],
-      name: 'CLAUDE.md section version',
-      status: SEVERITIES.fail,
-      severity: SEVERITIES.warn,
-      detail: `read error: ${err.message}`,
-      fix: 'Check CLAUDE.md permissions',
-    });
+  if (r.version === null) {
+    return c.fail('marker missing', 'Run /learning-loop:init Phase 5');
   }
+  if (r.version === String(templateVersion)) {
+    return c.ok(`v${r.version}`);
+  }
+  return c.fail(
+    `installed v${r.version}, template v${templateVersion}`,
+    'Run /learning-loop:init Phase 5 to update the section',
+  );
 }
 
 export function checkInstalledPluginsReadable({ home } = {}) {
+  const c = checker('installed-plugins-readable', 'Plugin registry', 'fail');
   if (!home) {
-    return makeCheck({
-      id: CHECK_IDS['installed-plugins-readable'],
-      name: 'Plugin registry',
-      status: SEVERITIES.fail,
-      severity: SEVERITIES.fail,
-      detail: 'HOME not set',
-      fix: 'Set $HOME',
-    });
+    return c.fail('HOME not set', 'Set $HOME');
   }
   const p = join(home, '.claude/plugins/installed_plugins.json');
   if (!existsSync(p)) {
-    return makeCheck({
-      id: CHECK_IDS['installed-plugins-readable'],
-      name: 'Plugin registry',
-      status: SEVERITIES.fail,
-      severity: SEVERITIES.fail,
-      detail: 'installed_plugins.json not found',
-      fix: 'Claude Code may not have run yet; launch Claude Code once and try again',
-    });
+    return c.fail(
+      'installed_plugins.json not found',
+      'Claude Code may not have run yet; launch Claude Code once and try again',
+    );
   }
   try {
     JSON.parse(readFileSync(p, 'utf-8'));
-    return makeCheck({
-      id: CHECK_IDS['installed-plugins-readable'],
-      name: 'Plugin registry',
-      status: SEVERITIES.ok,
-      severity: SEVERITIES.fail,
-      detail: p,
-      fix: null,
-    });
+    return c.ok(p);
   } catch (err) {
-    return makeCheck({
-      id: CHECK_IDS['installed-plugins-readable'],
-      name: 'Plugin registry',
-      status: SEVERITIES.fail,
-      severity: SEVERITIES.fail,
-      detail: `parse error: ${err.message}`,
-      fix: 'Inspect ~/.claude/plugins/installed_plugins.json for corruption',
-    });
+    return c.fail(
+      `parse error: ${err.message}`,
+      'Inspect ~/.claude/plugins/installed_plugins.json for corruption',
+    );
   }
 }
 
 export function checkPluginCacheVersionPresent({ home, installedVersion } = {}) {
+  const c = checker('plugin-cache-version-present', 'Plugin cache directory', 'fail');
   if (!home || !installedVersion) {
-    return makeCheck({
-      id: CHECK_IDS['plugin-cache-version-present'],
-      name: 'Plugin cache directory',
-      status: SEVERITIES.fail,
-      severity: SEVERITIES.fail,
-      detail: 'missing inputs',
-      fix: 'Internal: caller should pass installedVersion',
-    });
+    return c.fail('missing inputs', 'Internal: caller should pass installedVersion');
   }
   const verDir = join(
     home,
@@ -561,130 +311,54 @@ export function checkPluginCacheVersionPresent({ home, installedVersion } = {}) 
     installedVersion,
   );
   if (!existsSync(verDir)) {
-    return makeCheck({
-      id: CHECK_IDS['plugin-cache-version-present'],
-      name: 'Plugin cache directory',
-      status: SEVERITIES.fail,
-      severity: SEVERITIES.fail,
-      detail: `missing: ${verDir}`,
-      fix: `Run: claude plugin install learning-loop@learning-loop-marketplace`,
-    });
+    return c.fail(
+      `missing: ${verDir}`,
+      `Run: claude plugin install learning-loop@learning-loop-marketplace`,
+    );
   }
-  return makeCheck({
-    id: CHECK_IDS['plugin-cache-version-present'],
-    name: 'Plugin cache directory',
-    status: SEVERITIES.ok,
-    severity: SEVERITIES.fail,
-    detail: verDir,
-    fix: null,
-  });
+  return c.ok(verDir);
 }
 
 export function checkSearchIndexExists({ vaultRoot } = {}) {
+  const c = checker('search-index-exists', 'Search index', 'warn');
   if (!vaultRoot) {
-    return makeCheck({
-      id: CHECK_IDS['search-index-exists'],
-      name: 'Search index',
-      status: SEVERITIES.fail,
-      severity: SEVERITIES.warn,
-      detail: 'vault path not available',
-      fix: 'Fix vault-path first',
-    });
+    return c.fail('vault path not available', 'Fix vault-path first');
   }
   const p = join(vaultRoot, '.vault-search/vault-index.db');
   if (!existsSync(p)) {
-    return makeCheck({
-      id: CHECK_IDS['search-index-exists'],
-      name: 'Search index',
-      status: SEVERITIES.fail,
-      severity: SEVERITIES.warn,
-      detail: 'no index — run vault-search.mjs index to build',
-      fix: 'Run: ll-run vault-search.mjs index',
-    });
+    return c.fail(
+      'no index — run vault-search.mjs index to build',
+      'Run: ll-run vault-search.mjs index',
+    );
   }
   try {
     const stat = statSync(p);
     if (stat.size === 0) {
-      return makeCheck({
-        id: CHECK_IDS['search-index-exists'],
-        name: 'Search index',
-        status: SEVERITIES.fail,
-        severity: SEVERITIES.warn,
-        detail: 'index file is empty',
-        fix: 'Run: ll-run vault-search.mjs index',
-      });
+      return c.fail('index file is empty', 'Run: ll-run vault-search.mjs index');
     }
-    return makeCheck({
-      id: CHECK_IDS['search-index-exists'],
-      name: 'Search index',
-      status: SEVERITIES.ok,
-      severity: SEVERITIES.warn,
-      detail: `${Math.round(stat.size / 1024)} KB`,
-      fix: null,
-    });
+    return c.ok(`${Math.round(stat.size / 1024)} KB`);
   } catch (err) {
-    return makeCheck({
-      id: CHECK_IDS['search-index-exists'],
-      name: 'Search index',
-      status: SEVERITIES.fail,
-      severity: SEVERITIES.warn,
-      detail: `stat error: ${err.message}`,
-      fix: 'Run: ll-run vault-search.mjs index',
-    });
+    return c.fail(`stat error: ${err.message}`, 'Run: ll-run vault-search.mjs index');
   }
 }
 
 export function checkDupScanSocketFresh({ pluginData } = {}) {
+  const c = checker('dup-scan-socket-fresh', 'Duplicate-scan socket', 'warn');
   if (!pluginData) {
-    return makeCheck({
-      id: CHECK_IDS['dup-scan-socket-fresh'],
-      name: 'Duplicate-scan socket',
-      status: SEVERITIES.ok,
-      severity: SEVERITIES.warn,
-      detail: 'plugin-data not available — skipped',
-      fix: null,
-    });
+    return c.ok('plugin-data not available — skipped');
   }
   const p = DATA_FILES.dupScanSocket(pluginData);
   if (!existsSync(p)) {
-    return makeCheck({
-      id: CHECK_IDS['dup-scan-socket-fresh'],
-      name: 'Duplicate-scan socket',
-      status: SEVERITIES.ok,
-      severity: SEVERITIES.warn,
-      detail: 'not running (no socket file)',
-      fix: null,
-    });
+    return c.ok('not running (no socket file)');
   }
   try {
     const stat = statSync(p);
     if (!stat.isSocket()) {
-      return makeCheck({
-        id: CHECK_IDS['dup-scan-socket-fresh'],
-        name: 'Duplicate-scan socket',
-        status: SEVERITIES.fail,
-        severity: SEVERITIES.warn,
-        detail: 'stale (file at socket path is not a socket)',
-        fix: `rm ${p} and restart ll-watch`,
-      });
+      return c.fail('stale (file at socket path is not a socket)', `rm ${p} and restart ll-watch`);
     }
-    return makeCheck({
-      id: CHECK_IDS['dup-scan-socket-fresh'],
-      name: 'Duplicate-scan socket',
-      status: SEVERITIES.ok,
-      severity: SEVERITIES.warn,
-      detail: p,
-      fix: null,
-    });
+    return c.ok(p);
   } catch (err) {
-    return makeCheck({
-      id: CHECK_IDS['dup-scan-socket-fresh'],
-      name: 'Duplicate-scan socket',
-      status: SEVERITIES.fail,
-      severity: SEVERITIES.warn,
-      detail: `stat error: ${err.message}`,
-      fix: `Inspect ${p}`,
-    });
+    return c.fail(`stat error: ${err.message}`, `Inspect ${p}`);
   }
 }
 
@@ -717,26 +391,14 @@ export function checkFederationSyncHealth({
   syncIntervalSecs = 300,
   now = Date.now(),
 } = {}) {
-  const ok = (detail) =>
-    makeCheck({
-      id: CHECK_IDS['federation-sync-health'],
-      name: 'Federation sync',
-      status: SEVERITIES.ok,
-      severity: SEVERITIES.fail,
-      detail,
-      fix: null,
-    });
+  const c = checker('federation-sync-health', 'Federation sync', 'fail');
   const bad = (detail) =>
-    makeCheck({
-      id: CHECK_IDS['federation-sync-health'],
-      name: 'Federation sync',
-      status: SEVERITIES.fail,
-      severity: SEVERITIES.fail,
+    c.fail(
       detail,
-      fix: 'Run `ll-search status` for the full report; the detail above is the error the daemon last recorded.',
-    });
+      'Run `ll-search status` for the full report; the detail above is the error the daemon last recorded.',
+    );
 
-  if (!pluginData) return ok('plugin-data not available — skipped');
+  if (!pluginData) return c.ok('plugin-data not available — skipped');
 
   // Same profile walk as the session-start federation line: the registry when
   // there is one, otherwise the single implicit profile.
@@ -784,7 +446,7 @@ export function checkFederationSyncHealth({
       return bad(`${who}no successful sync in ${mins} minutes`);
     }
   }
-  return ok(configured === 0 ? 'not configured' : 'syncing');
+  return c.ok(configured === 0 ? 'not configured' : 'syncing');
 }
 
 // Warn when recent hook-errors logs show repeated duplicate-gate timeouts or a
@@ -799,15 +461,9 @@ export function checkDuplicateGateHealth({
   now = new Date(),
   platform = process.platform,
 } = {}) {
+  const c = checker('duplicate-gate-health', 'Duplicate gate', 'warn');
   if (!pluginData) {
-    return makeCheck({
-      id: CHECK_IDS['duplicate-gate-health'],
-      name: 'Duplicate gate',
-      status: SEVERITIES.ok,
-      severity: SEVERITIES.warn,
-      detail: 'plugin-data not available — skipped',
-      fix: null,
-    });
+    return c.ok('plugin-data not available — skipped');
   }
   const rows = recentHookErrors(pluginData, now);
   const timeouts = rows.filter((r) => r?.code === 'duplicate-gate-timeout');
@@ -820,14 +476,10 @@ export function checkDuplicateGateHealth({
   ).length;
   const totalStaleDaemon = rows.filter((r) => r?.code === 'duplicate-gate-stale-daemon').length;
   if (totalStaleDaemon > 0) {
-    return makeCheck({
-      id: CHECK_IDS['duplicate-gate-health'],
-      name: 'Duplicate gate',
-      status: SEVERITIES.fail,
-      severity: SEVERITIES.warn,
-      detail: `stale daemon binary: ${totalStaleDaemon} stale-daemon error(s) in recent logs — the duplicate gate is paying cold-start on every vault write`,
-      fix: 'Restart the watch daemon to pick up the new binary: kill the current ll-watch, then ll-watch',
-    });
+    return c.fail(
+      `stale daemon binary: ${totalStaleDaemon} stale-daemon error(s) in recent logs — the duplicate gate is paying cold-start on every vault write`,
+      'Restart the watch daemon to pick up the new binary: kill the current ll-watch, then ll-watch',
+    );
   }
   if (totalTimeouts >= DUPLICATE_GATE_TIMEOUT_WARN_THRESHOLD) {
     // A timeout logged against source 'daemon' proves the socket was there and a
@@ -839,48 +491,34 @@ export function checkDuplicateGateHealth({
     // every call pays a cold subprocess and the only lever is the write budget.
     // Prescribing ll-watch here is advice that cannot work at any daemon state.
     if (!daemonSocketSupported(platform)) {
-      return makeCheck({
-        id: CHECK_IDS['duplicate-gate-health'],
-        name: 'Duplicate gate',
-        status: SEVERITIES.fail,
-        severity: SEVERITIES.warn,
-        detail: `${totalTimeouts} duplicate-gate timeouts in recent logs — this platform has no daemon socket, so every write pays a cold model start and the gate falls open when it overruns`,
-        fix: 'No daemon can serve the gate here, so starting one changes nothing. Set LL_PRE_WRITE_BUDGET_MS above your measured cold start: it is the only part of this that survives an upgrade, because the plugin replaces hooks.json on every release. Raising the pre-write-check timeout in plugin/hooks/hooks.json to match makes the longer budget usable now, but expect to redo it after the next update.',
-      });
+      return c.fail(
+        `${totalTimeouts} duplicate-gate timeouts in recent logs — this platform has no daemon socket, so every write pays a cold model start and the gate falls open when it overruns`,
+        'No daemon can serve the gate here, so starting one changes nothing. Set LL_PRE_WRITE_BUDGET_MS above your measured cold start: it is the only part of this that survives an upgrade, because the plugin replaces hooks.json on every release. Raising the pre-write-check timeout in plugin/hooks/hooks.json to match makes the longer budget usable now, but expect to redo it after the next update.',
+      );
     }
 
-    return makeCheck({
-      id: CHECK_IDS['duplicate-gate-health'],
-      name: 'Duplicate gate',
-      status: SEVERITIES.fail,
-      severity: SEVERITIES.warn,
-      detail: daemonIsUp
+    return c.fail(
+      daemonIsUp
         ? `${totalTimeouts} duplicate-gate timeouts in recent logs (${totalDaemonTimeouts} from the daemon socket) — the daemon is running but answered too slowly, so each of those writes fell back to a cold subprocess` +
-          (totalHardFailures > 0
-            ? `; ${totalHardFailures} of them then failed there too, and those writes were saved without a duplicate check`
-            : ' (the fallback caught every one, so no write went unchecked)')
+            (totalHardFailures > 0
+              ? `; ${totalHardFailures} of them then failed there too, and those writes were saved without a duplicate check`
+              : ' (the fallback caught every one, so no write went unchecked)')
         : `${totalTimeouts} duplicate-gate timeouts in recent logs — no daemon answered, so each of those writes fell back to a cold subprocess start` +
-          (totalHardFailures > 0
-            ? `; ${totalHardFailures} of them then failed there too, and those writes were saved without a duplicate check`
-            : ' (the fallback caught every one, so no write went unchecked)'),
-      fix: daemonIsUp
+            (totalHardFailures > 0
+              ? `; ${totalHardFailures} of them then failed there too, and those writes were saved without a duplicate check`
+              : ' (the fallback caught every one, so no write went unchecked)'),
+      daemonIsUp
         ? totalHardFailures > 0
           ? `The daemon answered outside its ${HookConfig.PRE_WRITE_DAEMON_TIMEOUT_MS}ms socket wait and the cold subprocess behind it ran out of room as well. That second window is what the outer hook deadline sizes, so raise LL_PRE_WRITE_BUDGET_MS to give a cold scan time to finish.`
           : `The daemon is answering, just not inside its ${HookConfig.PRE_WRITE_DAEMON_TIMEOUT_MS}ms socket wait, so these writes paid a cold subprocess instead of the warm path. The scan's slowest responses sit close to that wait, so load on the machine or several writes landing together will cross it. Nothing was left unchecked and there is no override for this constant: the cost is latency. If it is frequent, cut what competes with the daemon, or change PRE_WRITE_DAEMON_TIMEOUT_MS in the plugin.`
         : 'Start the warm daemon (ll-watch) so the gate uses the socket instead of cold-starting the model: ll-watch',
-    });
+    );
   }
-  return makeCheck({
-    id: CHECK_IDS['duplicate-gate-health'],
-    name: 'Duplicate gate',
-    status: SEVERITIES.ok,
-    severity: SEVERITIES.warn,
-    detail:
-      totalTimeouts === 0
-        ? 'no recent timeouts'
-        : `${totalTimeouts} recent timeout(s) (under threshold)`,
-    fix: null,
-  });
+  return c.ok(
+    totalTimeouts === 0
+      ? 'no recent timeouts'
+      : `${totalTimeouts} recent timeout(s) (under threshold)`,
+  );
 }
 
 // --- General hook-error summary ---
@@ -890,15 +528,9 @@ export function checkDuplicateGateHealth({
 const HOOK_ERROR_WARN_THRESHOLD = 5;
 
 export function checkHookErrors({ pluginData, now = new Date() } = {}) {
+  const c = checker('hook-errors', 'Hook errors', 'warn');
   if (!pluginData) {
-    return makeCheck({
-      id: CHECK_IDS['hook-errors'],
-      name: 'Hook errors',
-      status: SEVERITIES.ok,
-      severity: SEVERITIES.warn,
-      detail: 'plugin-data not available — skipped',
-      fix: null,
-    });
+    return c.ok('plugin-data not available — skipped');
   }
   const rows = recentHookErrors(pluginData, now);
   const totalCount = rows.length;
@@ -910,24 +542,14 @@ export function checkHookErrors({ pluginData, now = new Date() } = {}) {
     const latestSummary = latest
       ? `${latest.module ?? 'unknown'} @ ${latest.ts ?? '?'} — ${String(latest.message ?? '').slice(0, 80)}`
       : 'unknown';
-    return makeCheck({
-      id: CHECK_IDS['hook-errors'],
-      name: 'Hook errors',
-      status: SEVERITIES.fail,
-      severity: SEVERITIES.warn,
-      detail: `${totalCount} hook errors in the last 2 months; latest: ${latestSummary}`,
-      fix: `Check ~/.claude/plugins/data/.../hook-errors-*.jsonl to identify which hook/module is failing`,
-    });
+    return c.fail(
+      `${totalCount} hook errors in the last 2 months; latest: ${latestSummary}`,
+      `Check ~/.claude/plugins/data/.../hook-errors-*.jsonl to identify which hook/module is failing`,
+    );
   }
-  return makeCheck({
-    id: CHECK_IDS['hook-errors'],
-    name: 'Hook errors',
-    status: SEVERITIES.ok,
-    severity: SEVERITIES.warn,
-    detail:
-      totalCount === 0 ? 'no hook errors logged' : `${totalCount} hook error(s) (under threshold)`,
-    fix: null,
-  });
+  return c.ok(
+    totalCount === 0 ? 'no hook errors logged' : `${totalCount} hook error(s) (under threshold)`,
+  );
 }
 
 // --- Injection shadow gate (injection_mode flip readiness) ---
@@ -994,36 +616,16 @@ export function checkInjectionShadowGate({
   injectionNudge,
   now = new Date(),
 } = {}) {
+  const c = checker('injection-shadow-gate', 'Injection shadow gate', 'warn');
   const mode = injectionMode || 'shadow';
   if (mode === 'live') {
-    return makeCheck({
-      id: CHECK_IDS['injection-shadow-gate'],
-      name: 'Injection shadow gate',
-      status: SEVERITIES.ok,
-      severity: SEVERITIES.warn,
-      detail: 'injection_mode live — JIT injection active',
-      fix: null,
-    });
+    return c.ok('injection_mode live — JIT injection active');
   }
   if (mode === 'off') {
-    return makeCheck({
-      id: CHECK_IDS['injection-shadow-gate'],
-      name: 'Injection shadow gate',
-      status: SEVERITIES.ok,
-      severity: SEVERITIES.warn,
-      detail: 'injection_mode off — JIT injection disabled by config',
-      fix: null,
-    });
+    return c.ok('injection_mode off — JIT injection disabled by config');
   }
   if (!pluginData) {
-    return makeCheck({
-      id: CHECK_IDS['injection-shadow-gate'],
-      name: 'Injection shadow gate',
-      status: SEVERITIES.ok,
-      severity: SEVERITIES.warn,
-      detail: 'plugin-data not available — skipped',
-      fix: null,
-    });
+    return c.ok('plugin-data not available — skipped');
   }
   const { healthy, passed, total, vaultOkCount, episodicOkCount } = collectShadowGateStats(
     pluginData,
@@ -1034,14 +636,9 @@ export function checkInjectionShadowGate({
   // representative and we must not draw gate conclusions from them.
   const healthyRate = total > 0 ? Math.min(vaultOkCount, episodicOkCount) / total : 1;
   if (total >= SHADOW_BACKEND_HEALTH_MIN_TOTAL && healthyRate < SHADOW_BACKEND_HEALTH_MIN_RATE) {
-    return makeCheck({
-      id: CHECK_IDS['injection-shadow-gate'],
-      name: 'Injection shadow gate',
-      status: SEVERITIES.ok,
-      severity: SEVERITIES.warn,
-      detail: `infrastructure: backend health ${(healthyRate * 100).toFixed(0)}% across ${total} post-epoch entries — fix backend errors before drawing gate conclusions (run \`node PLUGIN/scripts/review-shadow.mjs\`)`,
-      fix: null,
-    });
+    return c.ok(
+      `infrastructure: backend health ${(healthyRate * 100).toFixed(0)}% across ${total} post-epoch entries — fix backend errors before drawing gate conclusions (run \`node PLUGIN/scripts/review-shadow.mjs\`)`,
+    );
   }
   const passRate = healthy > 0 ? passed / healthy : 0;
   if (
@@ -1052,65 +649,37 @@ export function checkInjectionShadowGate({
     // Snooze: user reviewed shadow data and chose to stay in shadow mode.
     // Re-nudge only when the reviewed count has meaningfully grown.
     if (injectionNudge === 'dismissed') {
-      return makeCheck({
-        id: CHECK_IDS['injection-shadow-gate'],
-        name: 'Injection shadow gate',
-        status: SEVERITIES.ok,
-        severity: SEVERITIES.warn,
-        detail: `shadow mode: gate-ready (${passed}/${healthy} healthy entries pass) but nudge dismissed — run /learning-loop:doctor when you want to reconsider`,
-        fix: null,
-      });
+      return c.ok(
+        `shadow mode: gate-ready (${passed}/${healthy} healthy entries pass) but nudge dismissed — run /learning-loop:doctor when you want to reconsider`,
+      );
     }
-    return makeCheck({
-      id: CHECK_IDS['injection-shadow-gate'],
-      name: 'Injection shadow gate',
-      status: SEVERITIES.fail,
-      severity: SEVERITIES.warn,
-      detail: `shadow gate passing (${passed}/${healthy} recent healthy entries, ${(passRate * 100).toFixed(1)}% pass rate) — ready for review before flipping injection_mode to live`,
-      fix: 'Review with `node PLUGIN/scripts/review-shadow.mjs`, then run /learning-loop:doctor to apply the flip or hold in shadow (config.json injection_mode: shadow -> live)',
-    });
+    return c.fail(
+      `shadow gate passing (${passed}/${healthy} recent healthy entries, ${(passRate * 100).toFixed(1)}% pass rate) — ready for review before flipping injection_mode to live`,
+      'Review with `node PLUGIN/scripts/review-shadow.mjs`, then run /learning-loop:doctor to apply the flip or hold in shadow (config.json injection_mode: shadow -> live)',
+    );
   }
-  return makeCheck({
-    id: CHECK_IDS['injection-shadow-gate'],
-    name: 'Injection shadow gate',
-    status: SEVERITIES.ok,
-    severity: SEVERITIES.warn,
-    detail: `shadow mode: ${passed}/${healthy} recent healthy entries passed the gate — keep collecting`,
-    fix: null,
-  });
+  return c.ok(
+    `shadow mode: ${passed}/${healthy} recent healthy entries passed the gate — keep collecting`,
+  );
 }
 
 export function checkAbiDrift({ abiDriftResult } = {}) {
+  const c = checker('abi-drift', 'Native ABI', 'fail');
   // The caller is responsible for invoking detectAbiDrift from check-deps.mjs.
   // This check accepts the result so it stays in the quick library (no native module loads).
   if (!abiDriftResult || abiDriftResult.status === 'ok') {
-    return makeCheck({
-      id: CHECK_IDS['abi-drift'],
-      name: 'Native ABI',
-      status: SEVERITIES.ok,
-      severity: SEVERITIES.fail,
-      detail: 'no drift',
-      fix: null,
-    });
+    return c.ok('no drift');
   }
   if (abiDriftResult.status === 'abi-mismatch') {
-    return makeCheck({
-      id: CHECK_IDS['abi-drift'],
-      name: 'Native ABI',
-      status: SEVERITIES.fail,
-      severity: SEVERITIES.fail,
-      detail: `expected NODE_MODULE_VERSION ${abiDriftResult.expectedAbi}, got ${abiDriftResult.actualAbi}`,
-      fix: abiDriftResult.fix || 'Run npm rebuild in the affected plugin',
-    });
+    return c.fail(
+      `expected NODE_MODULE_VERSION ${abiDriftResult.expectedAbi}, got ${abiDriftResult.actualAbi}`,
+      abiDriftResult.fix || 'Run npm rebuild in the affected plugin',
+    );
   }
-  return makeCheck({
-    id: CHECK_IDS['abi-drift'],
-    name: 'Native ABI',
-    status: SEVERITIES.fail,
-    severity: SEVERITIES.fail,
-    detail: abiDriftResult.message || 'unknown error',
-    fix: 'Inspect native plugin modules; consider reinstall',
-  });
+  return c.fail(
+    abiDriftResult.message || 'unknown error',
+    'Inspect native plugin modules; consider reinstall',
+  );
 }
 
 // --- Otel export status (TD, T2h exit criteria) ---
@@ -1126,25 +695,12 @@ export function checkOtelExportStatus({
   isExportEnabled = defaultIsExportEnabled,
   now = Date.now(),
 } = {}) {
+  const c = checker('otel-export-status', 'Otel export', 'warn');
   if (!pluginData) {
-    return makeCheck({
-      id: CHECK_IDS['otel-export-status'],
-      name: 'Otel export',
-      status: SEVERITIES.ok,
-      severity: SEVERITIES.warn,
-      detail: 'plugin-data not available, skipped',
-      fix: null,
-    });
+    return c.ok('plugin-data not available, skipped');
   }
   if (!isExportEnabled()) {
-    return makeCheck({
-      id: CHECK_IDS['otel-export-status'],
-      name: 'Otel export',
-      status: SEVERITIES.ok,
-      severity: SEVERITIES.warn,
-      detail: 'inactive (no endpoint configured or opt-in not set)',
-      fix: null,
-    });
+    return c.ok('inactive (no endpoint configured or opt-in not set)');
   }
   let stat;
   try {
@@ -1153,15 +709,10 @@ export function checkOtelExportStatus({
     stat = null;
   }
   if (!stat) {
-    return makeCheck({
-      id: CHECK_IDS['otel-export-status'],
-      name: 'Otel export',
-      status: SEVERITIES.fail,
-      severity: SEVERITIES.warn,
-      detail:
-        'active, but no export has succeeded yet: either no telemetry has accumulated or the export is failing',
-      fix: 'Open a session (the worker runs detached from session-start), then see the otel-error-log check',
-    });
+    return c.fail(
+      'active, but no export has succeeded yet: either no telemetry has accumulated or the export is failing',
+      'Open a session (the worker runs detached from session-start), then see the otel-error-log check',
+    );
   }
   const ageSecs = Math.max(0, Math.round((now - stat.mtimeMs) / 1000));
   // A marker that exists is not the same as an export that is working. The
@@ -1172,23 +723,12 @@ export function checkOtelExportStatus({
   // interval, with slack for a machine that was asleep or simply unused.
   const staleAfterMs = OTEL_EXPORT_TTL_MS * STALE_EXPORT_TTL_MULTIPLE;
   if (now - stat.mtimeMs > staleAfterMs) {
-    return makeCheck({
-      id: CHECK_IDS['otel-export-status'],
-      name: 'Otel export',
-      status: SEVERITIES.fail,
-      severity: SEVERITIES.warn,
-      detail: `active, but the last successful export was ${ageSecs}s ago (over ${Math.round(staleAfterMs / 1000)}s): exports are failing or no session has opened`,
-      fix: 'Check the endpoint is reachable and see the otel-error-log check; a failing POST leaves this marker unstamped',
-    });
+    return c.fail(
+      `active, but the last successful export was ${ageSecs}s ago (over ${Math.round(staleAfterMs / 1000)}s): exports are failing or no session has opened`,
+      'Check the endpoint is reachable and see the otel-error-log check; a failing POST leaves this marker unstamped',
+    );
   }
-  return makeCheck({
-    id: CHECK_IDS['otel-export-status'],
-    name: 'Otel export',
-    status: SEVERITIES.ok,
-    severity: SEVERITIES.warn,
-    detail: `active, last successful export ${ageSecs}s ago`,
-    fix: null,
-  });
+  return c.ok(`active, last successful export ${ageSecs}s ago`);
 }
 
 // --- Otel error log (TD, T1i coverage) ---
@@ -1201,15 +741,9 @@ export function checkOtelExportStatus({
 const OTEL_ERROR_LOG_TAIL_BYTES = 2 * 1024 * 1024;
 
 export function checkOtelErrorLog({ pluginData, now = new Date() } = {}) {
+  const c = checker('otel-error-log', 'Error log', 'warn');
   if (!pluginData) {
-    return makeCheck({
-      id: CHECK_IDS['otel-error-log'],
-      name: 'Error log',
-      status: SEVERITIES.ok,
-      severity: SEVERITIES.warn,
-      detail: 'plugin-data not available, skipped',
-      fix: null,
-    });
+    return c.ok('plugin-data not available, skipped');
   }
   const path = join(DATA_PATHS.logs(pluginData), `log-${monthStr(now)}.jsonl`);
   // log.mjs's sink swallows its own write failures by design (an error
@@ -1219,14 +753,10 @@ export function checkOtelErrorLog({ pluginData, now = new Date() } = {}) {
   // sink here, where the finding can be shown.
   const sinkError = probeAppendable(path);
   if (sinkError) {
-    return makeCheck({
-      id: CHECK_IDS['otel-error-log'],
-      name: 'Error log',
-      status: SEVERITIES.fail,
-      severity: SEVERITIES.warn,
-      detail: `error log sink is not writable (${sinkError}): failures are not being recorded`,
-      fix: `Make ${path} appendable; until then, failures reach stderr only`,
-    });
+    return c.fail(
+      `error log sink is not writable (${sinkError}): failures are not being recorded`,
+      `Make ${path} appendable; until then, failures reach stderr only`,
+    );
   }
   const scopeCounts = new Map();
   let total = 0;
@@ -1244,27 +774,16 @@ export function checkOtelErrorLog({ pluginData, now = new Date() } = {}) {
     scopeCounts.set(scope, (scopeCounts.get(scope) || 0) + 1);
   }
   if (total === 0) {
-    return makeCheck({
-      id: CHECK_IDS['otel-error-log'],
-      name: 'Error log',
-      status: SEVERITIES.ok,
-      severity: SEVERITIES.warn,
-      detail: 'no errors logged this month',
-      fix: null,
-    });
+    return c.ok('no errors logged this month');
   }
   // Every error scope shares this log, so name the top few rather than one:
   // a single otel failure behind a noisier unrelated scope was invisible.
   const top = [...scopeCounts].sort((a, b) => b[1] - a[1]).slice(0, 3);
   const topScope = top[0][0];
-  return makeCheck({
-    id: CHECK_IDS['otel-error-log'],
-    name: 'Error log',
-    status: SEVERITIES.fail,
-    severity: SEVERITIES.warn,
-    detail: `${total} error(s) logged this month, top scopes: ${top.map(([s, c]) => `${s} (${c})`).join(', ')}`,
-    fix: `Check ${path} for details on the ${topScope} scope`,
-  });
+  return c.fail(
+    `${total} error(s) logged this month, top scopes: ${top.map(([s, c]) => `${s} (${c})`).join(', ')}`,
+    `Check ${path} for details on the ${topScope} scope`,
+  );
 }
 
 // The error string when `path` cannot be appended to (its directory created
