@@ -26,6 +26,9 @@ test('semverCmp fails every comparison once it reaches a non-numeric component',
   for (const [a, b] of [
     ['unknown', '1.0.0'],
     ['1.0', '1.0.0'],
+    ['v1.0.0', '2.0.0'],
+    ['v2.0.0', '2.0.0'],
+    ['1.x.5', '1.0.0'],
   ]) {
     const c = semverCmp(a, b);
     assert.ok(!(c < 0) && !(c >= 0) && !(c > 0), `${a} vs ${b} gave ${c}`);

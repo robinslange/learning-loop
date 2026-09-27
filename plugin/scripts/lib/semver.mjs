@@ -9,7 +9,11 @@
 export function semverCmp(a, b) {
   const pa = a.split('.').map(Number);
   const pb = b.split('.').map(Number);
-  return pa[0] - pb[0] || pa[1] - pb[1] || pa[2] - pb[2];
+  for (let i = 0; i < 3; i++) {
+    const d = pa[i] - pb[i];
+    if (d !== 0) return d;
+  }
+  return 0;
 }
 
 const SEMVER_RE = /^\d+\.\d+\.\d+$/;
