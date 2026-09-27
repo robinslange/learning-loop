@@ -8,34 +8,19 @@ use crate::model::loader;
 static PROVIDER: OnceLock<Box<dyn EmbeddingProvider>> = OnceLock::new();
 
 pub fn init_provider(model: &KnownModel) -> anyhow::Result<()> {
-    if let Some(existing) = PROVIDER.get() {
-        let requested = model.config().model_id;
-        let active = existing.model_id();
-        anyhow::ensure!(
-            active == requested,
-            "embedding provider already initialized with '{active}', cannot switch to '{requested}'"
-        );
-        return Ok(());
+    if PROVIDER.get().is_none() {
+        let loaded = loader::load_provider(model).context("failed to load embedding model")?;
+        // A concurrent init may have set the provider first. Whichever won,
+        // the check below compares it against the model this caller asked for.
+        let _ = PROVIDER.set(loaded);
     }
-    let loaded = loader::load_provider(model).context("failed to load embedding model")?;
-    // A concurrent init that won the race loaded the same model, so losing
-    // it costs a second load and nothing else.
-    let _ = PROVIDER.set(loaded);
+    let active = initialized()?.model_id();
+    let requested = model.config().model_id;
+    anyhow::ensure!(
+        active == requested,
+        "embedding provider already initialized with '{active}', cannot switch to '{requested}'"
+    );
     Ok(())
-}
-
-fn provider() -> &'static dyn EmbeddingProvider {
-    PROVIDER.get()
-        .expect("embedding provider not initialized -- call init_provider first")
-        .as_ref()
-}
-
-pub fn embedding_dim() -> usize {
-    provider().dim()
-}
-
-pub fn model_id() -> &'static str {
-    provider().model_id()
 }
 
 pub fn try_provider() -> Option<&'static dyn EmbeddingProvider> {
