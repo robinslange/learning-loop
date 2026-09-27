@@ -1,11 +1,18 @@
 // tests/librarian-tools-tag.test.mjs : unit tests for scripts/librarian/tools/tag-suggest.mjs
 
-import { describe, it, before, after, beforeEach, mock } from 'node:test';
+import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomBytes } from 'node:crypto';
+import {
+  chat,
+  httpError,
+  startOllamaMock,
+  structured,
+  unstructured,
+} from './helpers/ollama-mock.mjs';
 
 const runId = randomBytes(4).toString('hex');
 const TEMP_ROOT = join(tmpdir(), 'll-tools-tag-' + runId);
@@ -25,8 +32,9 @@ function readQueue() {
 }
 
 describe('librarian-tools-tag', () => {
+  const server = startOllamaMock();
   let tagCheck, submitTagSuggestion;
-  let origFetch;
+  let calls;
 
   before(async () => {
     mkdirSync(LIB_DIR, { recursive: true });
@@ -34,11 +42,9 @@ describe('librarian-tools-tag', () => {
     const mod = await import('../plugin/scripts/librarian/tools/tag-suggest.mjs?bust=tag-' + runId);
     tagCheck = mod.tagCheck;
     submitTagSuggestion = mod.submitTagSuggestion;
-    origFetch = globalThis.fetch;
   });
 
   after(() => {
-    globalThis.fetch = origFetch;
     rmSync(TEMP_ROOT, { recursive: true, force: true });
     delete process.env.CLAUDE_PLUGIN_DATA;
   });
@@ -50,7 +56,11 @@ describe('librarian-tools-tag', () => {
       sp,
       JSON.stringify({ visited: [], notes_visited: 0, tag_suggestions: 0, counters: {} }) + '\n',
     );
-    globalThis.fetch = origFetch;
+    calls = 0;
+    server.events.removeAllListeners();
+    server.events.on('request:start', () => {
+      calls += 1;
+    });
   });
 
   it('submitTagSuggestion enqueues a tag_suggestion item', async () => {
@@ -67,17 +77,11 @@ describe('librarian-tools-tag', () => {
   });
 
   it('tagCheck queues tag_suggestion with valid vocabulary-bounded tags', async () => {
-    globalThis.fetch = mock.fn(async () => ({
-      ok: true,
-      json: async () => ({
-        message: { content: JSON.stringify({ suggested_tags: ['pharmacology', 'neuroscience'] }) },
-      }),
-    }));
+    server.use(chat(() => structured({ suggested_tags: ['pharmacology', 'neuroscience'] })));
     await tagCheck('0-inbox/foo.md', {
       bodyOverride: 'Body about nootropics.',
       existingTagsOverride: '',
       vocabularyOverride: VOCAB,
-      fetchOverride: globalThis.fetch,
     });
     const items = readQueue();
     assert.equal(items.length, 1);
@@ -85,17 +89,11 @@ describe('librarian-tools-tag', () => {
   });
 
   it('tagCheck filters out tags outside vocabulary', async () => {
-    globalThis.fetch = mock.fn(async () => ({
-      ok: true,
-      json: async () => ({
-        message: { content: JSON.stringify({ suggested_tags: ['pharmacology', 'made-up'] }) },
-      }),
-    }));
+    server.use(chat(() => structured({ suggested_tags: ['pharmacology', 'made-up'] })));
     await tagCheck('0-inbox/foo.md', {
       bodyOverride: 'Body.',
       existingTagsOverride: '',
       vocabularyOverride: VOCAB,
-      fetchOverride: globalThis.fetch,
     });
     const items = readQueue();
     assert.equal(items.length, 1);
@@ -103,17 +101,11 @@ describe('librarian-tools-tag', () => {
   });
 
   it('tagCheck filters out existing tags', async () => {
-    globalThis.fetch = mock.fn(async () => ({
-      ok: true,
-      json: async () => ({
-        message: { content: JSON.stringify({ suggested_tags: ['pharmacology', 'neuroscience'] }) },
-      }),
-    }));
+    server.use(chat(() => structured({ suggested_tags: ['pharmacology', 'neuroscience'] })));
     await tagCheck('0-inbox/foo.md', {
       bodyOverride: 'Body.',
       existingTagsOverride: 'pharmacology',
       vocabularyOverride: VOCAB,
-      fetchOverride: globalThis.fetch,
     });
     const items = readQueue();
     assert.equal(items.length, 1);
@@ -121,55 +113,46 @@ describe('librarian-tools-tag', () => {
   });
 
   it('tagCheck skips when body is empty', async () => {
-    let called = false;
-    globalThis.fetch = mock.fn(async () => {
-      called = true;
-      return {};
-    });
-    await tagCheck('0-inbox/foo.md', {
-      bodyOverride: '',
-      vocabularyOverride: VOCAB,
-      fetchOverride: globalThis.fetch,
-    });
-    assert.equal(called, false);
+    await tagCheck('0-inbox/foo.md', { bodyOverride: '', vocabularyOverride: VOCAB });
+    assert.equal(calls, 0, 'an empty body must not reach ollama');
     assert.equal(readQueue().length, 0);
   });
 
   it('tagCheck skips when vocabulary is empty', async () => {
-    let called = false;
-    globalThis.fetch = mock.fn(async () => {
-      called = true;
-      return {};
-    });
-    await tagCheck('0-inbox/foo.md', {
-      bodyOverride: 'Body.',
-      vocabularyOverride: [],
-      fetchOverride: globalThis.fetch,
-    });
-    assert.equal(called, false);
+    await tagCheck('0-inbox/foo.md', { bodyOverride: 'Body.', vocabularyOverride: [] });
+    assert.equal(calls, 0, 'an empty vocabulary must not reach ollama');
     assert.equal(readQueue().length, 0);
   });
 
   it('tagCheck skips gracefully on HTTP error', async () => {
-    globalThis.fetch = mock.fn(async () => ({ ok: false, status: 500 }));
-    await tagCheck('0-inbox/foo.md', {
-      bodyOverride: 'Body.',
-      vocabularyOverride: VOCAB,
-      fetchOverride: globalThis.fetch,
-    });
+    server.use(chat(() => httpError(500)));
+    await tagCheck('0-inbox/foo.md', { bodyOverride: 'Body.', vocabularyOverride: VOCAB });
     assert.equal(readQueue().length, 0);
   });
 
   it('tagCheck does not crash on malformed JSON response', async () => {
-    globalThis.fetch = mock.fn(async () => ({
-      ok: true,
-      json: async () => ({ message: { content: 'bad json' } }),
-    }));
-    await tagCheck('0-inbox/foo.md', {
-      bodyOverride: 'Body.',
-      vocabularyOverride: VOCAB,
-      fetchOverride: globalThis.fetch,
-    });
+    server.use(chat(() => unstructured('bad json')));
+    await tagCheck('0-inbox/foo.md', { bodyOverride: 'Body.', vocabularyOverride: VOCAB });
     assert.equal(readQueue().length, 0);
+  });
+
+  it('sends the note body and the vocabulary ollama is asked to choose from', async () => {
+    // The prompt is the only thing that bounds the model to the vault's own
+    // tags. A stub that answers regardless of what it was asked cannot notice
+    // the body or the vocabulary going missing from the request.
+    let body;
+    server.use(
+      chat(async ({ request }) => {
+        body = await request.json();
+        return structured({ suggested_tags: ['graphql'] });
+      }),
+    );
+    await tagCheck('0-inbox/foo.md', {
+      bodyOverride: 'A note about resolvers.',
+      vocabularyOverride: VOCAB,
+    });
+    const prompt = body.messages.map((m) => m.content).join('\n');
+    assert.match(prompt, /A note about resolvers\./);
+    for (const tag of VOCAB) assert.ok(prompt.includes(tag), `vocabulary must carry ${tag}`);
   });
 });

@@ -1,5 +1,9 @@
-import { describe, it, before, after } from 'node:test';
+import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
+import { HttpResponse, http, startMockNetwork } from '../helpers/msw.mjs';
+
+const API = 'https://export.arxiv.org/api/query';
+const server = startMockNetwork();
 
 const ARXIV_ENTRY = `<?xml version="1.0" encoding="UTF-8"?>
 <feed>
@@ -23,20 +27,15 @@ const ARXIV_ERROR = `<?xml version="1.0" encoding="UTF-8"?>
 </feed>`;
 
 describe('arxiv adapter', () => {
-  let originalFetch;
   let adapter;
+  const answerXml = (xml) => server.use(http.get(API, () => HttpResponse.xml(xml)));
 
   before(async () => {
-    originalFetch = globalThis.fetch;
     adapter = (await import('../../plugin/scripts/lib/sources/adapters/arxiv.mjs')).default;
   });
 
-  after(() => {
-    globalThis.fetch = originalFetch;
-  });
-
   it('fetchById returns metadata on success', async () => {
-    globalThis.fetch = async () => ({ ok: true, text: async () => ARXIV_ENTRY });
+    answerXml(ARXIV_ENTRY);
     const data = await adapter.fetchById('1706.03762');
     assert.equal(data.source, 'arxiv');
     assert.equal(data.arxivId, '1706.03762');
@@ -47,19 +46,19 @@ describe('arxiv adapter', () => {
   });
 
   it('fetchById returns null on error entry', async () => {
-    globalThis.fetch = async () => ({ ok: true, text: async () => ARXIV_ERROR });
+    answerXml(ARXIV_ERROR);
     const data = await adapter.fetchById('9999.99999');
     assert.equal(data, null);
   });
 
   it('fetchById returns null on fetch failure', async () => {
-    globalThis.fetch = async () => ({ ok: false });
+    server.use(http.get(API, () => new HttpResponse('', { status: 503 })));
     const data = await adapter.fetchById('1234.5678');
     assert.equal(data, null);
   });
 
   it('verify returns verified:true for correct author', async () => {
-    globalThis.fetch = async () => ({ ok: true, text: async () => ARXIV_ENTRY });
+    answerXml(ARXIV_ENTRY);
     const result = await adapter.verify({
       arxivId: '1706.03762',
       claimedAuthor: 'Vaswani',
@@ -69,7 +68,7 @@ describe('arxiv adapter', () => {
   });
 
   it('verify returns wrong_author issue', async () => {
-    globalThis.fetch = async () => ({ ok: true, text: async () => ARXIV_ENTRY });
+    answerXml(ARXIV_ENTRY);
     const result = await adapter.verify({
       arxivId: '1706.03762',
       claimedAuthor: 'Hinton',
@@ -80,7 +79,7 @@ describe('arxiv adapter', () => {
   });
 
   it('verify returns error on not found', async () => {
-    globalThis.fetch = async () => ({ ok: true, text: async () => ARXIV_ERROR });
+    answerXml(ARXIV_ERROR);
     const result = await adapter.verify({ arxivId: '9999.99999' });
     assert.equal(result.verified, false);
     assert.ok(result.error);

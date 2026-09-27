@@ -142,12 +142,10 @@ export async function fetchGuarded(url, doFetch) {
   let current = guard.url.href;
   for (let hop = 0; ; hop++) {
     const res = await doFetch(current);
-    // Treat as a redirect only on an explicit 3xx WITH a Location header. A
-    // response lacking status/headers (a stubbed fetch) is terminal, not a
-    // redirect — defaulting the other way spins the loop.
-    const status = typeof res.status === 'number' ? res.status : 200;
-    if (status < 300 || status >= 400) return { ok: true, res, url: current };
-    const location = res.headers?.get?.('location');
+    // Treat as a redirect only on an explicit 3xx WITH a Location header: a
+    // 304, or a 3xx with nothing to point at, is terminal.
+    if (res.status < 300 || res.status >= 400) return { ok: true, res, url: current };
+    const location = res.headers.get('location');
     if (!location) return { ok: true, res, url: current };
     if (hop >= MAX_REDIRECTS) return { ok: false, reason: 'too_many_redirects' };
     const hopCheck = checkRedirect(location, current);

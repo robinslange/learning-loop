@@ -1,9 +1,16 @@
-import { describe, it, before, after, mock } from 'node:test';
+import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomBytes } from 'node:crypto';
+import {
+  chat,
+  httpError,
+  startOllamaMock,
+  structured,
+  unstructured,
+} from './helpers/ollama-mock.mjs';
 
 const runId = randomBytes(4).toString('hex');
 const TEMP_ROOT = join(tmpdir(), `ll-dup-classifier-${runId}`);
@@ -54,14 +61,14 @@ function resetState() {
 }
 
 describe('duplicate classifier structured-output flag', () => {
-  let originalFetch;
+  const server = startOllamaMock();
+  let calls;
 
   before(() => {
     mkdirSync(join(TEMP_VAULT, '3-permanent'), { recursive: true });
     mkdirSync(LIBRARIAN_DIR, { recursive: true });
     process.env.CLAUDE_PLUGIN_DATA = TEMP_DATA;
     process.env.VAULT_PATH = TEMP_VAULT;
-    originalFetch = globalThis.fetch;
 
     writeFileSync(join(TEMP_VAULT, TARGET), '---\nstatus: inbox\n---\nClaim about widgets.\n');
     writeFileSync(
@@ -74,8 +81,15 @@ describe('duplicate classifier structured-output flag', () => {
     );
   });
 
+  beforeEach(() => {
+    calls = 0;
+    server.events.removeAllListeners();
+    server.events.on('request:start', () => {
+      calls += 1;
+    });
+  });
+
   after(() => {
-    globalThis.fetch = originalFetch;
     delete process.env.CLAUDE_PLUGIN_DATA;
     delete process.env.VAULT_PATH;
     rmSync(TEMP_ROOT, { recursive: true, force: true });
@@ -84,17 +98,7 @@ describe('duplicate classifier structured-output flag', () => {
   it('queues duplicate_flag when model returns "duplicate" with valid neighbour', async () => {
     resetState();
 
-    globalThis.fetch = mock.fn(async () => ({
-      ok: true,
-      json: async () => ({
-        message: {
-          content: JSON.stringify({
-            relationship: 'duplicate',
-            duplicate_of: NEIGHBOUR_A,
-          }),
-        },
-      }),
-    }));
+    server.use(chat(() => structured({ relationship: 'duplicate', duplicate_of: NEIGHBOUR_A })));
 
     const mod = await import(`../plugin/scripts/librarian.mjs?bust=dup-happy-${runId}`);
     await mod.__test__.duplicateCheck(TARGET, {
@@ -115,17 +119,7 @@ describe('duplicate classifier structured-output flag', () => {
   it('does not queue when model returns "same_topic"', async () => {
     resetState();
 
-    globalThis.fetch = mock.fn(async () => ({
-      ok: true,
-      json: async () => ({
-        message: {
-          content: JSON.stringify({
-            relationship: 'same_topic',
-            duplicate_of: null,
-          }),
-        },
-      }),
-    }));
+    server.use(chat(() => structured({ relationship: 'same_topic', duplicate_of: null })));
 
     const mod = await import(`../plugin/scripts/librarian.mjs?bust=dup-same-${runId}`);
     await mod.__test__.duplicateCheck(TARGET, {
@@ -138,17 +132,7 @@ describe('duplicate classifier structured-output flag', () => {
   it('does not queue when model returns "unrelated"', async () => {
     resetState();
 
-    globalThis.fetch = mock.fn(async () => ({
-      ok: true,
-      json: async () => ({
-        message: {
-          content: JSON.stringify({
-            relationship: 'unrelated',
-            duplicate_of: null,
-          }),
-        },
-      }),
-    }));
+    server.use(chat(() => structured({ relationship: 'unrelated', duplicate_of: null })));
 
     const mod = await import(`../plugin/scripts/librarian.mjs?bust=dup-unrel-${runId}`);
     await mod.__test__.duplicateCheck(TARGET, {
@@ -161,17 +145,11 @@ describe('duplicate classifier structured-output flag', () => {
   it('skips when model names a non-neighbour as duplicate', async () => {
     resetState();
 
-    globalThis.fetch = mock.fn(async () => ({
-      ok: true,
-      json: async () => ({
-        message: {
-          content: JSON.stringify({
-            relationship: 'duplicate',
-            duplicate_of: '3-permanent/some-other-note.md',
-          }),
-        },
-      }),
-    }));
+    server.use(
+      chat(() =>
+        structured({ relationship: 'duplicate', duplicate_of: '3-permanent/some-other-note.md' }),
+      ),
+    );
 
     const mod = await import(`../plugin/scripts/librarian.mjs?bust=dup-nonbr-${runId}`);
     await mod.__test__.duplicateCheck(TARGET, {
@@ -184,17 +162,7 @@ describe('duplicate classifier structured-output flag', () => {
   it('accepts a neighbour identified by basename slug', async () => {
     resetState();
 
-    globalThis.fetch = mock.fn(async () => ({
-      ok: true,
-      json: async () => ({
-        message: {
-          content: JSON.stringify({
-            relationship: 'duplicate',
-            duplicate_of: 'neighbour-a',
-          }),
-        },
-      }),
-    }));
+    server.use(chat(() => structured({ relationship: 'duplicate', duplicate_of: 'neighbour-a' })));
 
     const mod = await import(`../plugin/scripts/librarian.mjs?bust=dup-slug-${runId}`);
     await mod.__test__.duplicateCheck(TARGET, {
@@ -209,10 +177,7 @@ describe('duplicate classifier structured-output flag', () => {
   it('does not crash on malformed response', async () => {
     resetState();
 
-    globalThis.fetch = mock.fn(async () => ({
-      ok: true,
-      json: async () => ({ message: { content: 'unrelated' } }),
-    }));
+    server.use(chat(() => unstructured('unrelated')));
 
     const mod = await import(`../plugin/scripts/librarian.mjs?bust=dup-malformed-${runId}`);
     await mod.__test__.duplicateCheck(TARGET, {
@@ -225,7 +190,7 @@ describe('duplicate classifier structured-output flag', () => {
   it('skips gracefully on HTTP error from ollama', async () => {
     resetState();
 
-    globalThis.fetch = mock.fn(async () => ({ ok: false, status: 500 }));
+    server.use(chat(() => httpError(500)));
 
     const mod = await import(`../plugin/scripts/librarian.mjs?bust=dup-http-${runId}`);
     await mod.__test__.duplicateCheck(TARGET, {
@@ -238,15 +203,19 @@ describe('duplicate classifier structured-output flag', () => {
   it('logs timeout and skips submission when fetch aborts', async () => {
     resetState();
 
-    globalThis.fetch = mock.fn(async () => {
-      throw Object.assign(new Error('aborted'), { name: 'TimeoutError' });
-    });
+    // Not served through MSW: duplicateCheck fixes its own client timeout, and
+    // a network mock cannot expire it sooner. The injected rejection is what
+    // undici throws when AbortSignal.timeout fires.
+    const timingOut = async () => {
+      throw new DOMException('The operation was aborted due to timeout', 'TimeoutError');
+    };
 
     const mod = await import(
       `../plugin/scripts/librarian.mjs?bust=dup-timeout-${runId}-${randomBytes(4).toString('hex')}`
     );
     await mod.__test__.duplicateCheck(TARGET, {
       neighboursOverride: NEIGHBOURS,
+      fetchOverride: timingOut,
     });
 
     assert.equal(readQueue().length, 0);
@@ -255,16 +224,10 @@ describe('duplicate classifier structured-output flag', () => {
   it('returns without queueing when there are no neighbours', async () => {
     resetState();
 
-    let fetchCalled = false;
-    globalThis.fetch = mock.fn(async () => {
-      fetchCalled = true;
-      return { ok: true, json: async () => ({ message: { content: '{}' } }) };
-    });
-
     const mod = await import(`../plugin/scripts/librarian.mjs?bust=dup-noneigh-${runId}`);
     await mod.__test__.duplicateCheck(TARGET, { neighboursOverride: [] });
 
-    assert.equal(fetchCalled, false);
+    assert.equal(calls, 0, 'a note with no neighbours must not reach ollama');
     assert.equal(readQueue().length, 0);
   });
 });

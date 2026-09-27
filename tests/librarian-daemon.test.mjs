@@ -8,8 +8,31 @@ import { mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomBytes } from 'node:crypto';
+import { HttpResponse, chat, httpError, startOllamaMock, tags } from './helpers/ollama-mock.mjs';
 
 const runId = randomBytes(4).toString('hex');
+
+// One server for the file: MSW patches process-global fetch, so two of them
+// would fight over the same hook. A default /api/tags handler stands in for a
+// reachable ollama, which every runDaemon call probes for before it does
+// anything else.
+const server = startOllamaMock(tags(() => HttpResponse.json({ models: [] })));
+
+/** Collect the JSON log lines a block writes to stderr. */
+async function captureStderr(fn) {
+  const chunks = [];
+  const original = process.stderr.write.bind(process.stderr);
+  process.stderr.write = (chunk) => {
+    chunks.push(String(chunk));
+    return true;
+  };
+  try {
+    await fn();
+  } finally {
+    process.stderr.write = original;
+  }
+  return chunks.join('');
+}
 const TEMP_ROOT = join(tmpdir(), 'll-daemon-' + runId);
 const TEMP_VAULT = join(TEMP_ROOT, 'vault');
 const TEMP_DATA = join(TEMP_ROOT, 'plugin-data');
@@ -68,14 +91,7 @@ describe('librarian-daemon', () => {
     };
 
     // waitForOllama will try to fetch; intercept with a mock
-    const origFetch = globalThis.fetch;
-    globalThis.fetch = async () => ({ ok: true });
-
-    try {
-      await runDaemon({ signal: ac.signal, configOverride: cfg, deps: { db: mockDb } });
-    } finally {
-      globalThis.fetch = origFetch;
-    }
+    await runDaemon({ signal: ac.signal, configOverride: cfg, deps: { db: mockDb } });
     // No assertion needed — just must not throw and must return
   });
 
@@ -101,9 +117,6 @@ describe('librarian-daemon', () => {
       structuralTags: new Set(),
     };
 
-    const origFetch = globalThis.fetch;
-    globalThis.fetch = async () => ({ ok: true });
-
     // Pre-set state to something recognizable
     const { saveState, loadState, resetState } = await import(
       '../plugin/scripts/librarian/queue.mjs?bust=daemon-drain-q-' + runId
@@ -121,8 +134,6 @@ describe('librarian-daemon', () => {
     setTimeout(() => ac.abort(), 50);
     await daemonPromise;
 
-    globalThis.fetch = origFetch;
-
     // State file must exist after drain
     const statePath = join(LIB_DIR, 'state.json');
     assert.ok(existsSync(statePath), 'state.json must exist after drain');
@@ -137,26 +148,61 @@ describe('librarian-daemon', () => {
     await runDaemon({ configOverride: cfg });
     assert.ok(Date.now() - start < 500, 'should return quickly when disabled');
   });
+  // The whole request body lives in ollama-client's chat() now, which spells
+  // two of these fields differently on the way in (`keepAlive`) and out
+  // (`keep_alive`). Nothing else reads the body, so without this a rename could
+  // drop `keep_alive`, `logprobs` or `stream:false` and every other test would
+  // stay green while the daemon quietly reloaded the model on each turn and
+  // lost the confidence trace submit_link scores against.
+  it('sends the tool-calling contract ollama needs and stops when no tool is called', async () => {
+    const bodies = [];
+    server.use(
+      chat(async ({ request }) => {
+        bodies.push(await request.json());
+        return HttpResponse.json({ message: { role: 'assistant', content: 'nothing to link' } });
+      }),
+    );
+    const { investigateNote } = await import(
+      '../plugin/scripts/librarian/daemon.mjs?bust=daemon-contract-' + runId
+    );
+    const { TOOL_DEFS } = await import('../plugin/scripts/librarian/tools/index.mjs');
+
+    await investigateNote(
+      '3-permanent/orphan.md',
+      'link_check',
+      {
+        ollamaUrl: 'http://localhost:11434',
+        model: 'test-model',
+        linkPrompt: 'investigate',
+        keepAlive: '5m',
+      },
+      { exec: () => [{ values: [] }] },
+      () => {},
+    );
+
+    assert.equal(bodies.length, 1, 'a reply with no tool_calls must end the loop');
+    const body = bodies[0];
+    assert.equal(body.model, 'test-model');
+    assert.equal(body.stream, false);
+    assert.equal(body.keep_alive, '5m');
+    assert.equal(body.logprobs, true);
+    assert.equal(body.top_logprobs, 20);
+    assert.deepEqual(body.options, { temperature: 0, num_predict: 1000 });
+    assert.equal(body.tools.length, TOOL_DEFS.length);
+    assert.equal(body.messages[0].role, 'system');
+    assert.equal(body.messages[0].content, 'investigate');
+    assert.match(body.messages[1].content, /3-permanent\/orphan\.md/);
+  });
+
   it('investigateNote reports the ollama HTTP status, not a TypeError, on an error response', async () => {
     const { investigateNote } = await import(
       '../plugin/scripts/librarian/daemon.mjs?bust=daemon-httperr-' + runId
     );
 
-    const origFetch = globalThis.fetch;
-    const origWrite = process.stderr.write.bind(process.stderr);
-    const captured = [];
-    globalThis.fetch = async () => ({
-      ok: false,
-      status: 400,
-      json: async () => ({ error: 'context length exceeded' }),
-    });
-    process.stderr.write = (chunk) => {
-      captured.push(String(chunk));
-      return true;
-    };
+    server.use(chat(() => httpError(400, 'context length exceeded')));
 
-    try {
-      await investigateNote(
+    const log = await captureStderr(() =>
+      investigateNote(
         '3-permanent/oversized.md',
         'link_check',
         {
@@ -167,13 +213,8 @@ describe('librarian-daemon', () => {
         },
         { exec: () => [{ values: [] }] },
         () => {},
-      );
-    } finally {
-      globalThis.fetch = origFetch;
-      process.stderr.write = origWrite;
-    }
-
-    const log = captured.join('');
+      ),
+    );
     assert.ok(
       !log.includes('Cannot read properties of undefined'),
       'must not surface a TypeError from destructuring an error body:\n' + log,
@@ -185,21 +226,10 @@ describe('librarian-daemon', () => {
       '../plugin/scripts/librarian/daemon.mjs?bust=daemon-nomsg-' + runId
     );
 
-    const origFetch = globalThis.fetch;
-    const origWrite = process.stderr.write.bind(process.stderr);
-    const captured = [];
-    globalThis.fetch = async () => ({
-      ok: true,
-      status: 200,
-      json: async () => ({ error: 'model not found' }),
-    });
-    process.stderr.write = (chunk) => {
-      captured.push(String(chunk));
-      return true;
-    };
+    server.use(chat(() => HttpResponse.json({ error: 'model not found' })));
 
-    try {
-      await investigateNote(
+    const log = await captureStderr(() =>
+      investigateNote(
         '3-permanent/no-completion.md',
         'link_check',
         {
@@ -210,13 +240,8 @@ describe('librarian-daemon', () => {
         },
         { exec: () => [{ values: [] }] },
         () => {},
-      );
-    } finally {
-      globalThis.fetch = origFetch;
-      process.stderr.write = origWrite;
-    }
-
-    const log = captured.join('');
+      ),
+    );
     assert.ok(
       !log.includes('Cannot read properties of undefined'),
       'a 200 with no message must not become a TypeError:\n' + log,

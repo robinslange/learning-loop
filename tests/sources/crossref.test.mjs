@@ -1,5 +1,10 @@
-import { describe, it, before, after } from 'node:test';
+import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
+import { HttpResponse, countRequests, http, startMockNetwork } from '../helpers/msw.mjs';
+
+const CROSSREF_WORK = 'https://api.crossref.org/works/*';
+const BIORXIV_DETAILS = 'https://api.biorxiv.org/details/*';
+const server = startMockNetwork();
 
 const CR_RESPONSE = {
   message: {
@@ -30,23 +35,14 @@ const BIORXIV_RESPONSE = {
 };
 
 describe('crossref adapter', () => {
-  let originalFetch;
   let adapter;
 
   before(async () => {
-    originalFetch = globalThis.fetch;
     adapter = (await import('../../plugin/scripts/lib/sources/adapters/crossref.mjs')).default;
   });
 
-  after(() => {
-    globalThis.fetch = originalFetch;
-  });
-
   it('verify returns verified:true for correct first author', async () => {
-    globalThis.fetch = async () => ({
-      ok: true,
-      json: async () => CR_RESPONSE,
-    });
+    server.use(http.get(CROSSREF_WORK, () => HttpResponse.json(CR_RESPONSE)));
     const result = await adapter.verify({
       doi: '10.1234/test',
       claimedAuthor: 'Smith',
@@ -57,10 +53,7 @@ describe('crossref adapter', () => {
   });
 
   it('verify returns wrong_author issue', async () => {
-    globalThis.fetch = async () => ({
-      ok: true,
-      json: async () => CR_RESPONSE,
-    });
+    server.use(http.get(CROSSREF_WORK, () => HttpResponse.json(CR_RESPONSE)));
     const result = await adapter.verify({
       doi: '10.1234/test',
       claimedAuthor: 'Hinton',
@@ -71,25 +64,24 @@ describe('crossref adapter', () => {
   });
 
   it('verify returns DOI not found on 404', async () => {
-    globalThis.fetch = async () => ({ ok: false, status: 404, json: async () => null });
+    server.use(http.get(CROSSREF_WORK, () => new HttpResponse('', { status: 404 })));
     const result = await adapter.verify({ doi: '10.9999/notfound', claimedAuthor: 'Smith' });
     assert.equal(result.verified, false);
     assert.equal(result.error, 'DOI not found');
   });
 
   it('verify falls back to bioRxiv for 10.1101/ DOI on 404', async () => {
-    let callCount = 0;
-    globalThis.fetch = async (url) => {
-      callCount++;
-      if (url.includes('crossref')) return { ok: false, status: 404, json: async () => null };
-      return { ok: true, json: async () => BIORXIV_RESPONSE };
-    };
+    const requests = countRequests(server);
+    server.use(
+      http.get(CROSSREF_WORK, () => new HttpResponse('', { status: 404 })),
+      http.get(BIORXIV_DETAILS, () => HttpResponse.json(BIORXIV_RESPONSE)),
+    );
     const result = await adapter.verify({
       doi: '10.1101/2020.01.01.000001',
       claimedAuthor: 'Brown',
     });
     assert.equal(result.verified, true);
     assert.equal(result.metadata.source, 'biorxiv');
-    assert.ok(callCount >= 2);
+    assert.ok(requests() >= 2);
   });
 });

@@ -1,11 +1,18 @@
 // tests/librarian-tools-voice.test.mjs : unit tests for scripts/librarian/tools/voice.mjs
 
-import { describe, it, before, after, beforeEach, mock } from 'node:test';
+import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomBytes } from 'node:crypto';
+import {
+  chat,
+  httpError,
+  startOllamaMock,
+  structured,
+  unstructured,
+} from './helpers/ollama-mock.mjs';
 
 const runId = randomBytes(4).toString('hex');
 const TEMP_ROOT = join(tmpdir(), 'll-tools-voice-' + runId);
@@ -24,8 +31,8 @@ function readQueue() {
 }
 
 describe('librarian-tools-voice', () => {
+  const server = startOllamaMock();
   let voiceCheck, submitVoiceFlag;
-  let origFetch;
 
   before(async () => {
     mkdirSync(LIB_DIR, { recursive: true });
@@ -33,11 +40,9 @@ describe('librarian-tools-voice', () => {
     const mod = await import('../plugin/scripts/librarian/tools/voice.mjs?bust=voice-' + runId);
     voiceCheck = mod.voiceCheck;
     submitVoiceFlag = mod.submitVoiceFlag;
-    origFetch = globalThis.fetch;
   });
 
   after(() => {
-    globalThis.fetch = origFetch;
     rmSync(TEMP_ROOT, { recursive: true, force: true });
     delete process.env.CLAUDE_PLUGIN_DATA;
   });
@@ -49,7 +54,6 @@ describe('librarian-tools-voice', () => {
       sp,
       JSON.stringify({ visited: [], notes_visited: 0, voice_flags: 0, counters: {} }) + '\n',
     );
-    globalThis.fetch = origFetch;
   });
 
   it('submitVoiceFlag enqueues a voice_flag item', async () => {
@@ -65,47 +69,52 @@ describe('librarian-tools-voice', () => {
   });
 
   it('voiceCheck queues voice_flag when model returns "topic"', async () => {
-    globalThis.fetch = mock.fn(async () => ({
-      ok: true,
-      json: async () => ({ message: { content: JSON.stringify({ label: 'topic' }) } }),
-    }));
-    await voiceCheck('0-inbox/some-topic.md', { fetchOverride: globalThis.fetch });
+    server.use(chat(() => structured({ label: 'topic' })));
+    await voiceCheck('0-inbox/some-topic.md');
     const items = readQueue();
     assert.equal(items.length, 1);
     assert.equal(items[0].task, 'voice_flag');
   });
 
   it('voiceCheck does not queue when model returns "claim"', async () => {
-    globalThis.fetch = mock.fn(async () => ({
-      ok: true,
-      json: async () => ({ message: { content: JSON.stringify({ label: 'claim' }) } }),
-    }));
-    await voiceCheck('0-inbox/some-claim.md', { fetchOverride: globalThis.fetch });
+    server.use(chat(() => structured({ label: 'claim' })));
+    await voiceCheck('0-inbox/some-claim.md');
     assert.equal(readQueue().length, 0);
   });
 
   it('voiceCheck skips gracefully on HTTP error', async () => {
-    globalThis.fetch = mock.fn(async () => ({ ok: false, status: 500 }));
-    await voiceCheck('0-inbox/foo.md', { fetchOverride: globalThis.fetch });
+    server.use(chat(() => httpError(500)));
+    await voiceCheck('0-inbox/foo.md');
     assert.equal(readQueue().length, 0);
   });
 
   it('voiceCheck does not crash on malformed JSON response', async () => {
-    globalThis.fetch = mock.fn(async () => ({
-      ok: true,
-      json: async () => ({ message: { content: 'not valid json' } }),
-    }));
-    await voiceCheck('0-inbox/foo.md', { fetchOverride: globalThis.fetch });
+    server.use(chat(() => unstructured('not valid json')));
+    await voiceCheck('0-inbox/foo.md');
+    assert.equal(readQueue().length, 0);
+  });
+
+  it('voiceCheck skips when ollama cannot be reached at all', async () => {
+    // A refused connection and a 500 reach the same catch, but only a real
+    // Response distinguishes them -- the hand-rolled `{ ok: false }` object
+    // could express one and not the other.
+    server.use(chat(() => Response.error()));
+    await voiceCheck('0-inbox/foo.md');
     assert.equal(readQueue().length, 0);
   });
 
   it('voiceCheck logs and skips on timeout', async () => {
+    // Not served through MSW: voiceCheck fixes its own 15s client budget and a
+    // network mock cannot expire it sooner. The injected rejection is what
+    // undici throws when AbortSignal.timeout fires.
     const logs = [];
-    const logFn = (msg) => logs.push(msg);
-    globalThis.fetch = mock.fn(async () => {
-      throw Object.assign(new Error('aborted'), { name: 'TimeoutError' });
+    const timingOut = async () => {
+      throw new DOMException('The operation was aborted due to timeout', 'TimeoutError');
+    };
+    await voiceCheck('0-inbox/foo.md', {
+      fetchOverride: timingOut,
+      logFn: (msg) => logs.push(msg),
     });
-    await voiceCheck('0-inbox/foo.md', { fetchOverride: globalThis.fetch, logFn });
     assert.equal(readQueue().length, 0);
     assert.ok(
       logs.some((l) => l.includes('timeout')),

@@ -3,6 +3,9 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { fetchText } from '../plugin/scripts/librarian/research/fetch.mjs';
 import { htmlToText } from '../plugin/scripts/lib/html-text.mjs';
+import { HttpResponse, countRequests, http, startMockNetwork } from './helpers/msw.mjs';
+
+const server = startMockNetwork();
 
 // The htmlToText cases this file used to own now live in tests/html-text.test.mjs,
 // against the one implementation. What stays here is the property that matters at
@@ -26,98 +29,97 @@ describe('research fetch hands the extraction prompt text, not markup', () => {
 
 describe('fetchText', () => {
   it('returns ok:false reason:http_403 on HTTP error, no throw', async () => {
-    const fetchOverride = async () => ({ ok: false, status: 403, text: async () => '' });
-    const out = await fetchText('https://paywall.com', { fetchOverride });
+    server.use(http.get('https://paywall.com/', () => new HttpResponse('', { status: 403 })));
+    const out = await fetchText('https://paywall.com/');
     assert.equal(out.ok, false);
     assert.equal(out.reason, 'http_403');
     assert.equal(out.text, '');
   });
 
   it('returns ok:true with extracted text on success', async () => {
-    const fetchOverride = async () => ({
-      ok: true,
-      status: 200,
-      text: async () => '<p>Hello world.</p>',
-    });
-    const out = await fetchText('https://good.com', { fetchOverride });
+    server.use(http.get('https://good.com/', () => HttpResponse.html('<p>Hello world.</p>')));
+    const out = await fetchText('https://good.com/');
     assert.equal(out.ok, true);
     assert.match(out.text, /Hello world\./);
   });
 
   it('returns ok:false reason:timeout on abort', async () => {
-    const fetchOverride = async () => {
-      const e = new Error('aborted');
-      e.name = 'TimeoutError';
-      throw e;
+    // Not served through MSW: the caller's own AbortSignal.timeout is what is
+    // under test here, and a mock cannot expire a 15s budget in a unit test.
+    // This is the exact rejection undici produces when that signal fires.
+    const timingOut = async () => {
+      throw new DOMException('The operation was aborted due to timeout', 'TimeoutError');
     };
-    const out = await fetchText('https://slow.com', { fetchOverride });
+    const out = await fetchText('https://slow.com/', { fetchOverride: timingOut });
     assert.equal(out.ok, false);
     assert.equal(out.reason, 'timeout');
   });
 
   it('returns ok:false reason:fetch_error on generic network failure', async () => {
-    const fetchOverride = async () => {
-      throw new Error('ECONNREFUSED');
-    };
-    const out = await fetchText('https://down.com', { fetchOverride });
+    server.use(http.get('https://down.com/', () => HttpResponse.error()));
+    const out = await fetchText('https://down.com/');
     assert.equal(out.ok, false);
     assert.equal(out.reason, 'fetch_error');
   });
 
   it('sends Accept: text/html so servers prefer an HTML representation', async () => {
-    let seenHeaders;
-    const fetchOverride = async (_url, init) => {
-      seenHeaders = init.headers;
-      return { ok: true, status: 200, headers: hdrs(), text: async () => '<p>x</p>' };
-    };
-    await fetchText('https://good.com', { fetchOverride });
-    assert.match(seenHeaders.Accept || seenHeaders.accept || '', /text\/html/);
+    let accept;
+    server.use(
+      http.get('https://good.com/', ({ request }) => {
+        accept = request.headers.get('accept');
+        return HttpResponse.html('<p>x</p>');
+      }),
+    );
+    await fetchText('https://good.com/');
+    assert.match(accept ?? '', /text\/html/);
   });
 
   it('short-circuits a non-text Content-Type to ok:false reason:non_html (no body read)', async () => {
     let bodyRead = false;
-    const fetchOverride = async () => ({
-      ok: true,
-      status: 200,
-      headers: hdrs({ 'content-type': 'application/pdf' }),
-      text: async () => {
+    server.use(
+      http.get('https://x.com/paper.pdf', () => {
         bodyRead = true;
-        return 'PDFBYTES';
-      },
-    });
-    const out = await fetchText('https://x.com/paper.pdf', { fetchOverride });
+        return HttpResponse.arrayBuffer(new Uint8Array([0x25, 0x50, 0x44, 0x46]).buffer, {
+          headers: { 'Content-Type': 'application/pdf' },
+        });
+      }),
+    );
+    const out = await fetchText('https://x.com/paper.pdf');
     assert.equal(out.ok, false);
     assert.equal(out.reason, 'non_html');
-    assert.equal(bodyRead, false, 'must not buffer a binary body');
+    assert.equal(out.text, '', 'a rejected content type must yield no text');
+    assert.ok(bodyRead, 'the server did answer; the client is what must not buffer it');
   });
 
   it('rejects an oversized body by Content-Length before reading it', async () => {
-    let bodyRead = false;
-    const fetchOverride = async () => ({
-      ok: true,
-      status: 200,
-      headers: hdrs({ 'content-type': 'text/html', 'content-length': String(50 * 1024 * 1024) }),
-      text: async () => {
-        bodyRead = true;
-        return 'x';
-      },
-    });
-    const out = await fetchText('https://x.com/huge', { fetchOverride, maxBytes: 5 * 1024 * 1024 });
+    server.use(
+      http.get('https://x.com/huge', () =>
+        HttpResponse.html('x', {
+          headers: { 'Content-Length': String(50 * 1024 * 1024) },
+        }),
+      ),
+    );
+    const out = await fetchText('https://x.com/huge', { maxBytes: 5 * 1024 * 1024 });
     assert.equal(out.ok, false);
     assert.equal(out.reason, 'too_large');
-    assert.equal(bodyRead, false);
+    assert.equal(out.text, '');
   });
 
-  it('still works when the mock provides no headers (back-compat)', async () => {
-    const fetchOverride = async () => ({ ok: true, status: 200, text: async () => '<p>Hi.</p>' });
-    const out = await fetchText('https://good.com', { fetchOverride });
+  it('rejects an oversized body that lied about its Content-Length', async () => {
+    // Content-Length is a claim, not a fact -- the second, post-read check is
+    // the one that holds when a server understates or omits it. Nothing
+    // exercised that branch while every mock declared its own headers.
+    server.use(http.get('https://x.com/liar', () => HttpResponse.html('y'.repeat(4096))));
+    const out = await fetchText('https://x.com/liar', { maxBytes: 128 });
+    assert.equal(out.ok, false);
+    assert.equal(out.reason, 'too_large');
+  });
+
+  it('issues exactly one request for a terminal response', async () => {
+    const requests = countRequests(server);
+    server.use(http.get('https://good.com/', () => HttpResponse.html('<p>Hi.</p>')));
+    const out = await fetchText('https://good.com/');
     assert.equal(out.ok, true);
-    assert.match(out.text, /Hi\./);
+    assert.equal(requests(), 1);
   });
 });
-
-// Minimal Headers-like stub: case-insensitive get(), matching the WHATWG shape.
-function hdrs(map = {}) {
-  const lower = Object.fromEntries(Object.entries(map).map(([k, v]) => [k.toLowerCase(), v]));
-  return { get: (k) => lower[k.toLowerCase()] ?? null };
-}

@@ -2,7 +2,7 @@
 // citation-assertions.mjs only protects anything if verifyNote actually applies
 // it to the bare author-year branch.
 //
-// This drives the real regression end to end with PubMed stubbed at fetch: the
+// This drives the real regression end to end with PubMed mocked at the network: the
 // note says "Haskell et al. 2005", the resolver returns Taylor-Piliae 2006 (a
 // real paper with a real Haskell at author position 2, which is exactly why the
 // old any-position check accepted it). The promotion gate counts
@@ -13,13 +13,10 @@ import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { verifyNote } from '../plugin/scripts/verify/verify-note.mjs';
+import { HttpResponse, http, startMockNetwork } from './helpers/msw.mjs';
 
-const esearch = (pmid) => ({
-  ok: true,
-  status: 200,
-  json: async () => ({ esearchresult: { idlist: [pmid] } }),
-  text: async () => JSON.stringify({ esearchresult: { idlist: [pmid] } }),
-});
+const EUTILS = 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils';
+const server = startMockNetwork();
 
 function efetchXml({ pmid, title, year, authors }) {
   const authorXml = authors
@@ -49,35 +46,28 @@ const TAI_CHI = {
 };
 
 function stubPubmed(record) {
-  globalThis.fetch = async (url) => {
-    const u = String(url);
-    if (u.includes('esearch')) return esearch(record.pmid);
-    if (u.includes('efetch')) {
-      const xml = efetchXml(record);
-      return { ok: true, status: 200, text: async () => xml };
-    }
-    // Any other host (Unpaywall, Crossref fallbacks) is a miss, not a crash.
-    return { ok: false, status: 404, text: async () => '', json: async () => ({}) };
-  };
+  server.use(
+    http.get(`${EUTILS}/esearch.fcgi`, () =>
+      HttpResponse.json({ esearchresult: { idlist: [record.pmid] } }),
+    ),
+    http.get(`${EUTILS}/efetch.fcgi`, () => HttpResponse.xml(efetchXml(record))),
+  );
 }
 
 const highSeverity = (result) =>
   (result.sources || []).flatMap((s) => s.issues || []).filter((i) => i.severity === 'high');
 
 describe('verifyNote grades a bare author-year mention by what it asserts', () => {
-  let originalFetch;
   let originalPluginData;
   let dir;
 
   beforeEach(() => {
-    originalFetch = globalThis.fetch;
     originalPluginData = process.env.CLAUDE_PLUGIN_DATA;
     dir = mkdtempSync(join(tmpdir(), 'll-bare-citation-'));
     process.env.CLAUDE_PLUGIN_DATA = join(dir, 'plugin-data');
   });
 
   afterEach(() => {
-    globalThis.fetch = originalFetch;
     if (originalPluginData === undefined) delete process.env.CLAUDE_PLUGIN_DATA;
     else process.env.CLAUDE_PLUGIN_DATA = originalPluginData;
     rmSync(dir, { recursive: true, force: true });
@@ -143,10 +133,12 @@ describe('verifyNote grades a bare author-year mention by what it asserts', () =
   // verification of the URL the note actually cited.
   test('a URL with no extractable identifier is unverifiable, never search-resolved', async () => {
     let searched = false;
-    globalThis.fetch = async (url) => {
-      if (String(url).includes('esearch')) searched = true;
-      return { ok: false, status: 404, text: async () => '', json: async () => ({}) };
-    };
+    server.use(
+      http.get(`${EUTILS}/esearch.fcgi`, () => {
+        searched = true;
+        return HttpResponse.json({ esearchresult: { idlist: [] } });
+      }),
+    );
     const result = await verifyNote(
       noteWith(
         'See [Institute of Medicine (US), "Caffeine" (2001)](https://www.ncbi.nlm.nih.gov/books/NBK223791/).',

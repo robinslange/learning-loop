@@ -17,6 +17,15 @@ import {
 import { fetchText } from '../plugin/scripts/librarian/research/fetch.mjs';
 import { runGateway } from '../plugin/bin/source-gateway.mjs';
 import { readCount } from '../plugin/scripts/lib/fetch-budget.mjs';
+import { HttpResponse, countRequests, http, redirectTo, startMockNetwork } from './helpers/msw.mjs';
+
+// Every hop below is a real request against a real Response. The blocked hops
+// have handlers too: a guard that stopped working must be caught by the
+// loopback body arriving, not merely by a request count.
+const server = startMockNetwork();
+
+/** One hop, the way every production caller issues it. */
+const oneHop = (u) => fetch(u, { redirect: 'manual' });
 
 describe('checkFetchUrl', () => {
   const blocked = [
@@ -112,47 +121,40 @@ describe('checkRedirect', () => {
     assert.equal(r.url.href, 'https://example.com/next');
   });
 });
-
 describe('fetchPageText redirect loop', () => {
-  it('treats a response with no status/headers as terminal, not a redirect', async () => {
+  it('fetches a terminal 200 exactly once instead of treating it as a redirect', async () => {
     // Regression: the manual-redirect loop first gated on `res.status < 300`.
-    // A stubbed fetch returning {ok, text} has status === undefined, and
-    // `undefined < 300` is false — so every mocked response looked like a
-    // redirect and the loop spun until MAX_REDIRECTS. Caught by
-    // source-resolver.test.mjs; pinned here at the unit level.
+    // The original pin used a stub with no status at all, which is a shape only
+    // a test can produce -- so it proved the workaround, not the loop. A real
+    // 200 proves the loop against what a server actually sends.
     const { fetchPageText } = await import('../plugin/scripts/lib/sources/web-fetch.mjs');
-    const saved = globalThis.fetch;
-    let calls = 0;
-    globalThis.fetch = async () => {
-      calls++;
-      return { ok: true, text: async () => '<html><body><p>hello</p></body></html>' };
-    };
-    try {
-      const out = await fetchPageText('https://example.com/a');
-      assert.equal(calls, 1, 'a terminal response must be fetched exactly once');
-      assert.notEqual(out.kind, 'too_many_redirects');
-    } finally {
-      globalThis.fetch = saved;
-    }
+    const requests = countRequests(server);
+    server.use(
+      http.get('https://example.com/a', () =>
+        HttpResponse.html('<html><body><p>hello</p></body></html>'),
+      ),
+    );
+
+    const out = await fetchPageText('https://example.com/a');
+    assert.equal(requests(), 1, 'a terminal response must be fetched exactly once');
+    assert.equal(out.ok, true);
+    assert.match(out.text, /hello/);
   });
 
   it('blocks a 302 from a public host into loopback', async () => {
     const { fetchPageText } = await import('../plugin/scripts/lib/sources/web-fetch.mjs');
-    const saved = globalThis.fetch;
-    globalThis.fetch = async () => ({
-      ok: false,
-      status: 302,
-      headers: { get: (h) => (h === 'location' ? 'http://127.0.0.1:11434/api/tags' : null) },
-      text: async () => '',
-    });
-    try {
-      const out = await fetchPageText('https://public.example.com/');
-      assert.equal(out.ok, false);
-      assert.equal(out.kind, 'blocked');
-      assert.equal(out.reason, 'redirect_host_private_ip');
-    } finally {
-      globalThis.fetch = saved;
-    }
+    server.use(
+      http.get('https://public.example.com/', () => redirectTo('http://127.0.0.1:11434/api/tags')),
+      http.get('http://127.0.0.1:11434/api/tags', () =>
+        HttpResponse.html('<p>LOOPBACK SECRET</p>'),
+      ),
+    );
+
+    const out = await fetchPageText('https://public.example.com/');
+    assert.equal(out.ok, false);
+    assert.equal(out.kind, 'blocked');
+    assert.equal(out.reason, 'redirect_host_private_ip');
+    assert.ok(!('text' in out), 'a blocked chain must not carry a body');
   });
 });
 
@@ -210,22 +212,17 @@ describe('source-gateway fetch verb', () => {
 // 127.0.0.1 returning the loopback body. fetchGuarded is the single hop loop
 // both entry points now drive.
 describe('fetchGuarded — every hop, not just the origin', () => {
-  const res = (status, location) => ({
-    ok: true,
-    status,
-    headers: { get: (k) => (k.toLowerCase() === 'location' ? location : null) },
-    text: async () => 'BODY',
-  });
-
   it('blocks a public origin that redirects into loopback', async () => {
-    const hops = [];
-    const out = await fetchGuarded('https://public.example.com/a', (u) => {
-      hops.push(u);
-      return Promise.resolve(res(302, 'http://127.0.0.1:8791/secret'));
-    });
+    const requests = countRequests(server);
+    server.use(
+      http.get('https://public.example.com/a', () => redirectTo('http://127.0.0.1:8791/secret')),
+      http.get('http://127.0.0.1:8791/secret', () => HttpResponse.text('LOOPBACK SECRET')),
+    );
+
+    const out = await fetchGuarded('https://public.example.com/a', oneHop);
     assert.equal(out.ok, false);
     assert.equal(out.reason, 'redirect_host_private_ip');
-    assert.deepEqual(hops, ['https://public.example.com/a'], 'must not fetch the loopback hop');
+    assert.equal(requests(), 1, 'must not fetch the loopback hop');
   });
 
   it('blocks a redirect into IMDS, including the mapped-IPv6 spelling', async () => {
@@ -233,87 +230,106 @@ describe('fetchGuarded — every hop, not just the origin', () => {
       'http://169.254.169.254/latest/meta-data/',
       'http://[::ffff:a9fe:a9fe]/',
     ]) {
-      const out = await fetchGuarded('https://public.example.com/a', () =>
-        Promise.resolve(res(302, target)),
-      );
+      server.use(http.get('https://public.example.com/a', () => redirectTo(target)));
+      const out = await fetchGuarded('https://public.example.com/a', oneHop);
       assert.equal(out.ok, false, `${target} must be blocked`);
       assert.equal(out.reason, 'redirect_host_private_ip');
     }
   });
 
   it('blocks a private hop reached only on the second redirect', async () => {
-    const chain = ['https://b.example.com/', 'http://10.0.0.5/'];
-    let i = 0;
-    const out = await fetchGuarded('https://a.example.com/', () =>
-      Promise.resolve(res(302, chain[i++])),
+    server.use(
+      http.get('https://a.example.com/', () => redirectTo('https://b.example.com/')),
+      http.get('https://b.example.com/', () => redirectTo('http://10.0.0.5/')),
     );
+
+    const out = await fetchGuarded('https://a.example.com/', oneHop);
     assert.equal(out.ok, false);
     assert.equal(out.reason, 'redirect_host_private_ip');
   });
 
   it('follows public redirects and returns the final response', async () => {
-    let i = 0;
-    const out = await fetchGuarded('https://a.example.com/', () =>
-      Promise.resolve(i++ === 0 ? res(302, 'https://b.example.com/x') : res(200, null)),
+    server.use(
+      http.get('https://a.example.com/', () => redirectTo('https://b.example.com/x')),
+      http.get('https://b.example.com/x', () => HttpResponse.text('BODY')),
     );
+
+    const out = await fetchGuarded('https://a.example.com/', oneHop);
     assert.equal(out.ok, true);
     assert.equal(out.url, 'https://b.example.com/x');
+    assert.equal(await out.res.text(), 'BODY');
   });
 
   it('caps redirect chains', async () => {
     let n = 0;
-    const out = await fetchGuarded('https://a.example.com/', () =>
-      Promise.resolve(res(302, `https://a.example.com/${n++}`)),
+    server.use(
+      http.get('https://a.example.com/*', () => redirectTo(`https://a.example.com/${n++}`)),
     );
+
+    const out = await fetchGuarded('https://a.example.com/', oneHop);
     assert.equal(out.ok, false);
     assert.equal(out.reason, 'too_many_redirects');
   });
 
-  it('treats a stubbed response with no status/headers as terminal, not a redirect', async () => {
-    const out = await fetchGuarded('https://a.example.com/', () =>
-      Promise.resolve({ ok: true, text: async () => 'BODY' }),
+  it('does not follow a 2xx that carries a Location header', async () => {
+    // A 201 Created names the resource it made in Location; that is not a
+    // redirect. Without the status gate the loop follows it, spends a hop, and
+    // hands the caller the wrong body. Removing the gate breaks nothing else,
+    // so this is the only assertion standing between it and a silent deletion.
+    const requests = countRequests(server);
+    server.use(
+      http.get('https://a.example.com/', () =>
+        HttpResponse.text('CREATED', {
+          status: 201,
+          headers: { Location: 'https://b.example.com/made' },
+        }),
+      ),
+      http.get('https://b.example.com/made', () => HttpResponse.text('FOLLOWED')),
     );
+
+    const out = await fetchGuarded('https://a.example.com/', oneHop);
     assert.equal(out.ok, true);
+    assert.equal(out.url, 'https://a.example.com/');
+    assert.equal(await out.res.text(), 'CREATED');
+    assert.equal(requests(), 1);
+  });
+
+  it('treats a 3xx with no Location header as terminal', async () => {
+    // A redirect status without a target is not a redirect anyone can follow.
+    // The loop must return it, not spin -- and this is the only remaining
+    // shape that reaches that branch now the status-less stub is gone.
+    const requests = countRequests(server);
+    server.use(http.get('https://a.example.com/', () => new HttpResponse(null, { status: 304 })));
+
+    const out = await fetchGuarded('https://a.example.com/', oneHop);
+    assert.equal(out.ok, true);
+    assert.equal(out.res.status, 304);
+    assert.equal(requests(), 1);
   });
 });
 
 describe('fetchText (source-gateway fetch slot) validates hops', () => {
   it('blocks a 302 into loopback instead of returning its body', async () => {
-    let call = 0;
-    const fetchOverride = async () => {
-      call++;
-      if (call === 1) {
-        return {
-          ok: true,
-          status: 302,
-          headers: { get: (k) => (k.toLowerCase() === 'location' ? 'http://127.0.0.1:9/x' : null) },
-          text: async () => '',
-        };
-      }
-      return {
-        ok: true,
-        status: 200,
-        headers: { get: () => null },
-        text: async () => '<p>SECRET</p>',
-      };
-    };
-    const out = await fetchText('https://public.example.com/a', { fetchOverride });
+    const requests = countRequests(server);
+    server.use(
+      http.get('https://public.example.com/a', () => redirectTo('http://127.0.0.1:9/x')),
+      http.get('http://127.0.0.1:9/x', () => HttpResponse.html('<p>SECRET</p>')),
+    );
+
+    const out = await fetchText('https://public.example.com/a');
     assert.equal(out.ok, false);
     assert.match(out.reason, /^blocked_/);
     assert.doesNotMatch(out.text, /SECRET/);
-    assert.equal(call, 1, 'must not issue the loopback hop');
+    assert.equal(requests(), 1, 'must not issue the loopback hop');
   });
 
   it('rejects a loopback origin outright', async () => {
-    let called = false;
-    const out = await fetchText('http://127.0.0.1:11434/api/tags', {
-      fetchOverride: async () => {
-        called = true;
-        return { ok: true, status: 200, headers: { get: () => null }, text: async () => 'x' };
-      },
-    });
+    const requests = countRequests(server);
+    server.use(http.get('http://127.0.0.1:11434/api/tags', () => HttpResponse.text('x')));
+
+    const out = await fetchText('http://127.0.0.1:11434/api/tags');
     assert.equal(out.ok, false);
     assert.equal(out.reason, 'blocked_host_private_ip');
-    assert.equal(called, false);
+    assert.equal(requests(), 0);
   });
 });

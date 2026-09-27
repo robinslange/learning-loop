@@ -1,9 +1,16 @@
-import { describe, it, before, after, mock } from 'node:test';
+import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomBytes } from 'node:crypto';
+import {
+  chat,
+  httpError,
+  startOllamaMock,
+  structured,
+  unstructured,
+} from './helpers/ollama-mock.mjs';
 
 const runId = randomBytes(4).toString('hex');
 const TEMP_ROOT = join(tmpdir(), `ll-tag-classifier-${runId}`);
@@ -47,18 +54,25 @@ function resetState() {
 }
 
 describe('tag classifier structured-output suggestion', () => {
-  let originalFetch;
+  const server = startOllamaMock();
+  let calls;
 
   before(() => {
     mkdirSync(TEMP_VAULT, { recursive: true });
     mkdirSync(LIBRARIAN_DIR, { recursive: true });
     process.env.CLAUDE_PLUGIN_DATA = TEMP_DATA;
     process.env.VAULT_PATH = TEMP_VAULT;
-    originalFetch = globalThis.fetch;
+  });
+
+  beforeEach(() => {
+    calls = 0;
+    server.events.removeAllListeners();
+    server.events.on('request:start', () => {
+      calls += 1;
+    });
   });
 
   after(() => {
-    globalThis.fetch = originalFetch;
     delete process.env.CLAUDE_PLUGIN_DATA;
     delete process.env.VAULT_PATH;
     rmSync(TEMP_ROOT, { recursive: true, force: true });
@@ -67,16 +81,7 @@ describe('tag classifier structured-output suggestion', () => {
   it('queues tag_suggestion with cleaned vocabulary-bounded tags', async () => {
     resetState();
 
-    globalThis.fetch = mock.fn(async () => ({
-      ok: true,
-      json: async () => ({
-        message: {
-          content: JSON.stringify({
-            suggested_tags: ['pharmacology', 'neuroscience'],
-          }),
-        },
-      }),
-    }));
+    server.use(chat(() => structured({ suggested_tags: ['pharmacology', 'neuroscience'] })));
 
     const mod = await import(`../plugin/scripts/librarian.mjs?bust=tag-happy-${runId}`);
     await mod.__test__.tagCheck('3-permanent/foo.md', {
@@ -99,12 +104,7 @@ describe('tag classifier structured-output suggestion', () => {
   it('does not queue when model returns empty array', async () => {
     resetState();
 
-    globalThis.fetch = mock.fn(async () => ({
-      ok: true,
-      json: async () => ({
-        message: { content: JSON.stringify({ suggested_tags: [] }) },
-      }),
-    }));
+    server.use(chat(() => structured({ suggested_tags: [] })));
 
     const mod = await import(`../plugin/scripts/librarian.mjs?bust=tag-empty-${runId}`);
     await mod.__test__.tagCheck('3-permanent/foo.md', {
@@ -119,16 +119,7 @@ describe('tag classifier structured-output suggestion', () => {
   it('filters out tags outside the vocabulary', async () => {
     resetState();
 
-    globalThis.fetch = mock.fn(async () => ({
-      ok: true,
-      json: async () => ({
-        message: {
-          content: JSON.stringify({
-            suggested_tags: ['pharmacology', 'made-up-tag'],
-          }),
-        },
-      }),
-    }));
+    server.use(chat(() => structured({ suggested_tags: ['pharmacology', 'made-up-tag'] })));
 
     const mod = await import(`../plugin/scripts/librarian.mjs?bust=tag-vocab-${runId}`);
     await mod.__test__.tagCheck('3-permanent/foo.md', {
@@ -145,16 +136,7 @@ describe('tag classifier structured-output suggestion', () => {
   it('filters out tags already on the note', async () => {
     resetState();
 
-    globalThis.fetch = mock.fn(async () => ({
-      ok: true,
-      json: async () => ({
-        message: {
-          content: JSON.stringify({
-            suggested_tags: ['pharmacology', 'neuroscience'],
-          }),
-        },
-      }),
-    }));
+    server.use(chat(() => structured({ suggested_tags: ['pharmacology', 'neuroscience'] })));
 
     const mod = await import(`../plugin/scripts/librarian.mjs?bust=tag-existing-${runId}`);
     await mod.__test__.tagCheck('3-permanent/foo.md', {
@@ -171,10 +153,7 @@ describe('tag classifier structured-output suggestion', () => {
   it('does not crash on malformed response', async () => {
     resetState();
 
-    globalThis.fetch = mock.fn(async () => ({
-      ok: true,
-      json: async () => ({ message: { content: 'not json' } }),
-    }));
+    server.use(chat(() => unstructured('not json')));
 
     const mod = await import(`../plugin/scripts/librarian.mjs?bust=tag-malformed-${runId}`);
     await mod.__test__.tagCheck('3-permanent/foo.md', {
@@ -189,7 +168,7 @@ describe('tag classifier structured-output suggestion', () => {
   it('skips gracefully on HTTP error from ollama', async () => {
     resetState();
 
-    globalThis.fetch = mock.fn(async () => ({ ok: false, status: 500 }));
+    server.use(chat(() => httpError(500)));
 
     const mod = await import(`../plugin/scripts/librarian.mjs?bust=tag-http-${runId}`);
     await mod.__test__.tagCheck('3-permanent/foo.md', {
@@ -204,9 +183,12 @@ describe('tag classifier structured-output suggestion', () => {
   it('logs timeout and skips submission when fetch aborts', async () => {
     resetState();
 
-    globalThis.fetch = mock.fn(async () => {
-      throw Object.assign(new Error('aborted'), { name: 'TimeoutError' });
-    });
+    // Not served through MSW: tagCheck fixes its own client timeout, and a
+    // network mock cannot expire it sooner. The injected rejection is what
+    // undici throws when AbortSignal.timeout fires.
+    const timingOut = async () => {
+      throw new DOMException('The operation was aborted due to timeout', 'TimeoutError');
+    };
 
     const mod = await import(
       `../plugin/scripts/librarian.mjs?bust=tag-timeout-${runId}-${randomBytes(4).toString('hex')}`
@@ -215,6 +197,7 @@ describe('tag classifier structured-output suggestion', () => {
       bodyOverride: 'Body.',
       existingTagsOverride: '',
       vocabularyOverride: VOCAB,
+      fetchOverride: timingOut,
     });
 
     assert.equal(readQueue().length, 0);
@@ -223,12 +206,6 @@ describe('tag classifier structured-output suggestion', () => {
   it('returns without queueing when body is empty', async () => {
     resetState();
 
-    let fetchCalled = false;
-    globalThis.fetch = mock.fn(async () => {
-      fetchCalled = true;
-      return { ok: true, json: async () => ({ message: { content: '{}' } }) };
-    });
-
     const mod = await import(`../plugin/scripts/librarian.mjs?bust=tag-emptybody-${runId}`);
     await mod.__test__.tagCheck('3-permanent/foo.md', {
       bodyOverride: '',
@@ -236,7 +213,7 @@ describe('tag classifier structured-output suggestion', () => {
       vocabularyOverride: VOCAB,
     });
 
-    assert.equal(fetchCalled, false, 'should short-circuit before fetch');
+    assert.equal(calls, 0, 'should short-circuit before fetch');
     assert.equal(readQueue().length, 0);
   });
 });

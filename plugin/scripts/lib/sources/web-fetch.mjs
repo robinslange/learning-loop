@@ -60,7 +60,7 @@ export async function fetchPageText(url) {
   // bounds how long a response may take, not how large it may be, and a slow
   // trickle stays under it while the heap fills. These URLs are scraped out of
   // note bodies, so the size is attacker-chosen.
-  const declaredLength = Number(res.headers?.get?.('content-length'));
+  const declaredLength = Number(res.headers.get('content-length'));
   if (Number.isFinite(declaredLength) && declaredLength > MAX_PAGE_BYTES) {
     return { ok: false, kind: 'too_large' };
   }

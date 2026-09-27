@@ -1,9 +1,12 @@
-import { describe, it, before, after, beforeEach, afterEach } from 'node:test';
+import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomBytes } from 'node:crypto';
+import { HttpResponse, countRequests, http, startMockNetwork } from './helpers/msw.mjs';
+
+const server = startMockNetwork();
 
 const runId = randomBytes(8).toString('hex');
 const TEMP_ROOT = join(tmpdir(), `ll-source-resolver-${runId}`);
@@ -12,28 +15,16 @@ const TEMP_DATA = join(TEMP_ROOT, 'plugin-data');
 let __test__;
 
 describe('source-resolver check-claims', () => {
-  let originalFetch;
-
   before(async () => {
     mkdirSync(TEMP_DATA, { recursive: true });
     process.env.CLAUDE_PLUGIN_DATA = TEMP_DATA;
-    originalFetch = globalThis.fetch;
     const mod = await import(`../plugin/scripts/source-resolver.mjs?bust=${runId}`);
     __test__ = mod.__test__;
   });
 
   after(() => {
-    globalThis.fetch = originalFetch;
     delete process.env.CLAUDE_PLUGIN_DATA;
     rmSync(TEMP_ROOT, { recursive: true, force: true });
-  });
-
-  beforeEach(() => {
-    globalThis.fetch = originalFetch;
-  });
-
-  afterEach(() => {
-    globalThis.fetch = originalFetch;
   });
 
   it('isBlockedFetch matches paywall/PDF domains in WEB_FETCH_BLOCKLIST', () => {
@@ -51,15 +42,14 @@ describe('source-resolver check-claims', () => {
   });
 
   it('check-claims fetches page text for non-academic URL and matches numeric claim', async () => {
-    let fetchCalls = 0;
-    globalThis.fetch = async (url) => {
-      fetchCalls++;
-      return {
-        ok: true,
-        text: async () =>
+    const requests = countRequests(server);
+    server.use(
+      http.get('https://example.com/article', () =>
+        HttpResponse.html(
           '<html><body><p>The study found that 80% of users prefer X over Y.</p></body></html>',
-      };
-    };
+        ),
+      ),
+    );
 
     const notePath = join(TEMP_ROOT, 'note-page.md');
     const content = [
@@ -75,7 +65,7 @@ describe('source-resolver check-claims', () => {
 
     const results = await __test__.checkClaims(notePath);
 
-    assert.ok(fetchCalls >= 1, 'fetch should have been called for non-blocklisted URL');
+    assert.ok(requests() >= 1, 'fetch should have been called for non-blocklisted URL');
     assert.ok(Array.isArray(results));
     assert.ok(results.length >= 1, 'should have at least one claim row');
 
@@ -88,11 +78,10 @@ describe('source-resolver check-claims', () => {
   });
 
   it('check-claims skips WEB_FETCH_BLOCKLIST domains without fetching', async () => {
-    let fetchCalls = 0;
-    globalThis.fetch = async () => {
-      fetchCalls++;
-      return { ok: true, text: async () => '<html>blocked</html>' };
-    };
+    const requests = countRequests(server);
+    server.use(
+      http.get('https://www.sciencedirect.com/*', () => HttpResponse.html('<html>blocked</html>')),
+    );
 
     const notePath = join(TEMP_ROOT, 'note-blocked.md');
     const content = [
@@ -108,7 +97,7 @@ describe('source-resolver check-claims', () => {
 
     const results = await __test__.checkClaims(notePath);
 
-    assert.equal(fetchCalls, 0, 'fetch must not be called for blocklisted domains');
+    assert.equal(requests(), 0, 'fetch must not be called for blocklisted domains');
     assert.ok(Array.isArray(results));
     // A blocklisted source still reports itself as UNCHECKED. Returning no rows
     // made "we could not read this" indistinguishable from "there was nothing
@@ -120,11 +109,10 @@ describe('source-resolver check-claims', () => {
   });
 
   it('check-claims returns [] when note has no quantitative numbers', async () => {
-    let fetchCalls = 0;
-    globalThis.fetch = async () => {
-      fetchCalls++;
-      return { ok: true, text: async () => '<html>page</html>' };
-    };
+    const requests = countRequests(server);
+    server.use(
+      http.get('https://example.com/article', () => HttpResponse.html('<html>page</html>')),
+    );
 
     const notePath = join(TEMP_ROOT, 'note-no-numbers.md');
     const content = [
@@ -143,33 +131,33 @@ describe('source-resolver check-claims', () => {
     const results = await __test__.checkClaims(notePath);
 
     assert.deepEqual(results, []);
-    assert.equal(fetchCalls, 0, 'no fetch should happen if no numbers to verify');
+    assert.equal(requests(), 0, 'no fetch should happen if no numbers to verify');
   });
 });
 
 describe('fetchPageText error surfacing', () => {
-  let originalFetch;
-  before(() => {
-    originalFetch = globalThis.fetch;
-  });
-  after(() => {
-    globalThis.fetch = originalFetch;
-  });
-
-  it('returns { ok: false, kind: "timeout" } on AbortError', async () => {
+  it('returns { ok: false, kind: "timeout" } on a client timeout', async () => {
+    // fetchPageText fixes its own 15s budget, so the abort has to be injected;
+    // this is the rejection undici produces when AbortSignal.timeout fires.
+    // The interceptor is left in place so nothing else can slip out.
+    const inner = globalThis.fetch;
     globalThis.fetch = async () => {
-      throw Object.assign(new Error('aborted'), { name: 'TimeoutError' });
+      throw new DOMException('The operation was aborted due to timeout', 'TimeoutError');
     };
-    const { __test__ } = await import(
-      `../plugin/scripts/source-resolver.mjs?bust=${randomBytes(4).toString('hex')}`
-    );
-    const result = await __test__.fetchPageText('https://example.com/x');
-    assert.equal(result.ok, false);
-    assert.equal(result.kind, 'timeout');
+    try {
+      const { __test__ } = await import(
+        `../plugin/scripts/source-resolver.mjs?bust=${randomBytes(4).toString('hex')}`
+      );
+      const result = await __test__.fetchPageText('https://example.com/x');
+      assert.equal(result.ok, false);
+      assert.equal(result.kind, 'timeout');
+    } finally {
+      globalThis.fetch = inner;
+    }
   });
 
   it('returns { ok: false, kind: "http", status } on 4xx', async () => {
-    globalThis.fetch = async () => ({ ok: false, status: 404 });
+    server.use(http.get('https://example.com/y', () => new HttpResponse('', { status: 404 })));
     const { __test__ } = await import(
       `../plugin/scripts/source-resolver.mjs?bust=${randomBytes(4).toString('hex')}`
     );
@@ -180,10 +168,11 @@ describe('fetchPageText error surfacing', () => {
   });
 
   it('returns { ok: true, text } on success', async () => {
-    globalThis.fetch = async () => ({
-      ok: true,
-      text: async () => '<html><body>hello world</body></html>',
-    });
+    server.use(
+      http.get('https://example.com/z', () =>
+        HttpResponse.html('<html><body>hello world</body></html>'),
+      ),
+    );
     const { __test__ } = await import(
       `../plugin/scripts/source-resolver.mjs?bust=${randomBytes(4).toString('hex')}`
     );
@@ -193,32 +182,48 @@ describe('fetchPageText error surfacing', () => {
   });
 
   it('rejects an oversized body by content-length without buffering it', async () => {
+    // MSW reads every mocked body itself to emit its response events, so "was
+    // the stream pulled" cannot be observed through it. A real Response with a
+    // lazy stream can: highWaterMark 0 means nothing pulls until a reader does.
     let bodyRead = false;
-    globalThis.fetch = async () => ({
-      ok: true,
-      headers: { get: (h) => (h === 'content-length' ? String(64 * 1024 * 1024) : null) },
-      text: async () => {
-        bodyRead = true;
-        return 'never reached';
+    const body = new ReadableStream(
+      {
+        pull(c) {
+          bodyRead = true;
+          c.enqueue(new TextEncoder().encode('never reached'));
+          c.close();
+        },
       },
-    });
-    const { __test__ } = await import(
-      `../plugin/scripts/source-resolver.mjs?bust=${randomBytes(4).toString('hex')}`
+      { highWaterMark: 0 },
     );
-    const result = await __test__.fetchPageText('https://example.com/big');
-    assert.equal(result.ok, false);
-    assert.equal(result.kind, 'too_large');
-    assert.equal(bodyRead, false, 'the body must be rejected before it is buffered');
+    const inner = globalThis.fetch;
+    globalThis.fetch = async () =>
+      new Response(body, { headers: { 'content-length': String(64 * 1024 * 1024) } });
+    try {
+      const { __test__ } = await import(
+        `../plugin/scripts/source-resolver.mjs?bust=${randomBytes(4).toString('hex')}`
+      );
+      const result = await __test__.fetchPageText('https://example.com/big');
+      assert.equal(result.ok, false);
+      assert.equal(result.kind, 'too_large');
+      assert.equal(bodyRead, false, 'the body must be rejected before it is buffered');
+    } finally {
+      globalThis.fetch = inner;
+    }
   });
 
   it('rejects an oversized body that under-declared its content-length', async () => {
     // content-length comes from the same server as the body, so the pre-check
     // is an optimisation and the post-check is the actual bound.
-    globalThis.fetch = async () => ({
-      ok: true,
-      headers: { get: (h) => (h === 'content-length' ? '10' : null) },
-      text: async () => 'x'.repeat(6 * 1024 * 1024),
-    });
+    server.use(
+      http.get(
+        'https://example.com/lying',
+        () =>
+          new HttpResponse('x'.repeat(6 * 1024 * 1024), {
+            headers: { 'content-type': 'text/html', 'content-length': '10' },
+          }),
+      ),
+    );
     const { __test__ } = await import(
       `../plugin/scripts/source-resolver.mjs?bust=${randomBytes(4).toString('hex')}`
     );
@@ -228,11 +233,17 @@ describe('fetchPageText error surfacing', () => {
   });
 
   it('accepts a body with no content-length header at all', async () => {
-    globalThis.fetch = async () => ({
-      ok: true,
-      headers: { get: () => null },
-      text: async () => '<html><body>small page</body></html>',
-    });
+    // A string body leaves content-length unset; HttpResponse.html would too,
+    // but spelling the headers out keeps the case from depending on that.
+    server.use(
+      http.get(
+        'https://example.com/nolen',
+        () =>
+          new HttpResponse('<html><body>small page</body></html>', {
+            headers: { 'content-type': 'text/html' },
+          }),
+      ),
+    );
     const { __test__ } = await import(
       `../plugin/scripts/source-resolver.mjs?bust=${randomBytes(4).toString('hex')}`
     );
