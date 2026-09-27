@@ -51,6 +51,6 @@ export function checker(id, name, severity) {
   }
   return {
     ok: (detail) => ({ id, name, status: 'ok', severity, detail, fix: null }),
-    fail: (detail, fix) => ({ id, name, status: 'fail', severity, detail, fix }),
+    fail: (detail, fix) => ({ id, name, status: 'fail', severity, detail, fix: fix ?? null }),
   };
 }
