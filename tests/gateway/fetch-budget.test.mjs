@@ -4,6 +4,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawn } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import {
   readCount,
   tryBump,
@@ -64,8 +65,8 @@ describe('fetch-budget readCount', () => {
   });
 
   it('isolates counters per sessionId', () => {
-    const a = `iso-a-${Date.now()}`,
-      b = `iso-b-${Date.now()}`;
+    const a = `iso-a-${randomUUID()}`,
+      b = `iso-b-${randomUUID()}`;
     tryBump(a, tmpPd, 10);
     tryBump(a, tmpPd, 10);
     tryBump(b, tmpPd, 10);
@@ -95,11 +96,28 @@ describe('tryBump', () => {
     assert.equal(tryBump(sid, tmpPd, 3), false);
     assert.equal(readCount(sid, tmpPd), 3);
   });
-  it('lets exactly budget of N concurrent processes through', async () => {
-    const sid = `race-${Date.now()}`;
+  it('never lets more than budget concurrent processes through, however contended the lock is', async () => {
+    // Under real contention, a losing process can be refused for either of
+    // two reasons: the counter was already at budget (a legitimate deny), or
+    // the lock's own retry budget (400x5ms) ran out first (a fail-closed
+    // timeout, since F-7). Both return the identical boolean `false` from
+    // tryBump, and each child process reports only that single bit over
+    // stdout ('0' or '1') — nothing distinguishes the two reasons from out
+    // here. So "granted === budget exactly when no timeouts occurred" is not
+    // an assertion this test can make from outside the child processes: we'd
+    // need tryBump itself to expose *why* it refused (a production API
+    // change, not asked for and not worth it for a test). What the test CAN
+    // assert from outside: the cap is never exceeded (not "exactly budget
+    // got through", which flaked under the old fail-open-on-timeout
+    // behaviour whenever a timeout let an over-budget caller slip in as a
+    // false '1'), and that something was granted at all (an always-refusing
+    // tryBump — e.g. a regression that fails every fetch closed — would
+    // otherwise satisfy "granted <= budget" trivially at granted=0).
+    const sid = `race-${randomUUID()}`;
+    const budget = 10;
     const mod = new URL('../../plugin/scripts/lib/fetch-budget.mjs', import.meta.url).href;
     const startAt = Date.now() + 1500;
-    const script = `import { tryBump } from ${JSON.stringify(mod)}; while (Date.now() < ${startAt}) {} process.stdout.write(tryBump(${JSON.stringify(sid)}, ${JSON.stringify(tmpPd)}, 10) ? '1' : '0');`;
+    const script = `import { tryBump } from ${JSON.stringify(mod)}; while (Date.now() < ${startAt}) {} process.stdout.write(tryBump(${JSON.stringify(sid)}, ${JSON.stringify(tmpPd)}, ${budget}) ? '1' : '0');`;
     const outs = await Promise.all(
       Array.from(
         { length: 30 },
@@ -112,7 +130,16 @@ describe('tryBump', () => {
           }),
       ),
     );
-    assert.equal(outs.filter((o) => o === '1').length, 10);
+    const granted = outs.filter((o) => o === '1').length;
+    assert.ok(
+      granted > 0,
+      'nothing was granted — cannot distinguish this from an always-refusing tryBump',
+    );
+    assert.ok(granted <= budget, `granted ${granted} exceeds budget ${budget}`);
+    // Every grant left its own mark on disk, and nothing else could have:
+    // the only way tryBump returns true and writes is the in-lock branch
+    // below budget, so the on-disk count must equal exactly what was granted.
+    assert.equal(readCount(sid, tmpPd), granted);
   });
   it('degrades to allowing when pluginData or sessionId is unusable', () => {
     assert.equal(tryBump('s', null, 0), true);
@@ -188,6 +215,45 @@ describe('tryBump — lock retry budget', () => {
     const result = tryBump(sid, tmpPd, 10);
     assert.equal(result, true);
     assert.equal(readCount(sid, tmpPd), 1);
+  });
+
+  it('refuses a fetch when a sibling process holds the lock past its retry budget', async () => {
+    const sid = 'lock-timeout';
+    const file = join(tmpPd, 'fetch-budget', `${sid}.count`);
+    mkdirSync(join(tmpPd, 'fetch-budget'), { recursive: true });
+    const flmUrl = new URL('../../plugin/scripts/lib/file-lock.mjs', import.meta.url).href;
+    // 400 retries x 5ms nominal is 2000ms, but each failed attempt also pays
+    // for an openSync + a stale-check readFileSync + a process.kill(pid, 0)
+    // probe, which measured out at ~2480-2500ms wall time in this
+    // environment. The holder must outlast that whole budget, not just the
+    // nominal 2000ms, or it releases mid-retry and this test flakes exactly
+    // the way the old race test did. 4000ms gives >1.5s of margin.
+    const holdMs = 4000;
+    const holderScript = `
+      import { acquireLock, releaseLock } from ${JSON.stringify(flmUrl)};
+      const handle = acquireLock(${JSON.stringify(file)});
+      process.stdout.write('LOCKED\\n');
+      const until = Date.now() + ${holdMs};
+      while (Date.now() < until) {}
+      releaseLock(handle);
+      process.exit(0);
+    `;
+    const holder = spawn(process.execPath, ['--input-type=module', '-e', holderScript]);
+    await new Promise((resolve, reject) => {
+      holder.stdout.once('data', (d) =>
+        String(d).includes('LOCKED') ? resolve() : reject(new Error(String(d))),
+      );
+      holder.once('error', reject);
+    });
+
+    // A lock timeout must fail this fetch closed — never fall through to the
+    // old catch-all `return true` a stuck lock used to trigger — so the
+    // counter this call would have written is never created at all.
+    const result = tryBump(sid, tmpPd, 10);
+    assert.equal(result, false);
+    assert.equal(readCount(sid, tmpPd), 0);
+
+    await new Promise((resolve) => holder.on('close', resolve));
   });
 });
 

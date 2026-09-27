@@ -30,11 +30,28 @@ export function readCount(sessionId, pluginData) {
 
 // Reserve one fetch atomically across processes. Reading the count and writing
 // count + 1 separately let parallel research subagents fetch past the budget.
+//
+// A missing/unwritable data dir still fails open (mkdirSync's own catch) —
+// that's the edge-environment escape hatch the module comment above promises,
+// and it fires before any lock is even attempted: nothing has been enforced,
+// so there is nothing to protect by refusing.
+//
+// Past that point we're inside the enforcement itself, and any failure there
+// — a lock timeout, a lock-file race in file-lock's stale-owner reclaim
+// (unlinkSync loses a race and throws ENOENT), a write failure — leaves us
+// unable to tell whether the budget was actually recorded. The budget is a
+// cap, not a best-effort counter: refusing this one fetch costs a retry,
+// while failing it open risks the cap being exceeded, which is exactly the
+// failure mode the lock exists to prevent.
 export function tryBump(sessionId, pluginData, budget) {
   if (!pluginData || !sessionId || sessionId === 'unknown') return true;
   const file = budgetFile(sessionId, pluginData);
   try {
     mkdirSync(join(pluginData, 'fetch-budget'), { recursive: true });
+  } catch {
+    return true;
+  }
+  try {
     return withLock(file, { retries: 400, retryDelayMs: 5 }, () => {
       const n = readCount(sessionId, pluginData);
       if (n >= budget) return false;
@@ -42,7 +59,7 @@ export function tryBump(sessionId, pluginData, budget) {
       return true;
     });
   } catch {
-    return true;
+    return false;
   }
 }
 
