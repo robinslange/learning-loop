@@ -116,6 +116,9 @@ fn embedding_commands_check_db_before_loading_model() {
     // missing-db diagnostic on stderr and exit non-zero, without first
     // touching the embedding model. Asserting on the diagnostic catches a
     // regression where the model load moves back ahead of open_db().
+    //
+    // A missing db is the user's mistake, not a crash, so every command also
+    // exits 1 with no panic banner. It used to panic with exit 101.
     let tmp = tempfile::tempdir().expect("tempdir");
     let bogus_db = tmp.path().join("missing.db");
     let bogus_db_str = bogus_db.to_str().unwrap();
@@ -123,6 +126,8 @@ fn embedding_commands_check_db_before_loading_model() {
     // Each entry: (args slice) — first arg is the subcommand, remaining are
     // placeholders chosen to satisfy clap's positional parsing.
     let cases: &[&[&str]] = &[
+        &["query", bogus_db_str, "a query"],
+        &["index-status", bogus_db_str, "/some/vault"],
         &["similar", bogus_db_str, "some/note.md"],
         &["cluster", bogus_db_str],
         &["discriminate", bogus_db_str, "a.md", "b.md"],
@@ -141,9 +146,15 @@ fn embedding_commands_check_db_before_loading_model() {
             .expect("spawn ll-search");
 
         let stderr = String::from_utf8_lossy(&out.stderr);
+        assert_eq!(
+            out.status.code(),
+            Some(1),
+            "{} should exit 1 on missing db; stderr: {stderr}",
+            args[0],
+        );
         assert!(
-            !out.status.success(),
-            "{} should exit non-zero on missing db; stderr: {stderr}",
+            !stderr.contains("panicked at"),
+            "{} should report a missing db, not panic; stderr: {stderr}",
             args[0],
         );
         assert!(
