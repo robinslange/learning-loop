@@ -336,8 +336,8 @@ fn parse_model(s: &str) -> anyhow::Result<ll_search::model::KnownModel> {
     }
 }
 
-fn init_embedding() {
-    ll_search::embed::init_provider(&ll_search::model::KnownModel::BgeSmallEnV15);
+fn init_embedding() -> anyhow::Result<()> {
+    ll_search::embed::init_provider(&ll_search::model::KnownModel::BgeSmallEnV15)
 }
 
 fn out<T: serde::Serialize>(data: &T) -> anyhow::Result<()> {
@@ -668,7 +668,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             println!("{}", env!("CARGO_PKG_VERSION"));
         }
         Commands::Index { vault_path, db_path, force, sync, config_dir, .. } => {
-            init_embedding();
+            init_embedding()?;
             let conn = ll_search::db::open_or_create_db(&db_path).context("failed to open database")?;
             let result = ll_search::db::reindex(&conn, &vault_path, force).context("reindex failed")?;
             out(&result)?;
@@ -690,7 +690,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         }
         Commands::Query { db_path, text, top, config_dir, vault_path, all, recency, after, before, session, project, threshold } => {
             let conn = open_db(&db_path)?;
-            init_embedding();
+            init_embedding()?;
             let app = build_app_state(&db_path, config_dir.clone())?;
             let ctx = app.ensure_search_context(&conn);
             let temporal = ll_search::search::TemporalParams {
@@ -702,49 +702,49 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             };
             let peers = resolve_peers(&conn, config_dir, vault_path, all)?;
             let results = if peers.is_empty() {
-                ll_search::search::hybrid_query_with_ctx(&ctx, &conn, &text, top, &temporal)
+                ll_search::search::hybrid_query_with_ctx(&ctx, &conn, &text, top, &temporal)?
             } else {
-                ll_search::search::hybrid_query_federated_with_ctx(&ctx, &conn, &text, top, &peers, &temporal)
+                ll_search::search::hybrid_query_federated_with_ctx(&ctx, &conn, &text, top, &peers, &temporal)?
             };
             let response = ll_search::search::build_query_response(text, results, &conn, threshold);
             out(&response)?;
         }
         Commands::Similar { db_path, note_path, top } => {
             let conn = open_db(&db_path)?;
-            init_embedding();
+            init_embedding()?;
             let store = ll_search::search::store::load_store(&conn);
             let results = ll_search::search::similar_notes(&conn, &note_path, top, &store);
             out(&results)?;
         }
         Commands::Cluster { db_path, threshold } => {
             let conn = open_db(&db_path)?;
-            init_embedding();
+            init_embedding()?;
             let store = ll_search::search::store::load_store(&conn);
             let results = ll_search::search::cluster_notes(&conn, threshold, &store);
             out(&results)?;
         }
         Commands::Discriminate { db_path, threshold, paths } => {
             let conn = open_db(&db_path)?;
-            init_embedding();
+            init_embedding()?;
             let store = ll_search::search::store::load_store(&conn);
             let results = ll_search::search::discriminate_pairs(&conn, &paths, threshold, &store);
             out(&results)?;
         }
         Commands::ReflectScan { db_path, queries, top, candidates, threshold, config_dir } => {
             let conn = open_db(&db_path)?;
-            init_embedding();
+            init_embedding()?;
             let store = ll_search::search::store::load_store(&conn);
             let peers = resolve_peers(&conn, config_dir, None, false)?;
             let result = if peers.is_empty() {
-                ll_search::search::reflect_scan(&conn, &queries, top, candidates, threshold, &store)
+                ll_search::search::reflect_scan(&conn, &queries, top, candidates, threshold, &store)?
             } else {
-                ll_search::search::reflect_scan_federated(&conn, &queries, top, candidates, threshold, &peers, &store)
+                ll_search::search::reflect_scan_federated(&conn, &queries, top, candidates, threshold, &peers, &store)?
             };
             out(&result)?;
         }
         Commands::Embed { text } => {
-            init_embedding();
-            let vec = ll_search::embed::embed_query(&text);
+            init_embedding()?;
+            let vec = ll_search::embed::embed_query(&text)?;
             out(&vec)?;
         }
         Commands::Status { config_dir } => {
@@ -821,7 +821,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
                 config.hub.endpoint = endpoint;
             }
             config.validate().context("invalid federation config")?;
-            init_embedding();
+            init_embedding()?;
             let result = ll_search::sync::client::sync_all_async(
                 std::path::Path::new(&db_path),
                 std::path::Path::new(&vault_path),
@@ -903,14 +903,14 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         }
         Commands::Rerank { db_path, query, top, candidates, config_dir } => {
             let conn = open_db(&db_path)?;
-            init_embedding();
+            init_embedding()?;
             let store = ll_search::search::store::load_store(&conn);
             let peers = resolve_peers(&conn, config_dir, None, false)?;
-            let scored = ll_search::rerank::run(&conn, &peers, &query, top, candidates, &store);
+            let scored = ll_search::rerank::run(&conn, &peers, &query, top, candidates, &store)?;
             out(&scored)?;
         }
         Commands::Watch { vault_path, db_path, sync_interval, config_dir, pid_file, librarian_script } => {
-            init_embedding();
+            init_embedding()?;
             let config_dir = ll_search::sync::config::resolve_config_dir_opt(config_dir);
             let pid_file = pid_file
                 .map(std::path::PathBuf::from)
@@ -945,32 +945,32 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         }
         Commands::EvalPrf { db_path, min_links } => {
             let conn = open_db(&db_path)?;
-            init_embedding();
+            init_embedding()?;
             let store = ll_search::search::store::load_store(&conn);
-            let result = ll_search::search::eval_prf(&conn, &store, min_links);
+            let result = ll_search::search::eval_prf(&conn, &store, min_links)?;
             out(&result)?;
         }
         Commands::EvalFunnel { db_path, min_links, limit } => {
             let conn = open_db(&db_path)?;
-            init_embedding();
+            init_embedding()?;
             let store = ll_search::search::store::load_store(&conn);
-            let result = ll_search::search::eval_funnel(&conn, &store, min_links, limit);
+            let result = ll_search::search::eval_funnel(&conn, &store, min_links, limit)?;
             out(&result)?;
         }
         Commands::LaneDiag { db_path, probes } => {
             let conn = open_db(&db_path)?;
-            init_embedding();
+            init_embedding()?;
             let raw = std::fs::read_to_string(&probes)
                 .with_context(|| format!("failed to read probes from {probes}"))?;
             let triples: Vec<(String, String, String)> =
                 serde_json::from_str(&raw).context("failed to parse probes")?;
-            out(&ll_search::search::lane_diagnostics(&conn, &triples))?;
+            out(&ll_search::search::lane_diagnostics(&conn, &triples)?)?;
         }
         Commands::TuneWeights { db_path, min_links, limit } => {
             let conn = open_db(&db_path)?;
-            init_embedding();
+            init_embedding()?;
             let store = ll_search::search::store::load_store(&conn);
-            let results = ll_search::search::tune_weights(&conn, &store, min_links, limit);
+            let results = ll_search::search::tune_weights(&conn, &store, min_links, limit)?;
             println!("{:>6} {:>6} {:>6}   {:>9} {:>9}", "vec", "ppr", "tag", "train", "holdout");
             for (w, train, hold) in results.iter() {
                 println!("{:>6.2} {:>6.2} {:>6.2}   {:>9.4} {:>9.4}", w.vec, w.ppr, w.tag, train, hold);
@@ -990,9 +990,9 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         }
         Commands::TunePrf { db_path, queries } => {
             let conn = open_db(&db_path)?;
-            init_embedding();
+            init_embedding()?;
             let store = ll_search::search::store::load_store(&conn);
-            let result = ll_search::search::tune_prf(&conn, &queries, &store);
+            let result = ll_search::search::tune_prf(&conn, &queries, &store)?;
             out(&result)?;
         }
 

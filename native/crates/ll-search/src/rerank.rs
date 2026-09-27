@@ -9,7 +9,8 @@ use crate::search::{
 
 /// Run the rerank pipeline: hybrid query for `candidates`, batch-load bodies
 /// across peers, score with the cross-encoder, return the top `top` scored
-/// results. Failures are logged to stderr but do not abort the pipeline.
+/// results. A document that fails to score is logged to stderr and skipped; a
+/// query that cannot be embedded is an error.
 pub fn run(
     conn: &Connection,
     peers: &[(String, Connection)],
@@ -17,9 +18,9 @@ pub fn run(
     top: usize,
     candidates: usize,
     store: &EmbeddingStore,
-) -> Vec<RerankResult> {
+) -> anyhow::Result<Vec<RerankResult>> {
     let candidate_results = if peers.is_empty() {
-        hybrid_query(conn, query, candidates, &TemporalParams::default(), store)
+        hybrid_query(conn, query, candidates, &TemporalParams::default(), store)?
     } else {
         hybrid_query_federated(
             conn,
@@ -28,10 +29,10 @@ pub fn run(
             peers,
             &TemporalParams::default(),
             store,
-        )
+        )?
     };
     if candidate_results.is_empty() {
-        return Vec::new();
+        return Ok(Vec::new());
     }
     let paths: Vec<String> = candidate_results.iter().map(|r| r.path.clone()).collect();
     let bodies = batch_load_bodies_federated(conn, peers, &paths);
@@ -52,5 +53,5 @@ pub fn run(
             report.failed[0].reason,
         );
     }
-    report.scored
+    Ok(report.scored)
 }

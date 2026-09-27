@@ -35,7 +35,7 @@ pub fn reflect_scan(
     candidates_n: usize,
     discriminate_threshold: f32,
     store: &EmbeddingStore,
-) -> ReflectScanResult {
+) -> anyhow::Result<ReflectScanResult> {
     let ctx = SearchContext::build(conn);
     let all_embeddings = ctx.store.all();
 
@@ -43,7 +43,7 @@ pub fn reflect_scan(
     let mut per_query: Vec<(String, Vec<f32>, Vec<SearchResult>)> = Vec::new();
 
     for query_text in queries {
-        let query_vec = embed_query(query_text);
+        let query_vec = embed_query(query_text)?;
         let rrf = ctx.local_rrf_scores(conn, &query_vec, query_text);
 
         let candidate_results: Vec<SearchResult> = finalize_rrf(rrf, candidates_n)
@@ -123,10 +123,10 @@ pub fn reflect_scan(
     all_result_paths.dedup();
     let confusable_pairs = discriminate_pairs(conn, &all_result_paths, discriminate_threshold, store);
 
-    ReflectScanResult {
+    Ok(ReflectScanResult {
         queries: query_results,
         confusable_pairs,
-    }
+    })
 }
 
 pub fn reflect_scan_federated(
@@ -137,7 +137,7 @@ pub fn reflect_scan_federated(
     discriminate_threshold: f32,
     peers: &[(String, Connection)],
     store: &EmbeddingStore,
-) -> ReflectScanResult {
+) -> anyhow::Result<ReflectScanResult> {
     let ctx = SearchContext::build(conn);
     let all_embeddings = ctx.store.all();
 
@@ -174,7 +174,7 @@ pub fn reflect_scan_federated(
     let mut per_query: Vec<(String, Vec<f32>, Vec<SearchResult>)> = Vec::new();
 
     for query_text in queries {
-        let query_vec = embed_query(query_text);
+        let query_vec = embed_query(query_text)?;
         let mut rrf = ctx.local_rrf_scores(conn, &query_vec, query_text);
 
         for (peer_id, peer_conn) in peers {
@@ -287,8 +287,8 @@ pub fn reflect_scan_federated(
     local_deduped.dedup();
     let confusable_pairs = discriminate_pairs(conn, &local_deduped, discriminate_threshold, store);
 
-    ReflectScanResult {
+    Ok(ReflectScanResult {
         queries: query_results,
         confusable_pairs,
-    }
+    })
 }

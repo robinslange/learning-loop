@@ -534,7 +534,7 @@ fn ensure_embeddings(db_path: &Path, vault_id: &str) -> anyhow::Result<()> {
 
     for chunk in notes.chunks(batch_size) {
         let texts: Vec<String> = chunk.iter().map(|(_, body)| body.clone()).collect();
-        let vecs = crate::embed::try_embed_documents(&texts)?;
+        let vecs = crate::embed::embed_documents(&texts)?;
 
         conn.execute_batch("BEGIN TRANSACTION;")?;
         for ((id, _), vec) in chunk.iter().zip(vecs.iter()) {

@@ -119,9 +119,9 @@ pub(crate) fn local_rrf_scores(
     rrf_scores
 }
 
-pub fn hybrid_query(conn: &Connection, query_text: &str, top_n: usize, temporal: &TemporalParams, store: &EmbeddingStore) -> Vec<SearchResult> {
-    let query_vec = embed_query(query_text);
-    hybrid_query_inner(conn, &query_vec, query_text, top_n, temporal, store)
+pub fn hybrid_query(conn: &Connection, query_text: &str, top_n: usize, temporal: &TemporalParams, store: &EmbeddingStore) -> anyhow::Result<Vec<SearchResult>> {
+    let query_vec = embed_query(query_text)?;
+    Ok(hybrid_query_inner(conn, &query_vec, query_text, top_n, temporal, store))
 }
 
 pub(crate) fn hybrid_query_inner(
@@ -143,9 +143,9 @@ pub fn hybrid_query_with_ctx(
     query_text: &str,
     top_n: usize,
     temporal: &TemporalParams,
-) -> Vec<SearchResult> {
-    let query_vec = embed_query(query_text);
-    hybrid_query_with_ctx_inner(ctx, conn, &query_vec, query_text, top_n, temporal)
+) -> anyhow::Result<Vec<SearchResult>> {
+    let query_vec = embed_query(query_text)?;
+    Ok(hybrid_query_with_ctx_inner(ctx, conn, &query_vec, query_text, top_n, temporal))
 }
 
 pub(crate) fn hybrid_query_with_ctx_inner(
@@ -180,9 +180,9 @@ pub fn hybrid_query_federated(
     peers: &[(String, Connection)],
     temporal: &TemporalParams,
     store: &EmbeddingStore,
-) -> Vec<SearchResult> {
-    let query_vec = embed_query(query_text);
-    hybrid_query_federated_inner(conn, &query_vec, query_text, top_n, peers, temporal, store)
+) -> anyhow::Result<Vec<SearchResult>> {
+    let query_vec = embed_query(query_text)?;
+    Ok(hybrid_query_federated_inner(conn, &query_vec, query_text, top_n, peers, temporal, store))
 }
 
 pub fn hybrid_query_federated_with_ctx(
@@ -192,9 +192,9 @@ pub fn hybrid_query_federated_with_ctx(
     top_n: usize,
     peers: &[(String, Connection)],
     temporal: &TemporalParams,
-) -> Vec<SearchResult> {
-    let query_vec = embed_query(query_text);
-    hybrid_query_federated_with_ctx_inner(ctx, conn, &query_vec, query_text, top_n, peers, temporal)
+) -> anyhow::Result<Vec<SearchResult>> {
+    let query_vec = embed_query(query_text)?;
+    Ok(hybrid_query_federated_with_ctx_inner(ctx, conn, &query_vec, query_text, top_n, peers, temporal))
 }
 
 pub(crate) fn hybrid_query_federated_with_ctx_inner(

@@ -55,7 +55,7 @@ fn bench_real_onnx(c: &mut Criterion) {
 
     c.bench_function("real_onnx", |b| {
         b.iter(|| {
-            let embedded = ll_search::embed::embed_documents(&texts);
+            let embedded = ll_search::embed::embed_documents(&texts).expect("embed_documents");
             embedded.len()
         });
     });

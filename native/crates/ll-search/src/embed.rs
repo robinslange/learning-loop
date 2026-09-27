@@ -1,26 +1,27 @@
 use std::sync::OnceLock;
 
+use anyhow::Context as _;
+
 use crate::model::{EmbeddingProvider, KnownModel};
 use crate::model::loader;
 
 static PROVIDER: OnceLock<Box<dyn EmbeddingProvider>> = OnceLock::new();
 
-pub fn init_provider(model: &KnownModel) {
+pub fn init_provider(model: &KnownModel) -> anyhow::Result<()> {
     if let Some(existing) = PROVIDER.get() {
         let requested = model.config().model_id;
         let active = existing.model_id();
-        if active != requested {
-            panic!(
-                "embedding provider already initialized with '{}', cannot switch to '{}'",
-                active, requested
-            );
-        }
-        return;
+        anyhow::ensure!(
+            active == requested,
+            "embedding provider already initialized with '{active}', cannot switch to '{requested}'"
+        );
+        return Ok(());
     }
-    PROVIDER.get_or_init(|| {
-        loader::load_provider(model)
-            .expect("failed to load embedding model")
-    });
+    let loaded = loader::load_provider(model).context("failed to load embedding model")?;
+    // A concurrent init that won the race loaded the same model, so losing
+    // it costs a second load and nothing else.
+    let _ = PROVIDER.set(loaded);
+    Ok(())
 }
 
 fn provider() -> &'static dyn EmbeddingProvider {
@@ -37,28 +38,30 @@ pub fn model_id() -> &'static str {
     provider().model_id()
 }
 
-pub fn embed_query(text: &str) -> Vec<f32> {
-    provider().embed_query(text).expect("embed_query failed")
-}
-
-pub fn embed_documents(texts: &[String]) -> Vec<Vec<f32>> {
-    provider().embed_documents(texts).expect("embed_documents failed")
-}
-
 pub fn try_provider() -> Option<&'static dyn EmbeddingProvider> {
     PROVIDER.get().map(|b| b.as_ref())
 }
 
-pub fn try_embed_query(text: &str) -> anyhow::Result<Vec<f32>> {
-    try_provider()
-        .ok_or_else(|| anyhow::anyhow!("embedding provider not initialized"))?
-        .embed_query(text)
-        .map_err(|e| anyhow::anyhow!("embed_query: {e}"))
+fn initialized() -> anyhow::Result<&'static dyn EmbeddingProvider> {
+    try_provider().context("embedding provider not initialized -- call init_provider first")
 }
 
-pub fn try_embed_documents(texts: &[String]) -> anyhow::Result<Vec<Vec<f32>>> {
-    try_provider()
-        .ok_or_else(|| anyhow::anyhow!("embedding provider not initialized"))?
-        .embed_documents(texts)
-        .map_err(|e| anyhow::anyhow!("embed_documents: {e}"))
+pub fn embed_query(text: &str) -> anyhow::Result<Vec<f32>> {
+    initialized()?.embed_query(text).context("embed_query failed")
+}
+
+pub fn embed_documents(texts: &[String]) -> anyhow::Result<Vec<Vec<f32>>> {
+    initialized()?.embed_documents(texts).context("embed_documents failed")
+}
+
+#[cfg(test)]
+mod tests {
+    // No lib test initialises the process-wide provider, so these calls reach
+    // the uninitialised branch.
+    #[test]
+    fn embedding_before_init_is_an_error_not_a_panic() {
+        let err = super::embed_query("q").expect_err("no provider, so no embedding");
+        assert!(format!("{err:#}").contains("not initialized"), "{err:#}");
+        assert!(super::embed_documents(&["d".to_string()]).is_err());
+    }
 }

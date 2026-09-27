@@ -245,20 +245,20 @@ fn run_duplicate_scan(
     // Lazy, idempotent: the embedding provider is a global OnceLock, so the
     // first scan pays the load cost and subsequent scans reuse it. init is a
     // no-op when already initialised with the same model.
-    crate::embed::init_provider(&crate::model::KnownModel::BgeSmallEnV15);
+    crate::embed::init_provider(&crate::model::KnownModel::BgeSmallEnV15)?;
 
     let db_str = db_path.to_string_lossy();
     let conn = crate::db::open_db(&db_str)
         .map_err(|e| anyhow::anyhow!("open index {}: {e:#}", db_path.display()))?;
     let store = crate::search::load_store(&conn);
-    Ok(crate::search::reflect_scan(
+    crate::search::reflect_scan(
         &conn,
         &req.queries,
         req.top,
         req.candidates,
         DUPLICATE_SCAN_DISCRIMINATE_THRESHOLD,
         &store,
-    ))
+    )
 }
 
 const PROTOCOL_SCHEMA_VERSION: u32 = 1;
