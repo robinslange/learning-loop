@@ -13,6 +13,7 @@ import {
   structured,
   unstructured,
 } from './helpers/ollama-mock.mjs';
+import { countRequests } from './helpers/msw.mjs';
 
 const runId = randomBytes(4).toString('hex');
 const TEMP_ROOT = join(tmpdir(), 'll-tools-tag-' + runId);
@@ -34,7 +35,7 @@ function readQueue() {
 describe('librarian-tools-tag', () => {
   const server = startOllamaMock();
   let tagCheck, submitTagSuggestion;
-  let calls;
+  let requests;
 
   before(async () => {
     mkdirSync(LIB_DIR, { recursive: true });
@@ -56,11 +57,7 @@ describe('librarian-tools-tag', () => {
       sp,
       JSON.stringify({ visited: [], notes_visited: 0, tag_suggestions: 0, counters: {} }) + '\n',
     );
-    calls = 0;
-    server.events.removeAllListeners();
-    server.events.on('request:start', () => {
-      calls += 1;
-    });
+    requests = countRequests();
   });
 
   it('submitTagSuggestion enqueues a tag_suggestion item', async () => {
@@ -114,13 +111,13 @@ describe('librarian-tools-tag', () => {
 
   it('tagCheck skips when body is empty', async () => {
     await tagCheck('0-inbox/foo.md', { bodyOverride: '', vocabularyOverride: VOCAB });
-    assert.equal(calls, 0, 'an empty body must not reach ollama');
+    assert.equal(requests(), 0, 'an empty body must not reach ollama');
     assert.equal(readQueue().length, 0);
   });
 
   it('tagCheck skips when vocabulary is empty', async () => {
     await tagCheck('0-inbox/foo.md', { bodyOverride: 'Body.', vocabularyOverride: [] });
-    assert.equal(calls, 0, 'an empty vocabulary must not reach ollama');
+    assert.equal(requests(), 0, 'an empty vocabulary must not reach ollama');
     assert.equal(readQueue().length, 0);
   });
 

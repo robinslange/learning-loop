@@ -19,14 +19,14 @@ const server = startMockNetwork();
 
 describe('sources/http SSRF guard', () => {
   it('refuses a loopback URL without touching the network', async () => {
-    const requests = countRequests(server);
+    const requests = countRequests();
     server.use(http.get('http://127.0.0.1:8080/secret', () => HttpResponse.json({ leaked: true })));
     assert.equal(await fetchJSON('http://127.0.0.1:8080/secret'), null);
     assert.equal(requests(), 0);
   });
 
   it('refuses the cloud metadata address', async () => {
-    const requests = countRequests(server);
+    const requests = countRequests();
     server.use(
       http.get('http://169.254.169.254/latest/meta-data/', () =>
         HttpResponse.json({ leaked: true }),
@@ -37,7 +37,7 @@ describe('sources/http SSRF guard', () => {
   });
 
   it('refuses a non-http scheme', async () => {
-    const requests = countRequests(server);
+    const requests = countRequests();
     assert.equal(await fetchXML('file:///etc/passwd'), null);
     assert.equal(requests(), 0);
   });
@@ -46,7 +46,7 @@ describe('sources/http SSRF guard', () => {
     // The loopback hop has a handler that would serve a body: the assertion is
     // that the guard stops the request, not that the address happens to be
     // unreachable from a test runner.
-    const requests = countRequests(server);
+    const requests = countRequests();
     server.use(
       http.get(CROSSREF, () => redirectTo('http://127.0.0.1:9000/pwned')),
       http.get('http://127.0.0.1:9000/pwned', () => HttpResponse.json({ leaked: true })),

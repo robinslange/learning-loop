@@ -11,6 +11,7 @@ import {
   structured,
   unstructured,
 } from './helpers/ollama-mock.mjs';
+import { countRequests } from './helpers/msw.mjs';
 
 const runId = randomBytes(4).toString('hex');
 const TEMP_ROOT = join(tmpdir(), `ll-dup-classifier-${runId}`);
@@ -62,7 +63,7 @@ function resetState() {
 
 describe('duplicate classifier structured-output flag', () => {
   const server = startOllamaMock();
-  let calls;
+  let requests;
 
   before(() => {
     mkdirSync(join(TEMP_VAULT, '3-permanent'), { recursive: true });
@@ -82,11 +83,7 @@ describe('duplicate classifier structured-output flag', () => {
   });
 
   beforeEach(() => {
-    calls = 0;
-    server.events.removeAllListeners();
-    server.events.on('request:start', () => {
-      calls += 1;
-    });
+    requests = countRequests();
   });
 
   after(() => {
@@ -227,7 +224,7 @@ describe('duplicate classifier structured-output flag', () => {
     const mod = await import(`../plugin/scripts/librarian.mjs?bust=dup-noneigh-${runId}`);
     await mod.__test__.duplicateCheck(TARGET, { neighboursOverride: [] });
 
-    assert.equal(calls, 0, 'a note with no neighbours must not reach ollama');
+    assert.equal(requests(), 0, 'a note with no neighbours must not reach ollama');
     assert.equal(readQueue().length, 0);
   });
 });

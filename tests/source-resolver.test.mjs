@@ -4,7 +4,13 @@ import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomBytes } from 'node:crypto';
-import { HttpResponse, countRequests, http, startMockNetwork } from './helpers/msw.mjs';
+import {
+  HttpResponse,
+  countRequests,
+  http,
+  lazyResponse,
+  startMockNetwork,
+} from './helpers/msw.mjs';
 
 const server = startMockNetwork();
 
@@ -42,7 +48,7 @@ describe('source-resolver check-claims', () => {
   });
 
   it('check-claims fetches page text for non-academic URL and matches numeric claim', async () => {
-    const requests = countRequests(server);
+    const requests = countRequests();
     server.use(
       http.get('https://example.com/article', () =>
         HttpResponse.html(
@@ -78,7 +84,7 @@ describe('source-resolver check-claims', () => {
   });
 
   it('check-claims skips WEB_FETCH_BLOCKLIST domains without fetching', async () => {
-    const requests = countRequests(server);
+    const requests = countRequests();
     server.use(
       http.get('https://www.sciencedirect.com/*', () => HttpResponse.html('<html>blocked</html>')),
     );
@@ -109,7 +115,7 @@ describe('source-resolver check-claims', () => {
   });
 
   it('check-claims returns [] when note has no quantitative numbers', async () => {
-    const requests = countRequests(server);
+    const requests = countRequests();
     server.use(
       http.get('https://example.com/article', () => HttpResponse.html('<html>page</html>')),
     );
@@ -182,23 +188,11 @@ describe('fetchPageText error surfacing', () => {
   });
 
   it('rejects an oversized body by content-length without buffering it', async () => {
-    // MSW reads every mocked body itself to emit its response events, so "was
-    // the stream pulled" cannot be observed through it. A real Response with a
-    // lazy stream can: highWaterMark 0 means nothing pulls until a reader does.
-    let bodyRead = false;
-    const body = new ReadableStream(
-      {
-        pull(c) {
-          bodyRead = true;
-          c.enqueue(new TextEncoder().encode('never reached'));
-          c.close();
-        },
-      },
-      { highWaterMark: 0 },
-    );
+    // fetchPageText has no fetch seam, so the lazy Response goes in through
+    // globalThis.fetch for this one case.
+    const { response, bodyRead } = lazyResponse({ 'content-length': String(64 * 1024 * 1024) });
     const inner = globalThis.fetch;
-    globalThis.fetch = async () =>
-      new Response(body, { headers: { 'content-length': String(64 * 1024 * 1024) } });
+    globalThis.fetch = async () => response;
     try {
       const { __test__ } = await import(
         `../plugin/scripts/source-resolver.mjs?bust=${randomBytes(4).toString('hex')}`
@@ -206,7 +200,7 @@ describe('fetchPageText error surfacing', () => {
       const result = await __test__.fetchPageText('https://example.com/big');
       assert.equal(result.ok, false);
       assert.equal(result.kind, 'too_large');
-      assert.equal(bodyRead, false, 'the body must be rejected before it is buffered');
+      assert.equal(bodyRead(), false, 'the body must be rejected before it is buffered');
     } finally {
       globalThis.fetch = inner;
     }

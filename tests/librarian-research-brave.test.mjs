@@ -56,7 +56,7 @@ describe('brave search client', () => {
     // supplied" and falls through to the keychain, so on a machine that has a
     // Brave key the old version of this test issued a real request to the live
     // API and passed only because `search` swallows every failure.
-    const requests = countRequests(server);
+    const requests = countRequests();
     const out = await search('x', { apiKey: '' });
     assert.deepEqual(out, []);
     assert.equal(requests(), 0, 'a missing key must not reach the network');
