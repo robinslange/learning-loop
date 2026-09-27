@@ -19,6 +19,9 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$SCRIPT_DIR"
 cd "$ROOT"
 
+readonly LL_PLUGIN="learning-loop"
+readonly LL_MARKETPLACE="learning-loop-marketplace"
+
 BUMP="${1:-}"
 DRY_RUN=false
 NO_PUSH=false
@@ -212,5 +215,5 @@ fi
 
 echo ""
 echo "To update the installed plugin:"
-echo "  /plugin marketplace update learning-loop-marketplace"
-echo "  /plugin install learning-loop@learning-loop-marketplace"
+echo "  /plugin marketplace update ${LL_MARKETPLACE}"
+echo "  /plugin install ${LL_PLUGIN}@${LL_MARKETPLACE}"

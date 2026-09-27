@@ -27,6 +27,8 @@ if [ -z "${LL_INSTALL_LOADED:-}" ]; then
   readonly CLAUDE_SESSION_VAR="CLAUDECODE"
   readonly MARKER_PREFIX="learning-loop-install: PATH"
   readonly MARKER_TAG="${MARKER_PREFIX} v1"
+  readonly LL_PLUGIN="learning-loop"
+  readonly LL_MARKETPLACE="learning-loop-marketplace"
 
   readonly C_DIM="$(printf '\033[2m')"
   readonly C_GREEN="$(printf '\033[32m')"
@@ -154,7 +156,7 @@ detect_platform() {
       echo "This installer is bash, so it covers: macOS (Apple Silicon arm64), Linux (x86_64), WSL (x86_64)."
       echo "Native Windows x64 is supported by the plugin itself — install it manually:"
       echo "  claude plugin marketplace add robinslange/learning-loop"
-      echo "  claude plugin install learning-loop@learning-loop-marketplace"
+      echo "  claude plugin install ${LL_PLUGIN}@${LL_MARKETPLACE}"
       echo "See guide/cross-platform.md for per-platform status."
       exit 1
       ;;
@@ -416,7 +418,7 @@ install_plugins() {
   step_start "Installing plugins"
   local p name added=0
   local installed_versions=()
-  for p in "episodic-memory@superpowers-marketplace" "learning-loop@learning-loop-marketplace"; do
+  for p in "episodic-memory@superpowers-marketplace" "${LL_PLUGIN}@${LL_MARKETPLACE}"; do
     name="${p%%@*}"
     local log_size_before
     log_size_before=$(wc -c <"$LOG_FILE" 2>/dev/null || echo 0)
@@ -463,8 +465,8 @@ find_codex_generator() {
   # file sits four levels down. maxdepth must clear that or find silently
   # matches nothing and Codex setup no-ops while reporting a locate failure.
   local base
-  for base in "$HOME/.claude/plugins/cache/learning-loop-marketplace/learning-loop" \
-    "$HOME/.codex/plugins/cache/learning-loop-marketplace/learning-loop"; do
+  for base in "$HOME/.claude/plugins/cache/${LL_MARKETPLACE}/${LL_PLUGIN}" \
+    "$HOME/.codex/plugins/cache/${LL_MARKETPLACE}/${LL_PLUGIN}"; do
     [ -d "$base" ] || continue
     local found
     found=$(find "$base" -maxdepth 4 -path "*/$rel" 2>/dev/null | sort -V | tail -1)
