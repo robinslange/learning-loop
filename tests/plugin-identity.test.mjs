@@ -7,6 +7,13 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { renderShim } from '../plugin/scripts/lib/shims.mjs';
 import { SHIM_NAMES } from '../plugin/scripts/lib/paths.mjs';
+import {
+  PLUGIN_NAME,
+  MARKETPLACE_NAME,
+  INSTALL_KEY,
+  DATA_DIR_NAME,
+  cacheRoot,
+} from '../plugin/scripts/lib/plugin-meta.mjs';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const readJson = (p) => JSON.parse(readFileSync(join(ROOT, p), 'utf8'));
@@ -74,6 +81,25 @@ describe('manifest parity', () => {
     assert.deepEqual(
       market.plugins.map((p) => p.name),
       [claude.name],
+    );
+  });
+});
+
+describe('identity constants', () => {
+  test('are pinned to the manifests', () => {
+    assert.equal(PLUGIN_NAME, claude.name);
+    assert.equal(MARKETPLACE_NAME, market.name);
+    assert.equal(INSTALL_KEY, `${claude.name}@${market.name}`);
+  });
+
+  test('DATA_DIR_NAME is the folder Claude Code creates for this install', () => {
+    assert.equal(DATA_DIR_NAME, 'learning-loop-learning-loop-marketplace');
+  });
+
+  test('cacheRoot is <home>/<dot>/plugins/cache/<marketplace>/<plugin>', () => {
+    assert.equal(
+      cacheRoot('/h', '.codex'),
+      join('/h', '.codex', 'plugins', 'cache', 'learning-loop-marketplace', 'learning-loop'),
     );
   });
 });
