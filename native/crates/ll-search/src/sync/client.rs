@@ -1938,6 +1938,12 @@ mod tests {
     /// Neither repo can see the other, so the value IS the contract: a change
     /// to either implementation fails its own side rather than silently
     /// breaking the wire while both halves still compile.
+    ///
+    /// This pins one hash. The rest of the wire -- frame field order,
+    /// endianness, header width, hash position -- is pinned the same way by
+    /// the shared fixture both repos vendor: see
+    /// `tests/chunked_wire_fixture.rs` and
+    /// `tests/fixtures/chunked-upload-v3.wire`.
     #[test]
     fn manifest_root_is_a_flat_sha256_of_chunk_hashes() {
         let h0: [u8; 32] = Sha256::digest(b"chunk-zero").into();
