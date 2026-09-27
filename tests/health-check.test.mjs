@@ -107,6 +107,7 @@ test('checker binds id, name and severity once for both outcomes', () => {
     detail: 'directory missing',
     fix: 'Run /learning-loop:init',
   });
+  assert.strictEqual(c.fail('no fix given').fix, null, 'every result keeps the six-field shape');
 });
 
 test('checkOfflineMode: ok status, ON detail when offline', () => {
