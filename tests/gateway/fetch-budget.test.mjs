@@ -25,7 +25,9 @@ function claimInChild(sid, pd, budget) {
     let out = '';
     child.stdout.on('data', (d) => (out += d));
     child.on('error', reject);
-    child.on('exit', (status) =>
+    // 'close', not 'exit': exit can fire before stdout drains, and an unread
+    // 'true' reads as a refused claim.
+    child.on('close', (status) =>
       status === 0 ? resolve(out === 'true') : reject(new Error(`child exited ${status}`)),
     );
   });
