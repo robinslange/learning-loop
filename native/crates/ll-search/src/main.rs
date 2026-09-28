@@ -108,6 +108,7 @@ enum Commands {
         db_path: String,
         context: Option<String>,
     },
+    #[cfg(feature = "research")]
     Sessions {
         db_path: String,
         #[arg(long, default_value_t = 2, help = "Minimum notes per session")]
@@ -197,6 +198,7 @@ enum Commands {
         #[arg(long)]
         librarian_script: Option<String>,
     },
+    #[cfg(feature = "research")]
     Migrate {
         db_path: String,
         #[arg(long)]
@@ -204,6 +206,7 @@ enum Commands {
         #[arg(long)]
         drop_old: bool,
     },
+    #[cfg(feature = "research")]
     Benchmark {
         db_path: String,
         #[arg(long)]
@@ -212,20 +215,24 @@ enum Commands {
         model_b: String,
         queries: Vec<String>,
     },
+    #[cfg(feature = "research")]
     TunePrf {
         db_path: String,
         queries: Vec<String>,
     },
+    #[cfg(feature = "research")]
     EvalPrf {
         db_path: String,
         #[arg(long, default_value_t = 2)]
         min_links: usize,
     },
+    #[cfg(feature = "research")]
     LaneDiag {
         db_path: String,
         /// JSON array of [set, gold_path, query_text] triples.
         probes: String,
     },
+    #[cfg(feature = "research")]
     TuneWeights {
         db_path: String,
         #[arg(long, default_value_t = 2)]
@@ -329,6 +336,7 @@ enum VaultCommand {
     },
 }
 
+#[cfg(feature = "research")]
 fn parse_model(s: &str) -> anyhow::Result<ll_search::model::KnownModel> {
     match s {
         "bge-small" | "bge" | "bge-small-en-v1.5" => Ok(ll_search::model::KnownModel::BgeSmallEnV15),
@@ -756,6 +764,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
                 None => out(&ll_search::db::list_intentions_summary(&conn))?,
             }
         }
+        #[cfg(feature = "research")]
         Commands::Sessions { db_path, min_notes } => {
             let conn = ll_search::db::open_db(&db_path)?;
             let sessions = ll_search::db::list_sessions(&conn, min_notes);
@@ -917,6 +926,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             };
             ll_search::sync::watch::run_watch_async(cfg).await.context("watch failed")?;
         }
+        #[cfg(feature = "research")]
         Commands::Migrate { db_path, model, drop_old } => {
             let conn = ll_search::db::open_db(&db_path)?;
             if drop_old {
@@ -930,6 +940,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
                 out(&result)?;
             }
         }
+        #[cfg(feature = "research")]
         Commands::EvalPrf { db_path, min_links } => {
             let conn = ll_search::db::open_db(&db_path)?;
             init_embedding()?;
@@ -942,6 +953,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             let result = ll_search::search::eval_funnel(&conn, min_links, limit)?;
             out(&result)?;
         }
+        #[cfg(feature = "research")]
         Commands::LaneDiag { db_path, probes } => {
             let conn = ll_search::db::open_db(&db_path)?;
             init_embedding()?;
@@ -951,6 +963,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
                 serde_json::from_str(&raw).context("failed to parse probes")?;
             out(&ll_search::search::lane_diagnostics(&conn, &triples)?)?;
         }
+        #[cfg(feature = "research")]
         Commands::TuneWeights { db_path, min_links, limit } => {
             let conn = ll_search::db::open_db(&db_path)?;
             init_embedding()?;
@@ -972,6 +985,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
                 dflt.ppr, dflt.tag
             );
         }
+        #[cfg(feature = "research")]
         Commands::TunePrf { db_path, queries } => {
             let conn = ll_search::db::open_db(&db_path)?;
             init_embedding()?;
@@ -1000,6 +1014,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             }
         },
         Commands::Link { command } => run_link(command).await.context("link failed")?,
+        #[cfg(feature = "research")]
         Commands::Benchmark { db_path, model_a, model_b, queries } => {
             let ma = parse_model(&model_a)?;
             let mb = parse_model(&model_b)?;

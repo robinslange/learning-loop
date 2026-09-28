@@ -7,7 +7,9 @@ use crate::config::{PRF_ALPHA, PRF_BETA, PRF_K};
 use crate::embed::embed_query;
 use crate::rerank::rerank_with_report;
 
-use super::scoring::{finalize_rrf, PrfParams, FusionWeights};
+use super::scoring::{finalize_rrf, PrfParams};
+#[cfg(feature = "research")]
+use super::scoring::FusionWeights;
 use super::context::{SearchContext, StageFlags};
 use super::federation::batch_load_bodies_federated;
 
@@ -143,6 +145,7 @@ fn build_eval_set(conn: &Connection, min_links: usize) -> Vec<EvalQuery> {
     queries
 }
 
+#[cfg(feature = "research")]
 fn eval_ranking(
     ctx: &SearchContext,
     conn: &Connection,
@@ -192,6 +195,7 @@ fn score_ranking(results: &[String], relevant: &HashSet<String>, source_path: &s
     (recall_5, recall_10, ndcg_10, mrr, hit_1)
 }
 
+#[cfg(feature = "research")]
 pub fn eval_prf(conn: &Connection, min_links: usize) -> anyhow::Result<EvalResult> {
     let queries = build_eval_set(conn, min_links);
     let ctx = SearchContext::build(conn);
@@ -395,9 +399,11 @@ fn funnel_with_signals(
 
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "research")]
     use super::super::test_helpers::helpers::*;
     use super::*;
 
+    #[cfg(feature = "research")]
     #[test]
     fn reciprocal_label_rate_counts_only_targets_that_link_back() {
         // b links back to a, so b's indexed body carries a's slug and the slug
@@ -484,6 +490,7 @@ mod tests {
 /// Approximate on purpose: this matches the raw slug a wikilink stores, which
 /// is the target's stem, so a link written as a full path is not counted. It is
 /// a floor on the leak, not a measurement of it.
+#[cfg(feature = "research")]
 fn reciprocal_label_rate(conn: &Connection, queries: &[EvalQuery]) -> (usize, usize) {
     let mut stmt = match conn.prepare(
         "SELECT 1 FROM links l JOIN notes n ON n.id = l.source_id
@@ -511,6 +518,7 @@ fn reciprocal_label_rate(conn: &Connection, queries: &[EvalQuery]) -> (usize, us
     (reciprocal, total)
 }
 
+#[cfg(feature = "research")]
 pub fn tune_weights(
     conn: &Connection,
     min_links: usize,
@@ -621,6 +629,7 @@ pub fn tune_weights(
 /// This reports the candidates — top score, gap to rank 2, spread across the
 /// top 10 — alongside where the gold note actually landed in each lane, so the
 /// question can be settled before any weighting rule is written.
+#[cfg(feature = "research")]
 #[derive(Debug, Serialize)]
 pub struct LaneStat {
     pub set: String,
@@ -633,6 +642,7 @@ pub struct LaneStat {
     pub bm25_gold_rank: i64,
 }
 
+#[cfg(feature = "research")]
 fn top_gap_spread(scores: &[f64]) -> (f64, f64, f64) {
     // Lists arrive best-first; magnitudes let the BM25 convention (negative,
     // more negative is better) and cosine share one code path.
@@ -645,6 +655,7 @@ fn top_gap_spread(scores: &[f64]) -> (f64, f64, f64) {
     (top, gap, (top - last).abs())
 }
 
+#[cfg(feature = "research")]
 pub fn lane_diagnostics(conn: &Connection, probes: &[(String, String, String)]) -> anyhow::Result<Vec<LaneStat>> {
     let ctx = SearchContext::build(conn);
     let mut out = Vec::new();
