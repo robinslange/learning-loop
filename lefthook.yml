@@ -39,6 +39,10 @@ pre-commit:
       glob: "{plugin/hooks,plugin/scripts,tests,plugin/agents,plugin/skills,native,bench}/**"
       run: npm test --silent
 
+    cargo-fmt:
+      glob: "native/**/*.rs"
+      run: cargo fmt --all --check --manifest-path native/Cargo.toml
+
     cargo-test:
       glob: "native/**"
       run: cargo test --workspace --quiet --manifest-path native/Cargo.toml
