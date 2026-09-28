@@ -177,7 +177,12 @@ pub(crate) fn reflect_scan_inner(
 
     local_result_paths.sort();
     local_result_paths.dedup();
-    let confusable_pairs = discriminate_pairs(conn, &local_result_paths, discriminate_threshold, &ctx.store);
+    // An empty list means "the whole vault" to discriminate_pairs.
+    let confusable_pairs = if local_result_paths.is_empty() {
+        Vec::new()
+    } else {
+        discriminate_pairs(conn, &local_result_paths, discriminate_threshold, &ctx.store)
+    };
 
     ReflectScanResult {
         queries: query_results,
@@ -268,5 +273,23 @@ mod tests {
         let peer_result = scan.results.iter().find(|r| r.path == "peer:alice/c.md").unwrap();
         assert_eq!(peer_result.title.as_deref(), Some("sleep and light"));
         assert_eq!(pairs(&result), [("a.md", "b.md")]);
+    }
+
+    /// `discriminate_pairs` reads an empty path list as "the whole vault". A
+    /// scan with no local result has nothing to pair, and must not hand back
+    /// every near-duplicate in the vault as though the queries had found them.
+    #[test]
+    fn a_scan_with_no_local_result_pairs_nothing() {
+        let conn = local_vault();
+        let ctx = SearchContext::build(&conn);
+        let peer = create_peer_db(&[("c.md", "sleep and light", "sleep and light", &norm(&[0.98, 0.2, 0.0]))]);
+        let peers = vec![("alice".to_string(), peer)];
+        let light = vec![("light".to_string(), norm(&[1.0, 0.0, 0.0]))];
+
+        let result = reflect_scan_inner(&ctx, &conn, &peers, &light, 1, 10, THRESHOLD, contains_query);
+
+        let paths: Vec<&str> = result.queries[0].results.iter().map(|r| r.path.as_str()).collect();
+        assert_eq!(paths, ["peer:alice/c.md"], "precondition: the only result is the peer's");
+        assert_eq!(pairs(&result), Vec::<(&str, &str)>::new());
     }
 }
