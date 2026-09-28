@@ -340,7 +340,7 @@ async fn do_reindex_blocking(db_path: &Path, vault_path: &Path) {
                 "Reindex: {} embedded, {} deleted, {} total",
                 result.embedded, result.deleted, result.total
             ),
-            Err(e) => eprintln!("Reindex failed: {e}"),
+            Err(e) => eprintln!("Reindex failed: {e:#}"),
         }
         conn.execute_batch("PRAGMA wal_checkpoint(PASSIVE);").ok();
         Ok(())

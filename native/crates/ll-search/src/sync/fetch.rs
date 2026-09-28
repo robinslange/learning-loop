@@ -253,7 +253,7 @@ pub async fn fetch_all(
             }
             Ok(Outcome::HubHoldsNothing) => eprintln!("Hub holds no index for {vault_id} yet"),
             Err(e) => {
-                eprintln!("Fetch for {vault_id} failed: {e}");
+                eprintln!("Fetch for {vault_id} failed: {e:#}");
                 out.skipped.push(vault_id);
             }
         }
@@ -459,10 +459,10 @@ async fn write_index(config_dir: &Path, vault_id: &str, bytes: Vec<u8>) -> anyho
             // FTS table costs this peer its keyword leg on the next query,
             // not the index.
             if let Err(e) = ensure_fts(staged) {
-                eprintln!("FTS rebuild for {vault} failed: {e}");
+                eprintln!("FTS rebuild for {vault} failed: {e:#}");
             }
             if let Err(e) = ensure_embeddings(staged, &vault) {
-                eprintln!("Embedding generation for {vault} failed: {e}");
+                eprintln!("Embedding generation for {vault} failed: {e:#}");
             }
             Ok(())
         })
