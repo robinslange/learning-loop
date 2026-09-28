@@ -1,0 +1,5 @@
+# Commits git blame skips. GitHub reads this file by name; locally, run once:
+#   git config blame.ignoreRevsFile .git-blame-ignore-revs
+
+# Format the Rust workspace with rustfmt (#53)
+18fc417e51e6d32dc75de70d9b22e5a1e3df774b
