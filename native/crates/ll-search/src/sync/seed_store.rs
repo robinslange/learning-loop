@@ -448,8 +448,8 @@ mod tests {
         let r2 = load_or_create(tmp.path()).unwrap();
         assert!(!r2.created);
 
-        let pk1 = super::super::auth::pubkey_b64(&r1.signing_key);
-        let pk2 = super::super::auth::pubkey_b64(&r2.signing_key);
+        let pk1 = super::super::key_id::pubkey_b64(&r1.signing_key);
+        let pk2 = super::super::key_id::pubkey_b64(&r2.signing_key);
         assert_eq!(pk1, pk2, "same key must be returned on second load");
     }
 

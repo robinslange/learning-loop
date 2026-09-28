@@ -8,17 +8,7 @@
 
 mod frame;
 
-pub use frame::{manifest_root, ChunkedFrame, Envelope};
-
-/// Maximum envelope size accepted on either send or receive.
-///
-/// This is the **client-side policy ceiling**, and it is far above what the
-/// transport can carry: [`HUB_INBOUND_CAP`] is the effective ceiling for
-/// outbound uploads, and nothing this large can reach either direction.
-pub const MAX_ENVELOPE_SIZE: usize = 200 * 1024 * 1024;
-
-/// Bytes preceding the body in a framed binary message: 4 (size BE u32) + 32 (sha256).
-pub const ENVELOPE_HEADER_LEN: usize = 4 + 32;
+pub use frame::{manifest_root, ChunkedFrame};
 
 /// The largest single WebSocket frame payload the hub will read.
 ///

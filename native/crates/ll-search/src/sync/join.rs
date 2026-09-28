@@ -44,7 +44,7 @@ use super::config::{
 use super::key_id::KeyId;
 use super::protocol_v5::PROTOCOL_VERSION;
 use super::well_known::HubIdentity;
-use super::{auth, registry, seed_store, well_known, words};
+use super::{registry, seed_store, well_known, words};
 
 /// What a completed join produced. `recovery_phrase` is the only copy of the
 /// recovery secret that will ever exist; the caller shows it and forgets it.
@@ -271,7 +271,7 @@ pub(super) fn fresh_config(
     FederationConfig {
         identity: Identity {
             display_name: display_name_for(vault_path),
-            pubkey: auth::pubkey_b64(signing_key),
+            pubkey: super::key_id::pubkey_b64(signing_key),
         },
         visibility: VisibilityConfig { default: "private".into(), rules: Vec::new() },
         hub: HubEndpoint {

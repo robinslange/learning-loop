@@ -39,7 +39,7 @@ fn setup_config_dir(hub_addr: SocketAddr) -> tempfile::TempDir {
 
     let seed = ll_search::sync::seed_store::load_or_create(dir.path())
         .expect("test setup must generate a seed");
-    let pubkey = ll_search::sync::auth::pubkey_b64(&seed.signing_key);
+    let pubkey = ll_search::sync::key_id::pubkey_b64(&seed.signing_key);
 
     let config = serde_json::json!({
         "identity": { "displayName": "alice", "pubkey": format!("ed25519:{pubkey}") },

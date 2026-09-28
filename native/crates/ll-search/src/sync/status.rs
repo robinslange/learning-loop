@@ -15,12 +15,8 @@
 
 use std::path::Path;
 
-use ed25519_dalek::VerifyingKey;
-
-use crate::b64;
-
 use super::config::{config_path, load_config, FederationConfig};
-use super::key_id::KeyId;
+use super::key_id::{key_id_from_b64, KeyId};
 use super::state::{read_state, HubHolds, SyncState, OUTCOME_ERROR, OUTCOME_OK};
 use super::words::fingerprint;
 
@@ -430,16 +426,6 @@ fn key_and_fingerprint(id: &KeyId) -> String {
     format!("{}  {}", elide(id.as_str()), fingerprint(id))
 }
 
-/// Both encodings that exist on disk: v5 `join` writes bare base64, and
-/// pre-v5 configs still in the wild carry the same bytes behind an `ed25519:`
-/// prefix. Refusing the older one would report a perfectly readable key as
-/// unreadable on exactly the installs most likely to be broken.
-fn key_id_from_b64(pubkey: &str) -> Option<KeyId> {
-    let encoded = pubkey.strip_prefix("ed25519:").unwrap_or(pubkey);
-    let bytes: [u8; 32] = b64::decode(encoded).ok()?.try_into().ok()?;
-    Some(KeyId::from_pubkey(&VerifyingKey::from_bytes(&bytes).ok()?))
-}
-
 /// `z6MkvDqG…v5T3Z`. Enough to recognise beside the fingerprint, and the `…`
 /// says plainly that it is not a value to copy.
 fn elide(s: &str) -> String {
@@ -530,7 +516,7 @@ const FOOTER: &str = "\nRead from local files. Nothing here contacted the hub; `
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sync::auth::pubkey_b64;
+    use crate::sync::key_id::pubkey_b64;
     use crate::sync::config::{write_config, FederationConfig, HubEndpoint, Identity, VisibilityConfig};
     use crate::sync::key_id::KeyId;
     use crate::sync::state::{write_state, HubHolds, SyncState, OUTCOME_ERROR, OUTCOME_OK};

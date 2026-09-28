@@ -390,7 +390,7 @@ mod tests {
 
     /// Files still legitimately mentioning the peer-id field: the wire
     /// protocol (`SyncHello`/`AuthChallenge`/envelope meta in `client.rs`,
-    /// `auth.rs`, `protocol/messages.rs`) and the search-side peer iteration
+    /// `protocol/messages.rs`) and the search-side peer iteration
     /// variable of the same name (`export.rs`, `search/federation.rs`,
     /// `search/query.rs`, `search/reflect.rs`). Plan 6 (client handshake and
     /// sync) removes it from `client.rs`; nothing currently scheduled
@@ -400,7 +400,6 @@ mod tests {
     /// allowlist and assert directly against the whole tree.
     const PEER_ID_ALLOWLIST: &[&str] = &[
         "sync/client.rs",
-        "sync/auth.rs",
         "sync/protocol/messages.rs",
         "sync/export.rs",
         "search/federation.rs",

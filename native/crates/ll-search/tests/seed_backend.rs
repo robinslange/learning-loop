@@ -97,8 +97,8 @@ fn env_force_encrypted_consistent_key_across_loads() {
     let r1 = load_or_create(tmp.path()).unwrap();
     let r2 = load_or_create(tmp.path()).unwrap();
 
-    let pk1 = ll_search::sync::auth::pubkey_b64(&r1.signing_key);
-    let pk2 = ll_search::sync::auth::pubkey_b64(&r2.signing_key);
+    let pk1 = ll_search::sync::key_id::pubkey_b64(&r1.signing_key);
+    let pk2 = ll_search::sync::key_id::pubkey_b64(&r2.signing_key);
     assert_eq!(pk1, pk2, "same key must be returned on repeated loads");
 }
 
@@ -119,30 +119,13 @@ fn load_only_returns_existing_seed_without_creating() {
     let tmp = tempdir().unwrap();
 
     let created = load_or_create(tmp.path()).unwrap();
-    let pk_created = ll_search::sync::auth::pubkey_b64(&created.signing_key);
+    let pk_created = ll_search::sync::key_id::pubkey_b64(&created.signing_key);
 
     let loaded = load_only(tmp.path()).unwrap().expect("seed must be found after load_or_create wrote one");
-    let pk_loaded = ll_search::sync::auth::pubkey_b64(&loaded.signing_key);
+    let pk_loaded = ll_search::sync::key_id::pubkey_b64(&loaded.signing_key);
 
     assert_eq!(pk_created, pk_loaded, "load_only must return the same key load_or_create wrote");
     assert!(!loaded.created, "load_only never sets created=true");
-}
-
-#[test]
-fn auth_load_seed_errors_on_missing_seed() {
-    init_test_backend();
-    let tmp = tempdir().unwrap();
-    let fed = tmp.path().join("federation");
-    std::fs::create_dir_all(&fed).unwrap();
-    let seed_path = fed.join(".seed");
-
-    let result = ll_search::sync::auth::load_seed(&seed_path);
-    let err = result.expect_err("load_seed must error when no seed exists in any backend");
-    let msg = err.to_string();
-    assert!(
-        msg.contains("no federation seed found"),
-        "error must mention missing seed; got: {msg}"
-    );
 }
 
 #[test]

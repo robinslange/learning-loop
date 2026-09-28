@@ -41,8 +41,8 @@ use super::config::{self, grants_path, pairing_window_path, FederationConfig, Hu
 use super::grant::{self, canonical_bytes, GrantKind, GrantStatement, RevocationStatement};
 use super::handshake::random_nonce;
 use super::key_id::KeyId;
-use super::protocol_v5::{sanitise_hub_text, ClientMsg, GrantWire, HubMsg, PROTOCOL_VERSION};
-use super::{seed_store, well_known, words};
+use super::protocol_v5::{sanitise_hub_text, ClientMsg, GrantWire, HubMsg};
+use super::{seed_store, words};
 
 
 /// Tags the two strings a door puts on a screen. A string that came from
@@ -498,15 +498,11 @@ pub(super) fn close_pairing_window(config_dir: &Path) {
 // ---------------------------------------------------------------------------
 
 /// Door 3's joining half, and the source of Door 2's QR: this machine's
-/// pairing code, over no network at all.
+/// pairing code and the six words it must show beside it, over no network at
+/// all.
 ///
 /// Creates the identity if there is not one yet, which is the whole of what a
 /// new machine needs before it can be admitted.
-pub fn request_offline(config_dir: &Path) -> anyhow::Result<String> {
-    Ok(pending_offline(config_dir)?.code)
-}
-
-/// The same, with the six words this machine must show beside the code.
 pub fn pending_offline(config_dir: &Path) -> anyhow::Result<PendingLink> {
     let identity = seed_store::load_or_create(config_dir)?;
     // Showing a pairing code is a person asking to be linked. That ask is the
@@ -538,17 +534,7 @@ pub async fn request(
         );
     }
     super::join::require_a_profile_if_this_is_not_the_root(config_dir)?;
-    super::client::check_hub_scheme(hub_endpoint)?;
-
-    let hub = well_known::fetch(hub_endpoint).await?;
-    if hub.protocol_version != PROTOCOL_VERSION {
-        anyhow::bail!(
-            "hub speaks protocol v{}, this client speaks v{PROTOCOL_VERSION}. \
-             There is no negotiation and no downgrade; upgrade one side.",
-            hub.protocol_version
-        );
-    }
-    let hub_key = KeyId::parse(&hub.hub_key_id)?;
+    let (hub, hub_key) = super::join::pin_hub(hub_endpoint).await?;
     if !confirm.confirm("hub identity", &words::fingerprint(&hub_key))? {
         anyhow::bail!("hub fingerprint not confirmed; nothing was written");
     }
@@ -561,7 +547,7 @@ pub async fn request(
         &FederationConfig {
             identity: Identity {
                 display_name: super::join::display_name_for(vault_path),
-                pubkey: super::auth::pubkey_b64(&identity.signing_key),
+                pubkey: super::key_id::pubkey_b64(&identity.signing_key),
             },
             visibility: VisibilityConfig { default: "private".into(), rules: Vec::new() },
             hub: HubEndpoint {
@@ -1126,6 +1112,7 @@ pub fn list(config_dir: &Path) -> anyhow::Result<Vec<LinkRow>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sync::protocol_v5::PROTOCOL_VERSION;
     use crate::sync::test_hub::{self, GrantAnswer};
     use std::path::PathBuf;
     use tempfile::TempDir;
@@ -1337,7 +1324,7 @@ mod tests {
     fn the_offline_door_needs_no_hub() {
         let dir_new = fresh_dir();
         let dir_old = seeded_dir();
-        let request = request_offline(dir_new.path()).unwrap();
+        let request = pending_offline(dir_new.path()).unwrap().code;
         let grant = approve_offline(dir_old.path(), &request, &mut Yes::default()).unwrap();
         let accepted = accept_offline(dir_new.path(), &grant).unwrap();
         assert!(
@@ -1359,7 +1346,7 @@ mod tests {
         let dir_new = dir_with_seed(9);
         let dir_old = seeded_dir();
         write_hub_config(dir_new.path(), "wss://hub.example/ws", None);
-        let request = request_offline(dir_new.path()).unwrap();
+        let request = pending_offline(dir_new.path()).unwrap().code;
         let grant = approve_offline(dir_old.path(), &request, &mut Yes::default()).unwrap();
 
         let accepted = accept_offline(dir_new.path(), &grant).unwrap();
@@ -1450,7 +1437,7 @@ mod tests {
         let mut confirm = Yes::default();
         let blob = approve_offline(
             approver.path(),
-            &request_offline(joiner.path()).unwrap(),
+            &pending_offline(joiner.path()).unwrap().code,
             &mut confirm,
         )
         .unwrap();
@@ -1509,13 +1496,13 @@ mod tests {
         let third = fresh_dir();
 
         let grant =
-            approve_offline(first.path(), &request_offline(second.path()).unwrap(), &mut Yes::default())
+            approve_offline(first.path(), &pending_offline(second.path()).unwrap().code, &mut Yes::default())
                 .unwrap();
         accept_offline(second.path(), &grant).unwrap();
 
         let onward = approve_offline(
             second.path(),
-            &request_offline(third.path()).unwrap(),
+            &pending_offline(third.path()).unwrap().code,
             &mut Yes::default(),
         )
         .unwrap();
@@ -1534,7 +1521,7 @@ mod tests {
         let approver = seeded_dir();
         let joiner = fresh_dir();
         let inbound =
-            approve_offline(approver.path(), &request_offline(joiner.path()).unwrap(), &mut Yes::default())
+            approve_offline(approver.path(), &pending_offline(joiner.path()).unwrap().code, &mut Yes::default())
                 .unwrap();
 
         // The inbound half alone, stored without the answering step.
@@ -1557,7 +1544,7 @@ mod tests {
         let approver = seeded_dir();
         let joiner = fresh_dir();
         let blob =
-            approve_offline(approver.path(), &request_offline(joiner.path()).unwrap(), &mut Yes::default())
+            approve_offline(approver.path(), &pending_offline(joiner.path()).unwrap().code, &mut Yes::default())
                 .unwrap();
         accept_offline(joiner.path(), &blob).unwrap();
 
@@ -1581,7 +1568,7 @@ mod tests {
         write_hub_config(approver.path(), &hub_a.ws_url(), None);
         approve(
             approver.path(),
-            &request_offline(joiner.path()).unwrap(),
+            &pending_offline(joiner.path()).unwrap().code,
             &mut Yes::default(),
         )
         .await
@@ -1634,7 +1621,7 @@ mod tests {
         // A admits B offline. The grant names no vault, which is the point.
         let blob = approve_offline(
             approver.path(),
-            &request_offline(joiner.path()).unwrap(),
+            &pending_offline(joiner.path()).unwrap().code,
             &mut Yes::default(),
         )
         .unwrap();
@@ -1711,7 +1698,7 @@ mod tests {
         let a_to_b = {
             let blob = approve_offline(
                 approver.path(),
-                &request_offline(joiner.path()).unwrap(),
+                &pending_offline(joiner.path()).unwrap().code,
                 &mut Yes::default(),
             )
             .unwrap();
@@ -2122,7 +2109,7 @@ mod tests {
         let intended = fresh_dir();
         let bystander = dir_with_seed(31);
         let blob =
-            approve_offline(approver.path(), &request_offline(intended.path()).unwrap(), &mut Yes::default())
+            approve_offline(approver.path(), &pending_offline(intended.path()).unwrap().code, &mut Yes::default())
                 .unwrap();
 
         let err = accept_offline(bystander.path(), &blob).unwrap_err().to_string();
@@ -2140,7 +2127,7 @@ mod tests {
         let approver = seeded_dir();
         let joiner = fresh_dir();
         let blob =
-            approve_offline(approver.path(), &request_offline(joiner.path()).unwrap(), &mut Yes::default())
+            approve_offline(approver.path(), &pending_offline(joiner.path()).unwrap().code, &mut Yes::default())
                 .unwrap();
 
         // Flip a byte inside the statement, leaving the blob well-formed and
@@ -2750,7 +2737,7 @@ mod tests {
     fn approving_the_same_machine_twice_leaves_one_link_to_revoke() {
         let approver = seeded_dir();
         let joiner = fresh_dir();
-        let code = request_offline(joiner.path()).unwrap();
+        let code = pending_offline(joiner.path()).unwrap().code;
 
         let first = approve_offline(approver.path(), &code, &mut Yes::default()).unwrap();
         let second = approve_offline(approver.path(), &code, &mut Yes::default()).unwrap();
@@ -2776,7 +2763,7 @@ mod tests {
         let approver = seeded_dir();
         let joiner = fresh_dir();
         let blob =
-            approve_offline(approver.path(), &request_offline(joiner.path()).unwrap(), &mut Yes::default())
+            approve_offline(approver.path(), &pending_offline(joiner.path()).unwrap().code, &mut Yes::default())
                 .unwrap();
         accept_offline(joiner.path(), &blob).unwrap();
 
@@ -2813,7 +2800,7 @@ mod tests {
 
         let blob = approve_offline(
             approver.path(),
-            &request_offline(answered.path()).unwrap(),
+            &pending_offline(answered.path()).unwrap().code,
             &mut Yes::default(),
         )
         .unwrap();
@@ -2991,6 +2978,24 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(err.contains("fingerprint"), "{err}");
+        assert!(!config::config_path(dir.path()).exists());
+    }
+
+    #[tokio::test]
+    async fn request_refuses_a_hub_announcing_a_protocol_this_client_does_not_speak() {
+        let _env = test_hub::insecure_ws_env();
+        let dir = fresh_dir();
+        let hub = test_hub::spawn_well_known_only(&test_hub::hub_key_id_str(), PROTOCOL_VERSION + 1).await;
+        let mut confirm = Yes::default();
+
+        let err = request(dir.path(), &hub.ws_url(), &PathBuf::from("/tmp/x"), &mut confirm)
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("protocol"), "{err}");
+        assert!(confirm.shown.is_empty(),
+            "a version this client cannot speak is settled before the user is asked \
+             to compare anything");
         assert!(!config::config_path(dir.path()).exists());
     }
 }

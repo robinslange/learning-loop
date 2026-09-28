@@ -7,7 +7,8 @@
 //! cycles. The pinned vector test below guards against silent divergence;
 //! change both sides together.
 
-use ed25519_dalek::{Signature, VerifyingKey};
+use crate::b64;
+use ed25519_dalek::{Signature, SigningKey, VerifyingKey};
 
 /// Multicodec prefix for an ed25519 public key (0xed 0x01), so the encoding is
 /// self-describing and a future key type does not need a new format.
@@ -103,10 +104,35 @@ impl<'de> serde::Deserialize<'de> for KeyId {
     }
 }
 
+/// The public half of `signing_key` as bare base64, the encoding v5 `join`
+/// writes into `identity.pubkey`.
+pub fn pubkey_b64(signing_key: &SigningKey) -> String {
+    b64::encode(signing_key.verifying_key().as_bytes())
+}
+
+/// Both encodings that exist on disk: v5 `join` writes bare base64, and
+/// pre-v5 configs still in the wild carry the same bytes behind an `ed25519:`
+/// prefix. Refusing the older one would report a perfectly readable key as
+/// unreadable on exactly the installs most likely to be broken.
+pub fn key_id_from_b64(pubkey: &str) -> Option<KeyId> {
+    let encoded = pubkey.strip_prefix("ed25519:").unwrap_or(pubkey);
+    let bytes: [u8; 32] = b64::decode(encoded).ok()?.try_into().ok()?;
+    Some(KeyId::from_pubkey(&VerifyingKey::from_bytes(&bytes).ok()?))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ed25519_dalek::{Signer, SigningKey};
+    use ed25519_dalek::Signer;
+
+    #[test]
+    fn pubkey_b64_reads_back_as_the_same_key_in_either_encoding() {
+        let signing = SigningKey::from_bytes(&[1u8; 32]);
+        let expected = KeyId::from_pubkey(&signing.verifying_key());
+        let encoded = pubkey_b64(&signing);
+        assert_eq!(key_id_from_b64(&encoded), Some(expected.clone()));
+        assert_eq!(key_id_from_b64(&format!("ed25519:{encoded}")), Some(expected));
+    }
 
     fn key() -> SigningKey { SigningKey::generate(&mut rand::thread_rng()) }
 
