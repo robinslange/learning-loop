@@ -535,7 +535,7 @@ test('the arity derivation and its extraction both work', () => {
   // `Option` may be omitted, `Vec` takes the rest — both come out of the type,
   // and a check that only counted fields would get these two wrong.
   assert.deepEqual(ARITY['intentions'], { min: 1, max: 2 });
-  assert.deepEqual(ARITY['tune-prf'], { min: 1, max: Infinity });
+  assert.deepEqual(ARITY['reflect-scan'], { min: 1, max: Infinity });
 
   // A flag's value is not a positional, or every documented `--config-dir DIR`
   // would read as one more argument than the command takes.

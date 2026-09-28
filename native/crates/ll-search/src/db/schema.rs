@@ -5,6 +5,7 @@ use std::path::Path;
 
 use crate::embed;
 
+#[cfg(feature = "research")]
 use super::index::IndexResult;
 
 const SCHEMA_VERSION: u32 = 5;
@@ -319,6 +320,7 @@ pub(crate) fn drop_all(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+#[cfg(feature = "research")]
 pub fn migrate_embeddings(
     conn: &Connection,
     provider: &dyn crate::model::EmbeddingProvider,
@@ -389,6 +391,7 @@ pub fn migrate_embeddings(
     })
 }
 
+#[cfg(feature = "research")]
 pub fn drop_old_embeddings(conn: &Connection) {
     conn.execute_batch("DROP TABLE IF EXISTS embeddings_old;")
         .ok();

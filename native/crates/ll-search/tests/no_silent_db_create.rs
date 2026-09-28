@@ -133,9 +133,12 @@ fn embedding_commands_check_db_before_loading_model() {
         &["discriminate", bogus_db_str, "a.md", "b.md"],
         &["reflect-scan", bogus_db_str, "a query"],
         &["rerank", bogus_db_str, "a query"],
+        #[cfg(feature = "research")]
         &["eval-prf", bogus_db_str],
         &["eval-funnel", bogus_db_str],
+        #[cfg(feature = "research")]
         &["tune-prf", bogus_db_str, "a query"],
+        #[cfg(feature = "research")]
         &["migrate", bogus_db_str, "--model", "bge"],
     ];
 

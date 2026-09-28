@@ -1,3 +1,4 @@
+#[cfg(feature = "research")]
 pub mod benchmark;
 pub mod bge_small;
 pub mod loader;

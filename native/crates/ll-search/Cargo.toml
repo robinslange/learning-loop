@@ -5,6 +5,12 @@ edition.workspace = true
 description = "Learning loop search binary -- SQLite + ONNX embeddings"
 license = "Apache-2.0"
 
+[features]
+# Hand-run tuning and evaluation subcommands (benchmark, migrate, tune-prf,
+# eval-prf, tune-weights, lane-diag, sessions). Nothing in the plugin or the
+# bench calls them, so release builds leave them out.
+research = []
+
 [dependencies]
 ll-core = { path = "../ll-core" }
 clap = { version = "4", features = ["derive"] }

@@ -487,23 +487,23 @@ ll-search link-stats <db> [--folder DIR] [--orphans]
 ```
 ll-search tags       <db> [--min-count N]
 ll-search intentions <db> [context]
-ll-search sessions   <db> [--min-notes N]
 ll-search export     <db> <output> <vault>
 ```
 
-**Embedding model migration and benchmarking**
+**Evaluation** (the bench quality gate runs this)
 
 ```
-ll-search migrate   <db> --model MODEL [--drop-old]
-ll-search benchmark <db> --model-a A --model-b B <queries...>
+ll-search eval-funnel  <db> [--min-links N] [--limit N]
 ```
 
-**Evaluation and tuning**
+**Research build only.** Nothing in the plugin or the bench calls these, so release binaries leave them out. Build with `cargo build -p ll-search --features research` to run them by hand. `migrate --model` and `benchmark` accept only bge-small, the one model the build knows.
 
 ```
+ll-search sessions     <db> [--min-notes N]
+ll-search migrate      <db> --model MODEL [--drop-old]
+ll-search benchmark    <db> --model-a A --model-b B <queries...>
 ll-search tune-prf     <db> <queries...>
 ll-search eval-prf     <db> [--min-links N]
-ll-search eval-funnel  <db> [--min-links N] [--limit N]
 ll-search tune-weights <db> [--min-links N] [--limit N]   # DIAGNOSTIC only: labels leak to BM25, cannot choose weights
 ll-search lane-diag    <db> <probes.json>                 # per-query, per-lane stats; probes is a JSON array of [set, gold_path, query] triples
 ```

@@ -45,6 +45,7 @@ pub struct IntentionDetail {
     pub cue: Option<String>,
 }
 
+#[cfg(feature = "research")]
 #[derive(Serialize)]
 pub struct SessionInfo {
     pub session_id: i64,
@@ -352,6 +353,7 @@ pub fn compute_project_phases(conn: &Connection) {
     eprintln!("Computed {} project phase tags", tag_data.len());
 }
 
+#[cfg(feature = "research")]
 pub fn list_sessions(conn: &Connection, min_notes: usize) -> Vec<SessionInfo> {
     let has_session_col = conn.prepare("SELECT session_id FROM notes LIMIT 0").is_ok();
     if !has_session_col {

@@ -107,6 +107,11 @@ jobs:
       - name: Check benches compile
         run: cargo check --benches --workspace --locked
 
+      # The hand-run tuning and eval subcommands are behind `research`, off by
+      # default, so nothing above compiles them or runs their tests.
+      - name: Test the research build
+        run: cargo test -p ll-search --features research --locked
+
   # Retrieval-quality regression gate: runs ll-search eval-funnel against a
   # seeded fixture vault and hard-fails on a >25% relative drop in recall@10 /
   # ndcg@10 / hits@1 versus the committed baseline (bench/baselines/quality.json).
