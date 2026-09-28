@@ -5,7 +5,6 @@ use serde::Serialize;
 use crate::embed::embed_query;
 
 use super::scoring::{add_ranked_rrf, finalize_rrf, rocchio_prf_with, PrfParams};
-use super::store::EmbeddingStore;
 use super::context::SearchContext;
 
 #[derive(Debug, Serialize)]
@@ -108,7 +107,6 @@ fn rank_position(results: &[String], item: &str) -> Option<usize> {
 pub fn tune_prf(
     conn: &rusqlite::Connection,
     queries: &[String],
-    _store: &EmbeddingStore,
 ) -> anyhow::Result<TuneResult> {
     let ctx = SearchContext::build(conn);
 

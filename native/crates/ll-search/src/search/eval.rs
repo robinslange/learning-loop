@@ -8,7 +8,6 @@ use crate::embed::embed_query;
 use crate::rerank::rerank_with_report;
 
 use super::scoring::{finalize_rrf, PrfParams, FusionWeights};
-use super::store::EmbeddingStore;
 use super::context::{SearchContext, StageFlags};
 use super::federation::batch_load_bodies_federated;
 
@@ -193,7 +192,7 @@ fn score_ranking(results: &[String], relevant: &HashSet<String>, source_path: &s
     (recall_5, recall_10, ndcg_10, mrr, hit_1)
 }
 
-pub fn eval_prf(conn: &Connection, _store: &EmbeddingStore, min_links: usize) -> anyhow::Result<EvalResult> {
+pub fn eval_prf(conn: &Connection, min_links: usize) -> anyhow::Result<EvalResult> {
     let queries = build_eval_set(conn, min_links);
     let ctx = SearchContext::build(conn);
 
@@ -265,7 +264,6 @@ pub fn eval_prf(conn: &Connection, _store: &EmbeddingStore, min_links: usize) ->
 /// relevant notes through second-order structure, not the gold edges.
 pub fn eval_funnel(
     conn: &Connection,
-    _store: &EmbeddingStore,
     min_links: usize,
     limit: Option<usize>,
 ) -> anyhow::Result<EvalResult> {
@@ -515,7 +513,6 @@ fn reciprocal_label_rate(conn: &Connection, queries: &[EvalQuery]) -> (usize, us
 
 pub fn tune_weights(
     conn: &Connection,
-    _store: &EmbeddingStore,
     min_links: usize,
     limit: Option<usize>,
 ) -> anyhow::Result<Vec<(FusionWeights, f64, f64)>> {

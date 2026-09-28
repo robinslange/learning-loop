@@ -561,34 +561,45 @@ mod tests {
     }
 
     #[test]
-    fn test_query_matches_legacy_path() {
-        let emb_a = norm(&[1.0, 0.0, 0.0]);
-        let emb_b = norm(&[0.0, 1.0, 0.0]);
+    fn test_tag_expand_idf_filtering() {
+        let emb = norm(&[1.0, 0.0, 0.0]);
         let conn = create_test_db(&[
-            ("3-permanent/sleep.md", "sleep architecture", "Deep sleep is important", &emb_a),
-            ("3-permanent/diet.md", "diet and nutrition", "Protein intake matters", &emb_b),
+            ("a.md", "a", "content", &emb),
+            ("b.md", "b", "content", &emb),
+            ("c.md", "c", "content", &emb),
         ]);
-        let store = super::super::store::load_store(&conn);
-        let query_vec = norm(&[1.0, 0.1, 0.0]);
-
-        let all_embeddings = store.all();
-        let graph = load_link_graph(&conn);
-        let legacy = super::super::query::local_rrf_scores(
-            &conn, &query_vec, "sleep", all_embeddings, &graph,
-        );
-        let mut legacy_top: Vec<(String, f64)> = legacy.into_iter().collect();
-        legacy_top.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-        legacy_top.truncate(10);
+        conn.execute("UPDATE notes SET tags = 'rare' WHERE path = 'a.md'", []).unwrap();
+        conn.execute("UPDATE notes SET tags = 'rare' WHERE path = 'b.md'", []).unwrap();
+        conn.execute("UPDATE notes SET tags = 'common' WHERE path = 'c.md'", []).unwrap();
 
         let ctx = SearchContext::build(&conn);
-        let ctx_scores = ctx.local_rrf_scores(&conn, &query_vec, "sleep");
-        let mut ctx_top: Vec<(String, f64)> = ctx_scores.into_iter().collect();
-        ctx_top.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-        ctx_top.truncate(10);
+        let results = tag_expand_from_map(&ctx.tags, &["a.md".to_string()]);
+        let paths: Vec<&str> = results.iter().map(|r| r.0.as_str()).collect();
+        assert!(paths.contains(&"b.md"));
+        assert!(!paths.contains(&"c.md"));
+        assert!(!paths.contains(&"a.md"));
+    }
 
-        let legacy_paths: Vec<&str> = legacy_top.iter().map(|(p, _)| p.as_str()).collect();
-        let ctx_paths: Vec<&str> = ctx_top.iter().map(|(p, _)| p.as_str()).collect();
-        assert_eq!(legacy_paths, ctx_paths);
+    #[test]
+    fn test_tag_expand_excludes_high_freq() {
+        let emb = norm(&[1.0, 0.0, 0.0]);
+        let mut notes: Vec<(&str, &str, &str, &[f32])> = Vec::new();
+        let paths: Vec<String> = (0..25).map(|i| format!("note{i}.md")).collect();
+        let titles: Vec<String> = (0..25).map(|i| format!("note{i}")).collect();
+        for i in 0..25 {
+            notes.push((&paths[i], &titles[i], "content", &emb));
+        }
+        let conn = create_test_db(&notes);
+        for path in &paths {
+            conn.execute(
+                "UPDATE notes SET tags = 'popular' WHERE path = ?1",
+                rusqlite::params![path],
+            ).unwrap();
+        }
+
+        let ctx = SearchContext::build(&conn);
+        let results = tag_expand_from_map(&ctx.tags, &["note0.md".to_string()]);
+        assert!(results.is_empty());
     }
 
     #[test]
