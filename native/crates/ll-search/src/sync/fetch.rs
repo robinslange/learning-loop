@@ -22,8 +22,8 @@
 //! identities and carries no authority at all, and a client that asks anyway
 //! is one hub-side bug away from getting an answer.
 
-use anyhow::Context;
 use crate::b64;
+use anyhow::Context;
 use std::path::Path;
 
 use serde::Serialize;
@@ -62,7 +62,9 @@ pub(super) fn permits_read(kind: GrantKind) -> bool {
 pub(super) fn is_safe_vault_id(id: &str) -> bool {
     !id.is_empty()
         && id.len() <= 128
-        && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+        && id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
 }
 
 /// The grants this client currently holds, verified and in force.
@@ -85,9 +87,10 @@ fn live_grants(grants: &[GrantWire], me: &KeyId, now: i64) -> Vec<GrantStatement
         if wire.state != "active" {
             continue;
         }
-        let (Ok(statement), Ok(signature)) =
-            (b64::decode(&wire.statement_b64), b64::decode(&wire.signature_b64))
-        else {
+        let (Ok(statement), Ok(signature)) = (
+            b64::decode(&wire.statement_b64),
+            b64::decode(&wire.signature_b64),
+        ) else {
             eprintln!("skipping a grant that is not valid base64");
             continue;
         };
@@ -274,10 +277,20 @@ async fn fetch_one(
     config_dir: &Path,
     vault_id: &str,
 ) -> anyhow::Result<Outcome> {
-    send_json(ws, &ClientMsg::FetchIndex { vault_id: vault_id.to_string() }).await?;
+    send_json(
+        ws,
+        &ClientMsg::FetchIndex {
+            vault_id: vault_id.to_string(),
+        },
+    )
+    .await?;
 
     let (answered, holds, chunked) = match recv_json::<HubMsg>(ws).await? {
-        HubMsg::IndexHeader { vault_id, holds, chunked } => (vault_id, holds, chunked),
+        HubMsg::IndexHeader {
+            vault_id,
+            holds,
+            chunked,
+        } => (vault_id, holds, chunked),
         HubMsg::Reject { reason } => {
             anyhow::bail!("hub refused the read: {}", sanitise_hub_text(&reason))
         }
@@ -298,7 +311,9 @@ async fn fetch_one(
     if answered != vault_id {
         anyhow::bail!("asked for {vault_id}, the hub answered for {answered}");
     }
-    let (Some(held), Some(bytes)) = (holds, body) else { return Ok(Outcome::HubHoldsNothing) };
+    let (Some(held), Some(bytes)) = (holds, body) else {
+        return Ok(Outcome::HubHoldsNothing);
+    };
 
     // The header is the hub's claim about what it is sending; the bytes are
     // what it sent. Hash them and compare — the same check the hub runs on
@@ -418,8 +433,12 @@ async fn installed_source_sha(config_dir: &Path, vault_id: &str) -> anyhow::Resu
             rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
         )
         .ok()?;
-        conn.query_row("SELECT value FROM meta WHERE key = 'source_sha256'", [], |r| r.get(0))
-            .ok()
+        conn.query_row(
+            "SELECT value FROM meta WHERE key = 'source_sha256'",
+            [],
+            |r| r.get(0),
+        )
+        .ok()
     })
     .await
     .map_err(|e| anyhow::anyhow!("cached-index provenance task panicked: {e}"))
@@ -500,7 +519,9 @@ fn ensure_embeddings(db_path: &Path, vault_id: &str) -> anyhow::Result<()> {
 
     let has_data = has_table
         && conn
-            .query_row("SELECT COUNT(*) FROM embeddings", [], |row| row.get::<_, i64>(0))
+            .query_row("SELECT COUNT(*) FROM embeddings", [], |row| {
+                row.get::<_, i64>(0)
+            })
             .unwrap_or(0)
             > 0;
 
@@ -512,7 +533,9 @@ fn ensure_embeddings(db_path: &Path, vault_id: &str) -> anyhow::Result<()> {
         "SELECT nc.id, nc.body FROM notes_content nc WHERE nc.body IS NOT NULL AND nc.body != ''",
     )?;
     let notes: Vec<(i64, String)> = stmt
-        .query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)))?
+        .query_map([], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+        })?
         .filter_map(|r| r.ok())
         .collect();
     drop(stmt);
@@ -521,7 +544,11 @@ fn ensure_embeddings(db_path: &Path, vault_id: &str) -> anyhow::Result<()> {
         return Ok(());
     }
 
-    eprintln!("Generating embeddings for {} ({} notes)...", vault_id, notes.len());
+    eprintln!(
+        "Generating embeddings for {} ({} notes)...",
+        vault_id,
+        notes.len()
+    );
 
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS embeddings (id INTEGER PRIMARY KEY, data BLOB NOT NULL);",
@@ -609,7 +636,6 @@ pub(crate) fn index_bytes(marker: &str) -> Vec<u8> {
     std::fs::read(&path).unwrap()
 }
 
-
 #[cfg(test)]
 /// What an installed peer index is asked to prove: it records the sha of
 /// the bytes the hub sent, and it carries that export's note.
@@ -622,7 +648,11 @@ pub(crate) fn assert_installed(dir: &Path, vault_id: &str, body: &[u8]) {
     let path = peer_index_path(dir, vault_id);
     let conn = rusqlite::Connection::open(&path).unwrap();
     let recorded: String = conn
-        .query_row("SELECT value FROM meta WHERE key = 'source_sha256'", [], |r| r.get(0))
+        .query_row(
+            "SELECT value FROM meta WHERE key = 'source_sha256'",
+            [],
+            |r| r.get(0),
+        )
         .unwrap_or_else(|e| panic!("{vault_id} records no source sha: {e}"));
     assert_eq!(
         recorded,
@@ -687,13 +717,20 @@ mod tests {
     }
 
     fn of_kind(kind: GrantKind, scope: &'static str) -> GrantFixture {
-        GrantFixture { kind, ..follow(scope) }
+        GrantFixture {
+            kind,
+            ..follow(scope)
+        }
     }
 
     /// A grant that names no vault. What `ll link` issues: "any vault this
     /// issuer owns", a set only the hub can enumerate.
     fn unscoped(kind: GrantKind) -> GrantFixture {
-        GrantFixture { kind, scope: None, ..follow("unused") }
+        GrantFixture {
+            kind,
+            scope: None,
+            ..follow("unused")
+        }
     }
 
     /// Sign `fixture` as a grant from `from` to `to`, in the wire shape the
@@ -724,7 +761,10 @@ mod tests {
     }
 
     async fn connect(addr: std::net::SocketAddr) -> WsStream {
-        tokio_tungstenite::connect_async(format!("ws://{addr}")).await.unwrap().0
+        tokio_tungstenite::connect_async(format!("ws://{addr}"))
+            .await
+            .unwrap()
+            .0
     }
 
     /// This client's own vault. The hub lists it because we own it, and the
@@ -747,7 +787,10 @@ mod tests {
     ) -> (FetchOutcome, Vec<String>) {
         let vault_state: Vec<VaultState> = listed
             .iter()
-            .map(|id| VaultState { vault_id: id.to_string(), holds: None })
+            .map(|id| VaultState {
+                vault_id: id.to_string(),
+                holds: None,
+            })
             .collect();
         let (hub, asked) = spawn_fetch_hub(answers).await;
         let mut ws = connect(hub.addr).await;
@@ -798,9 +841,15 @@ mod tests {
         )
         .await;
 
-        assert!(asked.is_empty(), "assoc carries no authority: the client must not ask, {asked:?}");
+        assert!(
+            asked.is_empty(),
+            "assoc carries no authority: the client must not ask, {asked:?}"
+        );
         assert!(out.fetched.is_empty());
-        assert!(out.skipped.is_empty(), "not asking is not a failure to report");
+        assert!(
+            out.skipped.is_empty(),
+            "not asking is not a failure to report"
+        );
         assert!(!peer_dir(dir.path(), "v-work").exists());
     }
 
@@ -832,7 +881,11 @@ mod tests {
         .await;
 
         assert_eq!(asked, vec!["v-other".to_string()]);
-        assert!(out.skipped.is_empty(), "a chunked body must not be a skipped fetch: {:?}", out.skipped);
+        assert!(
+            out.skipped.is_empty(),
+            "a chunked body must not be a skipped fetch: {:?}",
+            out.skipped
+        );
         assert_eq!(out.fetched.len(), 1, "the chunked fetch produced nothing");
         // Written to disk byte-for-byte: reassembling in the wrong order, or
         // dropping a frame, still yields "some bytes" and would pass a test
@@ -860,8 +913,15 @@ mod tests {
         )
         .await;
 
-        assert!(out.fetched.is_empty(), "a body that failed its integrity check was accepted");
-        assert_eq!(out.skipped.len(), 1, "the refusal must be reported, not swallowed");
+        assert!(
+            out.fetched.is_empty(),
+            "a body that failed its integrity check was accepted"
+        );
+        assert_eq!(
+            out.skipped.len(),
+            1,
+            "the refusal must be reported, not swallowed"
+        );
         assert!(
             !peer_index_path(dir.path(), "v-other").exists(),
             "refused bytes must not reach disk: there is no coming back to repair them"
@@ -925,8 +985,15 @@ mod tests {
         let (out, _asked) = fetched.expect(
             "the descriptor must be refused on its own: the client waited for frames instead",
         );
-        assert!(out.fetched.is_empty(), "a descriptor over the frame cap was accepted");
-        assert_eq!(out.skipped.len(), 1, "the refusal must be reported, not swallowed");
+        assert!(
+            out.fetched.is_empty(),
+            "a descriptor over the frame cap was accepted"
+        );
+        assert_eq!(
+            out.skipped.len(),
+            1,
+            "the refusal must be reported, not swallowed"
+        );
         assert!(!peer_index_path(dir.path(), "v-other").exists());
     }
 
@@ -953,8 +1020,11 @@ mod tests {
         )
         .await;
 
-        assert_eq!(asked, vec!["v-follow", "v-link", "v-peer"],
-            "link transfers full authority, follow and peer authorise reads, assoc nothing");
+        assert_eq!(
+            asked,
+            vec!["v-follow", "v-link", "v-peer"],
+            "link transfers full authority, follow and peer authorise reads, assoc nothing"
+        );
         assert_eq!(out.fetched.len(), 3);
     }
 
@@ -977,8 +1047,11 @@ mod tests {
         )
         .await;
 
-        assert_eq!(asked, vec!["v-other".to_string()],
-            "the hub listed it; the grant naming no vault is not a reason to stay quiet");
+        assert_eq!(
+            asked,
+            vec!["v-other".to_string()],
+            "the hub listed it; the grant naming no vault is not a reason to stay quiet"
+        );
         assert_eq!(out.fetched.len(), 1);
         assert_installed(dir.path(), "v-other", &body);
     }
@@ -1003,8 +1076,11 @@ mod tests {
         )
         .await;
 
-        assert_eq!(asked, vec!["v-other".to_string()],
-            "a key that has said nothing else to us has no say over what we read");
+        assert_eq!(
+            asked,
+            vec!["v-other".to_string()],
+            "a key that has said nothing else to us has no say over what we read"
+        );
         assert_eq!(out.fetched.len(), 1);
     }
 
@@ -1019,12 +1095,18 @@ mod tests {
         let (out, asked) = run(
             dir.path(),
             &["v-work"],
-            vec![to_me(unscoped(GrantKind::Link)), to_me(of_kind(GrantKind::Assoc, "v-work"))],
+            vec![
+                to_me(unscoped(GrantKind::Link)),
+                to_me(of_kind(GrantKind::Assoc, "v-work")),
+            ],
             vec![("v-work", FetchAnswer::Index(index_bytes("v-work")))],
         )
         .await;
 
-        assert!(asked.is_empty(), "the issuer withheld this vault by name: {asked:?}");
+        assert!(
+            asked.is_empty(),
+            "the issuer withheld this vault by name: {asked:?}"
+        );
         assert!(out.fetched.is_empty());
     }
 
@@ -1051,7 +1133,10 @@ mod tests {
         )
         .await;
 
-        assert!(asked.is_empty(), "the issuer withheld this vault by name: {asked:?}");
+        assert!(
+            asked.is_empty(),
+            "the issuer withheld this vault by name: {asked:?}"
+        );
         assert!(out.fetched.is_empty());
     }
 
@@ -1076,8 +1161,11 @@ mod tests {
         )
         .await;
 
-        assert_eq!(asked, vec!["v-work".to_string()],
-            "the key that named this vault to us is not the key vetoing it");
+        assert_eq!(
+            asked,
+            vec!["v-work".to_string()],
+            "the key that named this vault to us is not the key vetoing it"
+        );
         assert_eq!(out.fetched.len(), 1);
     }
 
@@ -1095,9 +1183,17 @@ mod tests {
         )
         .await;
 
-        assert_eq!(asked, vec!["v-other".to_string()], "our own vault is not ours to fetch");
+        assert_eq!(
+            asked,
+            vec!["v-other".to_string()],
+            "our own vault is not ours to fetch"
+        );
         assert!(!peer_dir(dir.path(), MY_VAULT).exists());
-        assert_eq!(out.fetched.len(), 1, "the vault that is not ours still lands");
+        assert_eq!(
+            out.fetched.len(),
+            1,
+            "the vault that is not ours still lands"
+        );
     }
 
     /// The hub's list is the authority in both directions. A grant this
@@ -1118,8 +1214,11 @@ mod tests {
         )
         .await;
 
-        assert_eq!(asked, vec!["v-listed".to_string()],
-            "a grant the hub did not back with a listing buys nothing: {asked:?}");
+        assert_eq!(
+            asked,
+            vec!["v-listed".to_string()],
+            "a grant the hub did not back with a listing buys nothing: {asked:?}"
+        );
         assert!(!peer_dir(dir.path(), "v-stale").exists());
     }
 
@@ -1138,8 +1237,14 @@ mod tests {
             dir.path(),
             &["v-listed"],
             vec![
-                to_me(GrantFixture { state: "pending", ..assoc() }),
-                to_me(GrantFixture { expires_at: NOW, ..assoc() }),
+                to_me(GrantFixture {
+                    state: "pending",
+                    ..assoc()
+                }),
+                to_me(GrantFixture {
+                    expires_at: NOW,
+                    ..assoc()
+                }),
                 wire(&me(), &them().1, &assoc()),
                 forged,
             ],
@@ -1147,8 +1252,11 @@ mod tests {
         )
         .await;
 
-        assert_eq!(asked, vec!["v-listed".to_string()],
-            "pending, expired, addressed elsewhere, unsigned: none of these is our assoc");
+        assert_eq!(
+            asked,
+            vec!["v-listed".to_string()],
+            "pending, expired, addressed elsewhere, unsigned: none of these is our assoc"
+        );
         assert_eq!(out.fetched.len(), 1);
     }
 
@@ -1165,8 +1273,10 @@ mod tests {
 
         assert_eq!(asked, vec!["v-empty".to_string()], "it is asked for");
         assert!(out.fetched.is_empty());
-        assert!(out.skipped.is_empty(),
-            "a peer that has never uploaded is the ordinary state of a new peer, not a failure");
+        assert!(
+            out.skipped.is_empty(),
+            "a peer that has never uploaded is the ordinary state of a new peer, not a failure"
+        );
         assert!(!peer_dir(dir.path(), "v-empty").exists());
     }
 
@@ -1206,10 +1316,20 @@ mod tests {
 
         let (out, asked) = run(dir.path(), &["v-same"], grants(), answer()).await;
 
-        assert_eq!(asked, vec!["v-same".to_string()], "it is still asked for and still verified");
+        assert_eq!(
+            asked,
+            vec!["v-same".to_string()],
+            "it is still asked for and still verified"
+        );
         assert_eq!(out.unchanged, vec!["v-same".to_string()]);
-        assert!(out.fetched.is_empty(), "nothing was written, so nothing downstream should rerun");
-        assert!(out.skipped.is_empty(), "an already-current vault is not a failure");
+        assert!(
+            out.fetched.is_empty(),
+            "nothing was written, so nothing downstream should rerun"
+        );
+        assert!(
+            out.skipped.is_empty(),
+            "an already-current vault is not a failure"
+        );
         assert_eq!(
             std::fs::metadata(&path).unwrap().ino(),
             installed,
@@ -1263,7 +1383,11 @@ mod tests {
             vec![("v-cached", FetchAnswer::Index(good.clone()))],
         )
         .await;
-        assert_eq!(first.fetched.len(), 1, "precondition: a good index is cached");
+        assert_eq!(
+            first.fetched.len(),
+            1,
+            "precondition: a good index is cached"
+        );
         let path = peer_index_path(dir.path(), "v-cached");
         let cached = std::fs::metadata(&path).unwrap().ino();
 
@@ -1275,7 +1399,11 @@ mod tests {
         )
         .await;
 
-        assert_eq!(out.skipped, vec!["v-cached".to_string()], "the bad index is refused");
+        assert_eq!(
+            out.skipped,
+            vec!["v-cached".to_string()],
+            "the bad index is refused"
+        );
         assert!(out.fetched.is_empty());
         assert_eq!(
             std::fs::metadata(&path).unwrap().ino(),
@@ -1289,7 +1417,10 @@ mod tests {
             .map(|e| e.file_name().to_string_lossy().to_string())
             .filter(|n| n != "index.db")
             .collect();
-        assert!(left_behind.is_empty(), "the failed write left {left_behind:?} behind");
+        assert!(
+            left_behind.is_empty(),
+            "the failed write left {left_behind:?} behind"
+        );
     }
 
     /// R-C. The header is a claim; the bytes are the fact.
@@ -1300,15 +1431,20 @@ mod tests {
             dir.path(),
             &["v-liar"],
             vec![to_me(follow("v-liar"))],
-            vec![("v-liar", FetchAnswer::IndexUnderADifferentSha(index_bytes("v-liar")))],
+            vec![(
+                "v-liar",
+                FetchAnswer::IndexUnderADifferentSha(index_bytes("v-liar")),
+            )],
         )
         .await;
 
         assert_eq!(asked, vec!["v-liar".to_string()]);
         assert!(out.fetched.is_empty());
         assert_eq!(out.skipped, vec!["v-liar".to_string()]);
-        assert!(!peer_index_path(dir.path(), "v-liar").exists(),
-            "written and repaired later is not a thing: nothing would know to come back");
+        assert!(
+            !peer_index_path(dir.path(), "v-liar").exists(),
+            "written and repaired later is not a thing: nothing would know to come back"
+        );
     }
 
     /// R-D. Two vaults, the first refused. The second must still land, and
@@ -1322,14 +1458,20 @@ mod tests {
             &["v-bad", "v-good"],
             vec![to_me(follow("v-bad")), to_me(follow("v-good"))],
             vec![
-                ("v-bad", FetchAnswer::Reject("not authorized to read this vault")),
+                (
+                    "v-bad",
+                    FetchAnswer::Reject("not authorized to read this vault"),
+                ),
                 ("v-good", FetchAnswer::Index(body.clone())),
             ],
         )
         .await;
 
-        assert_eq!(asked, vec!["v-bad".to_string(), "v-good".to_string()],
-            "the second vault is still asked for");
+        assert_eq!(
+            asked,
+            vec!["v-bad".to_string(), "v-good".to_string()],
+            "the second vault is still asked for"
+        );
         assert_eq!(out.skipped, vec!["v-bad".to_string()]);
         assert_eq!(out.fetched.len(), 1);
         assert_eq!(out.fetched[0].vault_id, "v-good");
@@ -1349,14 +1491,21 @@ mod tests {
             &["v-liar", "v-good"],
             vec![to_me(follow("v-liar")), to_me(follow("v-good"))],
             vec![
-                ("v-liar", FetchAnswer::IndexUnderADifferentSha(index_bytes("v-liar"))),
+                (
+                    "v-liar",
+                    FetchAnswer::IndexUnderADifferentSha(index_bytes("v-liar")),
+                ),
                 ("v-good", FetchAnswer::Index(body.clone())),
             ],
         )
         .await;
 
         assert_eq!(out.skipped, vec!["v-liar".to_string()]);
-        assert_eq!(out.fetched.len(), 1, "the rejected frame was consumed, not left in the stream");
+        assert_eq!(
+            out.fetched.len(),
+            1,
+            "the rejected frame was consumed, not left in the stream"
+        );
         assert_installed(dir.path(), "v-good", &body);
     }
 
@@ -1375,19 +1524,31 @@ mod tests {
             &["v-asked", "v-good"],
             vec![to_me(follow("v-asked")), to_me(follow("v-good"))],
             vec![
-                ("v-asked", FetchAnswer::HeaderFor("v-else", index_bytes("v-else"))),
+                (
+                    "v-asked",
+                    FetchAnswer::HeaderFor("v-else", index_bytes("v-else")),
+                ),
                 ("v-good", FetchAnswer::Index(good.clone())),
             ],
         )
         .await;
 
-        assert_eq!(asked, vec!["v-asked".to_string(), "v-good".to_string()],
-            "the hub answered both and complained about neither");
+        assert_eq!(
+            asked,
+            vec!["v-asked".to_string(), "v-good".to_string()],
+            "the hub answered both and complained about neither"
+        );
         assert_eq!(out.skipped, vec!["v-asked".to_string()]);
-        assert_eq!(out.fetched.len(), 1, "the misdirected frame was consumed, not left in the stream");
+        assert_eq!(
+            out.fetched.len(),
+            1,
+            "the misdirected frame was consumed, not left in the stream"
+        );
         assert_installed(dir.path(), "v-good", &good);
-        assert!(!peer_dir(dir.path(), "v-else").exists(),
-            "an answer for a vault nobody asked for must not create a cache for it");
+        assert!(
+            !peer_dir(dir.path(), "v-else").exists(),
+            "an answer for a vault nobody asked for must not create a cache for it"
+        );
         assert!(!peer_dir(dir.path(), "v-asked").exists());
     }
 
@@ -1397,9 +1558,13 @@ mod tests {
     #[tokio::test]
     async fn a_listed_vault_id_that_is_not_a_safe_path_component_is_never_asked_for() {
         let dir = tempfile::tempdir().unwrap();
-        let (_out, asked) =
-            run(dir.path(), &["../../escaped"], vec![to_me(unscoped(GrantKind::Link))], vec![])
-                .await;
+        let (_out, asked) = run(
+            dir.path(),
+            &["../../escaped"],
+            vec![to_me(unscoped(GrantKind::Link))],
+            vec![],
+        )
+        .await;
         assert!(asked.is_empty(), "{asked:?}");
         assert!(!dir.path().join("../../escaped").exists());
     }
@@ -1457,20 +1622,34 @@ mod tests {
 
         // The veto side: it silences the vault it names, and no other.
         assert!(only_assoc_names(std::slice::from_ref(&assoc), "v-alice"));
-        assert!(!only_assoc_names(std::slice::from_ref(&assoc), "v-a"),
-            "a vault whose id the scope starts with is a different vault");
-        assert!(!only_assoc_names(std::slice::from_ref(&assoc), "v-alice-2"),
-            "and so is one that starts with the scope");
-        assert!(!only_assoc_names(std::slice::from_ref(&assoc), "V-ALICE"),
-            "and the comparison is not case-insensitive either");
+        assert!(
+            !only_assoc_names(std::slice::from_ref(&assoc), "v-a"),
+            "a vault whose id the scope starts with is a different vault"
+        );
+        assert!(
+            !only_assoc_names(std::slice::from_ref(&assoc), "v-alice-2"),
+            "and so is one that starts with the scope"
+        );
+        assert!(
+            !only_assoc_names(std::slice::from_ref(&assoc), "V-ALICE"),
+            "and the comparison is not case-insensitive either"
+        );
 
         // The outranking side: only a read grant naming this vault, or naming
         // none at all, may lift the veto.
-        assert!(!only_assoc_names(&[assoc.clone(), held(&b, GrantKind::Follow, "v-alice")], "v-alice"),
-            "a read grant for this vault outranks a stranger's assoc");
+        assert!(
+            !only_assoc_names(
+                &[assoc.clone(), held(&b, GrantKind::Follow, "v-alice")],
+                "v-alice"
+            ),
+            "a read grant for this vault outranks a stranger's assoc"
+        );
         for near_miss in ["v-a", "v-alice-2", "V-ALICE"] {
             assert!(
-                only_assoc_names(&[assoc.clone(), held(&b, GrantKind::Follow, near_miss)], "v-alice"),
+                only_assoc_names(
+                    &[assoc.clone(), held(&b, GrantKind::Follow, near_miss)],
+                    "v-alice"
+                ),
                 "a read grant for {near_miss:?} says nothing about v-alice"
             );
         }

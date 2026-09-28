@@ -1,7 +1,7 @@
+use ll_search::sync::config::{encrypted_seed_path, seed_path};
 use ll_search::sync::seed_store::{
     load_only, load_or_create, read_encrypted, read_plaintext_legacy, write_encrypted, SeedBackend,
 };
-use ll_search::sync::config::{encrypted_seed_path, seed_path};
 use std::sync::Once;
 use tempfile::tempdir;
 
@@ -18,7 +18,9 @@ fn init_test_backend() {
         // SAFETY (Rust 2024): set_var is unsafe because env mutation is global.
         // Set once at first invocation and never unset; test threads only ever
         // observe `encrypted`, never an empty value.
-        unsafe { std::env::set_var("LL_SEED_BACKEND", "encrypted"); }
+        unsafe {
+            std::env::set_var("LL_SEED_BACKEND", "encrypted");
+        }
     });
 }
 
@@ -65,7 +67,10 @@ fn legacy_plaintext_read_returns_correct_bytes() {
 
     let result = read_plaintext_legacy(tmp.path()).unwrap().unwrap();
     assert_eq!(result, [5u8; 32]);
-    assert!(seed_path(tmp.path()).exists(), "legacy seed file must still exist after read");
+    assert!(
+        seed_path(tmp.path()).exists(),
+        "legacy seed file must still exist after read"
+    );
 }
 
 #[test]
@@ -121,10 +126,15 @@ fn load_only_returns_existing_seed_without_creating() {
     let created = load_or_create(tmp.path()).unwrap();
     let pk_created = ll_search::sync::key_id::pubkey_b64(&created.signing_key);
 
-    let loaded = load_only(tmp.path()).unwrap().expect("seed must be found after load_or_create wrote one");
+    let loaded = load_only(tmp.path())
+        .unwrap()
+        .expect("seed must be found after load_or_create wrote one");
     let pk_loaded = ll_search::sync::key_id::pubkey_b64(&loaded.signing_key);
 
-    assert_eq!(pk_created, pk_loaded, "load_only must return the same key load_or_create wrote");
+    assert_eq!(
+        pk_created, pk_loaded,
+        "load_only must return the same key load_or_create wrote"
+    );
     assert!(!loaded.created, "load_only never sets created=true");
 }
 

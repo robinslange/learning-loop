@@ -1,28 +1,35 @@
-pub mod scoring;
-pub mod query;
+pub mod cluster;
+pub mod context;
+pub mod eval;
 pub mod federation;
 pub mod graph;
-pub mod cluster;
+pub mod query;
 pub mod reflect;
+pub mod scoring;
 pub mod store;
-#[cfg(feature = "research")]
-pub mod tune;
-pub mod eval;
-pub mod context;
 #[cfg(test)]
 pub(crate) mod test_helpers;
-
-pub use query::{SearchResult, QueryResponse, QueryMeta, TemporalParams, hybrid_query_with_ctx, build_query_response};
-pub use federation::{discover_peer_dbs, discover_peer_dbs_for, batch_load_bodies_federated, query_scope, QueryScope};
-pub use cluster::{SimilarResult, DiscriminatePair, similar_notes, cluster_notes, discriminate_pairs};
-pub use reflect::{ReflectQueryResult, ReflectScanResult, reflect_scan};
-pub use store::{EmbeddingStore, load_store};
 #[cfg(feature = "research")]
-pub use tune::tune_prf;
+pub mod tune;
+
+pub use cluster::{
+    cluster_notes, discriminate_pairs, similar_notes, DiscriminatePair, SimilarResult,
+};
+pub use context::SearchContext;
 pub use eval::eval_funnel;
 #[cfg(feature = "research")]
-pub use eval::{eval_prf, tune_weights, lane_diagnostics, LaneStat};
-pub use context::SearchContext;
+pub use eval::{eval_prf, lane_diagnostics, tune_weights, LaneStat};
+pub use federation::{
+    batch_load_bodies_federated, discover_peer_dbs, discover_peer_dbs_for, query_scope, QueryScope,
+};
+pub use query::{
+    build_query_response, hybrid_query_with_ctx, QueryMeta, QueryResponse, SearchResult,
+    TemporalParams,
+};
+pub use reflect::{reflect_scan, ReflectQueryResult, ReflectScanResult};
+pub use store::{load_store, EmbeddingStore};
+#[cfg(feature = "research")]
+pub use tune::tune_prf;
 
 #[cfg(feature = "research")]
 /// The shipped fusion weights, for harnesses that want to mark them in a sweep.

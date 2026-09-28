@@ -280,13 +280,16 @@ pub fn client_auth_message(
     hub_key_id: &str,
     exporter: &[u8],
 ) -> Vec<u8> {
-    framed(b"ll-client-v5", &[nonce_h, nonce_c, hub_key_id.as_bytes(), exporter])
+    framed(
+        b"ll-client-v5",
+        &[nonce_h, nonce_c, hub_key_id.as_bytes(), exporter],
+    )
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::b64;
     use super::*;
+    use crate::b64;
 
     /// A `Reject` reason is the one string in this system that comes from
     /// off-machine, and it is written to `sync-state.json`, re-rendered by
@@ -299,8 +302,14 @@ mod tests {
         let clean = sanitise_hub_text(attack);
 
         assert!(!clean.contains('\u{1b}'), "the escape survived: {clean:?}");
-        assert!(!clean.contains('\r'), "the carriage return survived: {clean:?}");
-        assert!(clean.starts_with("fine"), "and the real text is kept: {clean:?}");
+        assert!(
+            !clean.contains('\r'),
+            "the carriage return survived: {clean:?}"
+        );
+        assert!(
+            clean.starts_with("fine"),
+            "and the real text is kept: {clean:?}"
+        );
     }
 
     #[test]
@@ -310,7 +319,10 @@ mod tests {
         let clean = sanitise_hub_text(&huge);
 
         assert!(clean.starts_with(&"A".repeat(MAX_HUB_TEXT)));
-        assert!(clean.ends_with("(truncated)"), "a silent cut reads as the hub's own words");
+        assert!(
+            clean.ends_with("(truncated)"),
+            "a silent cut reads as the hub's own words"
+        );
         assert!(clean.chars().count() < MAX_HUB_TEXT + 20);
     }
 
@@ -331,7 +343,6 @@ mod tests {
         assert_eq!(clean, "firstsecondthird");
     }
 
-
     /// The wire tags are the contract between two repos that cannot see each
     /// other. Nothing fails to compile when one side renames a variant; the
     /// first real connection fails instead. Pinning the tags as literals here,
@@ -341,28 +352,56 @@ mod tests {
     fn every_message_tag_is_pinned() {
         let tag = |v: serde_json::Value| v["type"].as_str().unwrap().to_string();
 
-        assert_eq!(tag(serde_json::to_value(ClientMsg::PutGrant {
-            statement_b64: "s".into(), signature_b64: "g".into(),
-        }).unwrap()), "put-grant");
-        assert_eq!(tag(serde_json::to_value(ClientMsg::RevokeGrant {
-            statement_b64: "s".into(), signature_b64: "g".into(),
-        }).unwrap()), "revoke-grant");
-        assert_eq!(tag(serde_json::to_value(ClientMsg::PutDecision {
-            statement_b64: "s".into(), signature_b64: "g".into(),
-        }).unwrap()), "put-decision");
-        assert_eq!(tag(serde_json::to_value(ClientMsg::FetchIndex {
-            vault_id: "v1".into(),
-        }).unwrap()), "fetch-index");
+        assert_eq!(
+            tag(serde_json::to_value(ClientMsg::PutGrant {
+                statement_b64: "s".into(),
+                signature_b64: "g".into(),
+            })
+            .unwrap()),
+            "put-grant"
+        );
+        assert_eq!(
+            tag(serde_json::to_value(ClientMsg::RevokeGrant {
+                statement_b64: "s".into(),
+                signature_b64: "g".into(),
+            })
+            .unwrap()),
+            "revoke-grant"
+        );
+        assert_eq!(
+            tag(serde_json::to_value(ClientMsg::PutDecision {
+                statement_b64: "s".into(),
+                signature_b64: "g".into(),
+            })
+            .unwrap()),
+            "put-decision"
+        );
+        assert_eq!(
+            tag(serde_json::to_value(ClientMsg::FetchIndex {
+                vault_id: "v1".into(),
+            })
+            .unwrap()),
+            "fetch-index"
+        );
 
-        assert_eq!(tag(serde_json::to_value(HubMsg::GrantAck {
-            grant_id: "g1".into(),
-        }).unwrap()), "grant-ack");
+        assert_eq!(
+            tag(serde_json::to_value(HubMsg::GrantAck {
+                grant_id: "g1".into(),
+            })
+            .unwrap()),
+            "grant-ack"
+        );
         let header = serde_json::to_value(HubMsg::IndexHeader {
-            vault_id: "v1".into(), holds: None, chunked: None,
-        }).unwrap();
+            vault_id: "v1".into(),
+            holds: None,
+            chunked: None,
+        })
+        .unwrap();
         assert_eq!(tag(header.clone()), "index-header");
-        assert!(header["holds"].is_null(),
-            "a hub holding nothing says so with an explicit null, not by omitting the field");
+        assert!(
+            header["holds"].is_null(),
+            "a hub holding nothing says so with an explicit null, not by omitting the field"
+        );
     }
 
     /// `IndexHeader.holds` must deserialise from the same JSON `SyncReady`'s
@@ -403,7 +442,6 @@ mod tests {
     /// A regression to a placeholder that only looks like a key_id fails here.
     #[test]
     fn hub_challenge_deserialises_from_the_hub_wire_format() {
-        
         const HUB_KEY_ID: &str = "z6MkwVDfCg9LbbY6xjH3EZk8YSFQZujV5Y4y1ZWeER9tDiN3";
         let wire = format!(
             r#"{{"type":"hub-challenge","nonce_h":"AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=",
@@ -411,7 +449,11 @@ mod tests {
                  "sig_h":"AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAg=="}}"#
         );
         match serde_json::from_str::<HubMsg>(&wire).unwrap() {
-            HubMsg::HubChallenge { nonce_h, hub_key_id, sig_h } => {
+            HubMsg::HubChallenge {
+                nonce_h,
+                hub_key_id,
+                sig_h,
+            } => {
                 assert_eq!(hub_key_id, HUB_KEY_ID);
                 assert!(
                     crate::sync::key_id::KeyId::parse(&hub_key_id).is_ok(),
@@ -432,10 +474,15 @@ mod tests {
                        "grants":[],"revocations":[]}"#;
         match serde_json::from_str::<HubMsg>(wire).unwrap() {
             HubMsg::SyncReady {
-            chunked_upload: None, vault_state, .. } => {
-                assert!(vault_state[0].holds.is_none(),
+                chunked_upload: None,
+                vault_state,
+                ..
+            } => {
+                assert!(
+                    vault_state[0].holds.is_none(),
                     "`null` must mean 'the hub holds nothing' — this is the value \
-                     that triggers a re-upload");
+                     that triggers a re-upload"
+                );
             }
             other => panic!("wrong variant: {other:?}"),
         }
@@ -460,7 +507,12 @@ mod tests {
                        "revocations":[{"statement_b64":"cmV2","signature_b64":"cnNpZw"}]}"#;
         match serde_json::from_str::<HubMsg>(wire).unwrap() {
             HubMsg::SyncReady {
-            chunked_upload: None, protocol_version, vault_state, grants, revocations } => {
+                chunked_upload: None,
+                protocol_version,
+                vault_state,
+                grants,
+                revocations,
+            } => {
                 assert_eq!(protocol_version, 5);
                 let held = vault_state[0].holds.as_ref().expect("holds must be Some");
                 assert_eq!(held.sha256, "deadbeef");
@@ -557,7 +609,10 @@ mod tests {
         // the statement the signature covers, so there is no second copy that
         // could name a different grant than the one that was signed for.
         let json = serde_json::to_value(&msg).unwrap();
-        assert!(json.get("grant_id").is_none(), "the grant_id is inside the signed statement");
+        assert!(
+            json.get("grant_id").is_none(),
+            "the grant_id is inside the signed statement"
+        );
     }
 
     /// The whole `sync-ready` payload as bytes, including a `revocations[]`
@@ -577,10 +632,17 @@ mod tests {
             chunked_upload: None,
             protocol_version: PROTOCOL_VERSION,
             vault_state: vec![
-                VaultState { vault_id: "v1".into(), holds: None },
+                VaultState {
+                    vault_id: "v1".into(),
+                    holds: None,
+                },
                 VaultState {
                     vault_id: "v2".into(),
-                    holds: Some(HeldIndex { sha256: "abc".into(), note_count: 7, uploaded_at: 10 }),
+                    holds: Some(HeldIndex {
+                        sha256: "abc".into(),
+                        note_count: 7,
+                        uploaded_at: 10,
+                    }),
                 },
             ],
             grants: vec![GrantWire {
@@ -601,7 +663,9 @@ mod tests {
 
     #[test]
     fn client_auth_serialises_to_the_exact_hub_expected_wire_format() {
-        let msg = ClientMsg::ClientAuth { sig_c: "CCCC".into() };
+        let msg = ClientMsg::ClientAuth {
+            sig_c: "CCCC".into(),
+        };
         let json = serde_json::to_value(&msg).unwrap();
         let expected: serde_json::Value =
             serde_json::from_str(r#"{"type":"client-auth","sig_c":"CCCC"}"#).unwrap();
@@ -631,12 +695,20 @@ mod tests {
         )
         .unwrap();
         assert_eq!(json, expected);
-        assert!(json.get("size").is_none(), "size is hub-derived, not wire-carried");
-        assert!(json.get("uploaded_at").is_none(), "uploaded_at is hub-derived, not wire-carried");
+        assert!(
+            json.get("size").is_none(),
+            "size is hub-derived, not wire-carried"
+        );
+        assert!(
+            json.get("uploaded_at").is_none(),
+            "uploaded_at is hub-derived, not wire-carried"
+        );
 
         let round_tripped: ClientMsg = serde_json::from_value(json).unwrap();
-        assert!(matches!(round_tripped, ClientMsg::UploadIndex {
-            chunked: None, .. }));
+        assert!(matches!(
+            round_tripped,
+            ClientMsg::UploadIndex { chunked: None, .. }
+        ));
     }
 
     /// Independently hand-assembles the expected byte string field-by-field
@@ -659,7 +731,12 @@ mod tests {
     #[test]
     fn client_auth_message_produces_the_exact_expected_bytes() {
         let mut expected = b"ll-client-v5".to_vec();
-        for part in [b"AB".as_slice(), b"CD".as_slice(), b"zK".as_slice(), b"EF".as_slice()] {
+        for part in [
+            b"AB".as_slice(),
+            b"CD".as_slice(),
+            b"zK".as_slice(),
+            b"EF".as_slice(),
+        ] {
             expected.extend_from_slice(&(part.len() as u32).to_be_bytes());
             expected.extend_from_slice(part);
         }
@@ -684,7 +761,10 @@ mod tests {
     fn changing_the_exporter_changes_the_client_message() {
         let a = client_auth_message(b"nh", b"nc", "zK", &[1u8; 32]);
         let b = client_auth_message(b"nh", b"nc", "zK", &[2u8; 32]);
-        assert_ne!(a, b, "the session must be bound, or a relay is undetectable");
+        assert_ne!(
+            a, b,
+            "the session must be bound, or a relay is undetectable"
+        );
     }
 
     #[test]

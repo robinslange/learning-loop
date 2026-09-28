@@ -108,8 +108,14 @@ fn unreadable_config(config_dir: &Path, e: &anyhow::Error) -> String {
 
 fn identity_block(config: &FederationConfig, seed: Option<&KeyId>) -> String {
     let mut out = String::new();
-    out.push_str(&row("vault:", config.vault_path.as_deref().unwrap_or("unknown")));
-    out.push_str(&row("vault id:", config.vault_id.as_deref().unwrap_or("unknown")));
+    out.push_str(&row(
+        "vault:",
+        config.vault_path.as_deref().unwrap_or("unknown"),
+    ));
+    out.push_str(&row(
+        "vault id:",
+        config.vault_id.as_deref().unwrap_or("unknown"),
+    ));
     out.push_str(&row("key:", &client_key(seed, &config.identity.pubkey)));
     out.push_str(&row("hub:", &config.hub.endpoint));
     out.push_str(&row("hub key:", &hub_key(config.hub.key_id.as_deref())));
@@ -119,16 +125,22 @@ fn identity_block(config: &FederationConfig, seed: Option<&KeyId>) -> String {
     // the two lines above it belong to a key it no longer has — and nothing
     // else on this page would say so.
     if let Some(stale) = recovered_over(seed, &config.identity.pubkey) {
-        out.push_str(&row("RECOVERED", &format!(
-            "config.json still names {stale}. The key above is this machine's; the vault \
+        out.push_str(&row(
+            "RECOVERED",
+            &format!(
+                "config.json still names {stale}. The key above is this machine's; the vault \
              id and hub pin are the ones that key had. Re-enroll to bring them into line."
-        )));
+            ),
+        ));
     }
     // Ask the validator rather than restating its rules: this is the exact
     // check `sync` runs before it will talk to anything, so a config that
     // fails it cannot sync no matter how healthy the rest of the page looks.
     if let Err(e) = config.validate() {
-        out.push_str(&row("BLOCKED", &format!("`ll sync` will refuse this config. {e}")));
+        out.push_str(&row(
+            "BLOCKED",
+            &format!("`ll sync` will refuse this config. {e}"),
+        ));
     }
     out
 }
@@ -142,11 +154,9 @@ fn local_export_note_count(config_dir: &Path) -> Option<i64> {
     if !path.exists() {
         return None;
     }
-    let conn = rusqlite::Connection::open_with_flags(
-        &path,
-        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
-    )
-    .ok()?;
+    let conn =
+        rusqlite::Connection::open_with_flags(&path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .ok()?;
     conn.query_row("SELECT value FROM meta WHERE key = 'note_count'", [], |r| {
         r.get::<_, String>(0)
     })
@@ -157,11 +167,21 @@ fn local_export_note_count(config_dir: &Path) -> Option<i64> {
 
 fn sync_block(state: &SyncState, now: i64, local_note_count: Option<i64>) -> String {
     let mut out = String::new();
-    out.push_str(&row("last sync:", &format!("{}  ({})", utc_minute(state.last_attempt_at), outcome(state))));
-    out.push_str(&row("last ok:", &match state.last_success_at {
-        Some(at) => utc_minute(at),
-        None => "never".to_string(),
-    }));
+    out.push_str(&row(
+        "last sync:",
+        &format!(
+            "{}  ({})",
+            utc_minute(state.last_attempt_at),
+            outcome(state)
+        ),
+    ));
+    out.push_str(&row(
+        "last ok:",
+        &match state.last_success_at {
+            Some(at) => utc_minute(at),
+            None => "never".to_string(),
+        },
+    ));
     out.push_str(&row("hub holds:", &holds(state.hub_holds.as_ref())));
     // A count with nothing beside it reads as healthy at any value. "866
     // notes" was true and useless while 4,193 more sat unsent, because the
@@ -185,7 +205,11 @@ fn sync_block(state: &SyncState, now: i64, local_note_count: Option<i64>) -> Str
             if terminal { "STUCK" } else { "FAILING" },
             &format!(
                 "{consecutive} cycles in a row have failed{}.",
-                if terminal { " and retrying cannot fix it" } else { "" }
+                if terminal {
+                    " and retrying cannot fix it"
+                } else {
+                    ""
+                }
             ),
         ));
     }
@@ -204,21 +228,27 @@ fn sync_block(state: &SyncState, now: i64, local_note_count: Option<i64>) -> Str
     // nothing to say; `None` is a cycle that never reached it, and the
     // outcome line above has already said why.
     if let Some(n) = state.skipped_fetches.filter(|n| *n > 0) {
-        out.push_str(&row("WARNING", &format!(
-            "{n} followed vault(s) could not be read in that cycle. Their local copies are \
+        out.push_str(&row(
+            "WARNING",
+            &format!(
+                "{n} followed vault(s) could not be read in that cycle. Their local copies are \
              whatever the last successful fetch left; the next sync retries them."
-        )));
+            ),
+        ));
     }
     // Same `Some(0)` / `None` distinction as above, and a stronger warning:
     // a refused fetch may be a hiccup, but a refused grant is the hub's
     // decision and the next cycle gets the same answer.
     if let Some(n) = state.refused_grants.filter(|n| *n > 0) {
-        out.push_str(&row("WARNING", &format!(
-            "the hub refused {n} grant(s) in that cycle. They are still signed and still \
+        out.push_str(&row(
+            "WARNING",
+            &format!(
+                "the hub refused {n} grant(s) in that cycle. They are still signed and still \
              offered on every sync, but whatever they were for — a linked machine, a \
              follow — is not in effect until the hub accepts them. Retrying alone will \
              not change its answer."
-        )));
+            ),
+        ));
     }
     out
 }
@@ -253,24 +283,32 @@ fn read_authority_block(config_dir: &Path, me: Option<&KeyId>, now: i64) -> anyh
         // unreadable seed arrives here the same way — so every diagnosis this
         // line could offer would be wrong for at least three of them, and the
         // module's rule is that no line may imply a check that did not run.
-        return Ok(row("read auth:",
+        return Ok(row(
+            "read auth:",
             "none — no cached peer index is searched, which is the safe direction. Run \
              `ll sync` to record what this key may read; any warning about an existing \
-             record is on stderr above."));
+             record is on stderr above.",
+        ));
     };
-    let mut out = row("read auth:", &format!(
-        "{} vault(s), as the hub listed them at {}",
-        listed.vault_ids.len(),
-        utc_minute(listed.at),
-    ));
+    let mut out = row(
+        "read auth:",
+        &format!(
+            "{} vault(s), as the hub listed them at {}",
+            listed.vault_ids.len(),
+            utc_minute(listed.at),
+        ),
+    );
     let age = listed.age(now);
     if age >= STALE_AFTER_SECS {
-        out.push_str(&row("WARNING", &format!(
-            "federated search is being served on read authority {} days old. A vault the hub \
+        out.push_str(&row(
+            "WARNING",
+            &format!(
+                "federated search is being served on read authority {} days old. A vault the hub \
              has stopped listing since then is still searchable here until the grant behind \
              it expires. Run `ll sync`.",
-            age / 86_400,
-        )));
+                age / 86_400,
+            ),
+        ));
     }
     Ok(out)
 }
@@ -353,7 +391,11 @@ fn outcome(state: &SyncState) -> String {
     if state.outcome == OUTCOME_OK {
         return OUTCOME_OK.to_string();
     }
-    let label = if state.outcome == OUTCOME_ERROR { OUTCOME_ERROR } else { &state.outcome };
+    let label = if state.outcome == OUTCOME_ERROR {
+        OUTCOME_ERROR
+    } else {
+        &state.outcome
+    };
     match state.detail.as_deref() {
         Some(detail) => format!("{label}: {detail}"),
         None => label.to_string(),
@@ -382,8 +424,10 @@ fn client_key(seed: Option<&KeyId>, pubkey_b64: &str) -> String {
         return key_and_fingerprint(id);
     }
     match key_id_from_b64(pubkey_b64) {
-        Some(id) => format!("{}  (from config.json — no seed on this machine)",
-            key_and_fingerprint(&id)),
+        Some(id) => format!(
+            "{}  (from config.json — no seed on this machine)",
+            key_and_fingerprint(&id)
+        ),
         None => format!("{pubkey_b64}  (not a public key this build can read)"),
     }
 }
@@ -461,7 +505,11 @@ fn utc_minute(unix_secs: i64) -> String {
     };
     let (y, m, d) = crate::db::days_to_ymd(secs / 86_400);
     let rem = secs % 86_400;
-    format!("{y:04}-{m:02}-{d:02} {:02}:{:02} UTC", rem / 3600, (rem % 3600) / 60)
+    format!(
+        "{y:04}-{m:02}-{d:02} {:02}:{:02} UTC",
+        rem / 3600,
+        (rem % 3600) / 60
+    )
 }
 
 /// One labelled row, wrapped to [`WIDTH`] and indented under the label so the
@@ -511,13 +559,16 @@ fn row(label: &str, value: &str) -> String {
     out
 }
 
-const FOOTER: &str = "\nRead from local files. Nothing here contacted the hub; `ll sync` does that.\n";
+const FOOTER: &str =
+    "\nRead from local files. Nothing here contacted the hub; `ll sync` does that.\n";
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sync::config::{
+        write_config, FederationConfig, HubEndpoint, Identity, VisibilityConfig,
+    };
     use crate::sync::key_id::pubkey_b64;
-    use crate::sync::config::{write_config, FederationConfig, HubEndpoint, Identity, VisibilityConfig};
     use crate::sync::key_id::KeyId;
     use crate::sync::state::{write_state, HubHolds, SyncState, OUTCOME_ERROR, OUTCOME_OK};
     use ed25519_dalek::SigningKey;
@@ -554,67 +605,89 @@ mod tests {
     /// property of thread scheduling.
     fn seeded_profile(config_dir: &Path) {
         crate::sync::test_hub::force_encrypted_seed_backend();
-        write_config(config_dir, &FederationConfig {
-            identity: Identity {
-                display_name: "brain".into(),
-                pubkey: pubkey_b64(&SigningKey::from_bytes(&CLIENT_SEED)),
+        write_config(
+            config_dir,
+            &FederationConfig {
+                identity: Identity {
+                    display_name: "brain".into(),
+                    pubkey: pubkey_b64(&SigningKey::from_bytes(&CLIENT_SEED)),
+                },
+                visibility: VisibilityConfig {
+                    default: "private".into(),
+                    rules: Vec::new(),
+                },
+                hub: HubEndpoint {
+                    endpoint: "wss://hub.interchange.live".into(),
+                    key_id: Some(hub_key_id()),
+                },
+                vault_id: Some("0192f3c1-8a2e-7c3d-9f10-1a2b3c4d5e6f".into()),
+                vault_path: Some("/Users/robin/brain/brain".into()),
+                recovery_key_id: None,
             },
-            visibility: VisibilityConfig { default: "private".into(), rules: Vec::new() },
-            hub: HubEndpoint {
-                endpoint: "wss://hub.interchange.live".into(),
-                key_id: Some(hub_key_id()),
-            },
-            vault_id: Some("0192f3c1-8a2e-7c3d-9f10-1a2b3c4d5e6f".into()),
-            vault_path: Some("/Users/robin/brain/brain".into()),
-            recovery_key_id: None,
-        }).unwrap();
+        )
+        .unwrap();
     }
 
     #[test]
     fn status_reports_when_the_hub_holds_nothing() {
         let dir = tempfile::tempdir().unwrap();
         seeded_profile(dir.path());
-        write_state(dir.path(), &SyncState {
-            last_attempt_at: 1_000,
-            last_success_at: Some(1_000),
-            outcome: OUTCOME_OK.into(),
-            detail: None,
-            hub_holds: Some(HubHolds::Nothing),
-            skipped_fetches: None,
-            refused_grants: None,
-            consecutive_failures: None,
-            first_failure_at: None,
-            terminal: None,
-        }).unwrap();
+        write_state(
+            dir.path(),
+            &SyncState {
+                last_attempt_at: 1_000,
+                last_success_at: Some(1_000),
+                outcome: OUTCOME_OK.into(),
+                detail: None,
+                hub_holds: Some(HubHolds::Nothing),
+                skipped_fetches: None,
+                refused_grants: None,
+                consecutive_failures: None,
+                first_failure_at: None,
+                terminal: None,
+            },
+        )
+        .unwrap();
 
         let out = render_status(dir.path(), 1_100).unwrap();
         assert!(out.contains("hub holds:  nothing"), "got:\n{out}");
-        assert!(out.contains("WARNING"),
-            "'the hub holds nothing' is the outage signature and must be loud; got:\n{out}");
+        assert!(
+            out.contains("WARNING"),
+            "'the hub holds nothing' is the outage signature and must be loud; got:\n{out}"
+        );
     }
 
     #[test]
     fn status_says_how_many_grants_the_hub_refused() {
         let dir = tempfile::tempdir().unwrap();
         seeded_profile(dir.path());
-        write_state(dir.path(), &SyncState {
-            last_attempt_at: 1_000,
-            last_success_at: Some(1_000),
-            outcome: OUTCOME_OK.into(),
-            detail: None,
-            hub_holds: Some(HubHolds::Index { sha256: "abc123".into(), note_count: 10 }),
-            skipped_fetches: Some(0),
-            refused_grants: Some(1),
-            consecutive_failures: None,
-            first_failure_at: None,
-            terminal: None,
-        }).unwrap();
+        write_state(
+            dir.path(),
+            &SyncState {
+                last_attempt_at: 1_000,
+                last_success_at: Some(1_000),
+                outcome: OUTCOME_OK.into(),
+                detail: None,
+                hub_holds: Some(HubHolds::Index {
+                    sha256: "abc123".into(),
+                    note_count: 10,
+                }),
+                skipped_fetches: Some(0),
+                refused_grants: Some(1),
+                consecutive_failures: None,
+                first_failure_at: None,
+                terminal: None,
+            },
+        )
+        .unwrap();
 
         let out = render_status(dir.path(), 1_100).unwrap();
-        assert!(out.contains("refused 1 grant(s)"),
+        assert!(
+            out.contains("refused 1 grant(s)"),
             "the cycle succeeded overall — this line is the only place a refused grant \
              is ever visible, and without it the user meets it as a machine that never \
-             finishes linking; got:\n{out}");
+             finishes linking; got:\n{out}"
+        );
     }
 
     /// The other side, and the reason it needs saying: a check on `> 0` that
@@ -625,21 +698,30 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         seeded_profile(dir.path());
         for refused_grants in [Some(0), None] {
-            write_state(dir.path(), &SyncState {
-                last_attempt_at: 1_000,
-                last_success_at: Some(1_000),
-                outcome: OUTCOME_OK.into(),
-                detail: None,
-                hub_holds: Some(HubHolds::Index { sha256: "abc123".into(), note_count: 10 }),
-                skipped_fetches: Some(0),
-                refused_grants,
-                consecutive_failures: None,
-                first_failure_at: None,
-                terminal: None,
-            }).unwrap();
+            write_state(
+                dir.path(),
+                &SyncState {
+                    last_attempt_at: 1_000,
+                    last_success_at: Some(1_000),
+                    outcome: OUTCOME_OK.into(),
+                    detail: None,
+                    hub_holds: Some(HubHolds::Index {
+                        sha256: "abc123".into(),
+                        note_count: 10,
+                    }),
+                    skipped_fetches: Some(0),
+                    refused_grants,
+                    consecutive_failures: None,
+                    first_failure_at: None,
+                    terminal: None,
+                },
+            )
+            .unwrap();
             let out = render_status(dir.path(), 1_100).unwrap();
-            assert!(!out.contains("refused"),
-                "refused_grants={refused_grants:?} got:\n{out}");
+            assert!(
+                !out.contains("refused"),
+                "refused_grants={refused_grants:?} got:\n{out}"
+            );
         }
     }
 
@@ -647,22 +729,31 @@ mod tests {
     fn status_names_the_followed_vaults_the_last_cycle_could_not_read() {
         let dir = tempfile::tempdir().unwrap();
         seeded_profile(dir.path());
-        write_state(dir.path(), &SyncState {
-            last_attempt_at: 1_000,
-            last_success_at: Some(1_000),
-            outcome: OUTCOME_OK.into(),
-            detail: None,
-            hub_holds: Some(HubHolds::Index { sha256: "abc123".into(), note_count: 10 }),
-            skipped_fetches: Some(2),
-            refused_grants: None,
-            consecutive_failures: None,
-            first_failure_at: None,
-            terminal: None,
-        }).unwrap();
+        write_state(
+            dir.path(),
+            &SyncState {
+                last_attempt_at: 1_000,
+                last_success_at: Some(1_000),
+                outcome: OUTCOME_OK.into(),
+                detail: None,
+                hub_holds: Some(HubHolds::Index {
+                    sha256: "abc123".into(),
+                    note_count: 10,
+                }),
+                skipped_fetches: Some(2),
+                refused_grants: None,
+                consecutive_failures: None,
+                first_failure_at: None,
+                terminal: None,
+            },
+        )
+        .unwrap();
 
         let out = render_status(dir.path(), 1_100).unwrap();
-        assert!(out.contains("2 followed vault(s) could not be read"),
-            "the cycle succeeded overall, so this is the only place it shows; got:\n{out}");
+        assert!(
+            out.contains("2 followed vault(s) could not be read"),
+            "the cycle succeeded overall, so this is the only place it shows; got:\n{out}"
+        );
     }
 
     /// The other side of it. A renderer that prints the line unconditionally
@@ -673,21 +764,30 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         seeded_profile(dir.path());
         for skipped_fetches in [Some(0), None] {
-            write_state(dir.path(), &SyncState {
-                last_attempt_at: 1_000,
-                last_success_at: Some(1_000),
-                outcome: OUTCOME_OK.into(),
-                detail: None,
-                hub_holds: Some(HubHolds::Index { sha256: "abc123".into(), note_count: 10 }),
-                skipped_fetches,
-                refused_grants: None,
-                consecutive_failures: None,
-                first_failure_at: None,
-                terminal: None,
-            }).unwrap();
+            write_state(
+                dir.path(),
+                &SyncState {
+                    last_attempt_at: 1_000,
+                    last_success_at: Some(1_000),
+                    outcome: OUTCOME_OK.into(),
+                    detail: None,
+                    hub_holds: Some(HubHolds::Index {
+                        sha256: "abc123".into(),
+                        note_count: 10,
+                    }),
+                    skipped_fetches,
+                    refused_grants: None,
+                    consecutive_failures: None,
+                    first_failure_at: None,
+                    terminal: None,
+                },
+            )
+            .unwrap();
             let out = render_status(dir.path(), 1_100).unwrap();
-            assert!(!out.contains("could not be read"),
-                "skipped_fetches={skipped_fetches:?} got:\n{out}");
+            assert!(
+                !out.contains("could not be read"),
+                "skipped_fetches={skipped_fetches:?} got:\n{out}"
+            );
         }
     }
 
@@ -695,18 +795,25 @@ mod tests {
     fn status_flags_a_stale_sync() {
         let dir = tempfile::tempdir().unwrap();
         seeded_profile(dir.path());
-        write_state(dir.path(), &SyncState {
-            last_attempt_at: 1_000,
-            last_success_at: Some(1_000),
-            outcome: OUTCOME_OK.into(),
-            detail: None,
-            hub_holds: Some(HubHolds::Index { sha256: "abc123".into(), note_count: 10 }),
-            skipped_fetches: None,
-            refused_grants: None,
-            consecutive_failures: None,
-            first_failure_at: None,
-            terminal: None,
-        }).unwrap();
+        write_state(
+            dir.path(),
+            &SyncState {
+                last_attempt_at: 1_000,
+                last_success_at: Some(1_000),
+                outcome: OUTCOME_OK.into(),
+                detail: None,
+                hub_holds: Some(HubHolds::Index {
+                    sha256: "abc123".into(),
+                    note_count: 10,
+                }),
+                skipped_fetches: None,
+                refused_grants: None,
+                consecutive_failures: None,
+                first_failure_at: None,
+                terminal: None,
+            },
+        )
+        .unwrap();
         let out = render_status(dir.path(), 1_000 + 8 * 86_400).unwrap();
         assert!(out.contains("STALE"), "got:\n{out}");
     }
@@ -720,21 +827,30 @@ mod tests {
     fn a_sync_just_inside_the_threshold_is_not_flagged_stale() {
         let dir = tempfile::tempdir().unwrap();
         seeded_profile(dir.path());
-        write_state(dir.path(), &SyncState {
-            last_attempt_at: 1_000,
-            last_success_at: Some(1_000),
-            outcome: OUTCOME_OK.into(),
-            detail: None,
-            hub_holds: Some(HubHolds::Index { sha256: "abc123".into(), note_count: 10 }),
-            skipped_fetches: None,
-            refused_grants: None,
-            consecutive_failures: None,
-            first_failure_at: None,
-            terminal: None,
-        }).unwrap();
+        write_state(
+            dir.path(),
+            &SyncState {
+                last_attempt_at: 1_000,
+                last_success_at: Some(1_000),
+                outcome: OUTCOME_OK.into(),
+                detail: None,
+                hub_holds: Some(HubHolds::Index {
+                    sha256: "abc123".into(),
+                    note_count: 10,
+                }),
+                skipped_fetches: None,
+                refused_grants: None,
+                consecutive_failures: None,
+                first_failure_at: None,
+                terminal: None,
+            },
+        )
+        .unwrap();
         let out = render_status(dir.path(), 1_000 + 7 * 86_400 - 60).unwrap();
-        assert!(!out.contains("STALE"),
-            "a sync one second inside the threshold is fine; got:\n{out}");
+        assert!(
+            !out.contains("STALE"),
+            "a sync one second inside the threshold is fine; got:\n{out}"
+        );
     }
 
     /// The short window. `ll status` and the health check both read
@@ -745,25 +861,34 @@ mod tests {
     fn a_daemon_that_has_stopped_ticking_is_named_here_too() {
         let dir = tempfile::tempdir().unwrap();
         seeded_profile(dir.path());
-        write_state(dir.path(), &SyncState {
-            last_attempt_at: 1_000,
-            last_success_at: Some(1_000),
-            outcome: OUTCOME_OK.into(),
-            detail: None,
-            hub_holds: Some(HubHolds::Index { sha256: "abc123".into(), note_count: 10 }),
-            skipped_fetches: None,
-            refused_grants: None,
-            consecutive_failures: None,
-            first_failure_at: None,
-            terminal: None,
-        }).unwrap();
+        write_state(
+            dir.path(),
+            &SyncState {
+                last_attempt_at: 1_000,
+                last_success_at: Some(1_000),
+                outcome: OUTCOME_OK.into(),
+                detail: None,
+                hub_holds: Some(HubHolds::Index {
+                    sha256: "abc123".into(),
+                    note_count: 10,
+                }),
+                skipped_fetches: None,
+                refused_grants: None,
+                consecutive_failures: None,
+                first_failure_at: None,
+                terminal: None,
+            },
+        )
+        .unwrap();
 
         let out = render_status(dir.path(), 1_000 + 47 * 60).unwrap();
 
         assert!(out.contains("DAEMON"), "got:\n{out}");
         assert!(out.contains("47 minutes"), "and says how long; got:\n{out}");
-        assert!(!out.contains("STALE"),
-            "47 minutes is not old DATA — saying both is the confusion this replaced; got:\n{out}");
+        assert!(
+            !out.contains("STALE"),
+            "47 minutes is not old DATA — saying both is the confusion this replaced; got:\n{out}"
+        );
     }
 
     /// The other side, in absolute minutes rather than in terms of the
@@ -773,22 +898,32 @@ mod tests {
     fn a_sync_inside_the_daemon_window_says_nothing() {
         let dir = tempfile::tempdir().unwrap();
         seeded_profile(dir.path());
-        write_state(dir.path(), &SyncState {
-            last_attempt_at: 1_000,
-            last_success_at: Some(1_000),
-            outcome: OUTCOME_OK.into(),
-            detail: None,
-            hub_holds: Some(HubHolds::Index { sha256: "abc123".into(), note_count: 10 }),
-            skipped_fetches: None,
-            refused_grants: None,
-            consecutive_failures: None,
-            first_failure_at: None,
-            terminal: None,
-        }).unwrap();
+        write_state(
+            dir.path(),
+            &SyncState {
+                last_attempt_at: 1_000,
+                last_success_at: Some(1_000),
+                outcome: OUTCOME_OK.into(),
+                detail: None,
+                hub_holds: Some(HubHolds::Index {
+                    sha256: "abc123".into(),
+                    note_count: 10,
+                }),
+                skipped_fetches: None,
+                refused_grants: None,
+                consecutive_failures: None,
+                first_failure_at: None,
+                terminal: None,
+            },
+        )
+        .unwrap();
 
         let out = render_status(dir.path(), 1_000 + 5 * 60).unwrap();
 
-        assert!(!out.contains("DAEMON"), "a sync 5 minutes old is a daemon working; got:\n{out}");
+        assert!(
+            !out.contains("DAEMON"),
+            "a sync 5 minutes old is a daemon working; got:\n{out}"
+        );
         assert!(!out.contains("STALE"), "got:\n{out}");
     }
 
@@ -799,23 +934,33 @@ mod tests {
     fn a_stale_vault_is_not_also_reported_as_a_silent_daemon() {
         let dir = tempfile::tempdir().unwrap();
         seeded_profile(dir.path());
-        write_state(dir.path(), &SyncState {
-            last_attempt_at: 1_000,
-            last_success_at: Some(1_000),
-            outcome: OUTCOME_OK.into(),
-            detail: None,
-            hub_holds: Some(HubHolds::Index { sha256: "abc123".into(), note_count: 10 }),
-            skipped_fetches: None,
-            refused_grants: None,
-            consecutive_failures: None,
-            first_failure_at: None,
-            terminal: None,
-        }).unwrap();
+        write_state(
+            dir.path(),
+            &SyncState {
+                last_attempt_at: 1_000,
+                last_success_at: Some(1_000),
+                outcome: OUTCOME_OK.into(),
+                detail: None,
+                hub_holds: Some(HubHolds::Index {
+                    sha256: "abc123".into(),
+                    note_count: 10,
+                }),
+                skipped_fetches: None,
+                refused_grants: None,
+                consecutive_failures: None,
+                first_failure_at: None,
+                terminal: None,
+            },
+        )
+        .unwrap();
 
         let out = render_status(dir.path(), 1_000 + 8 * 86_400).unwrap();
 
         assert!(out.contains("STALE"), "got:\n{out}");
-        assert!(!out.contains("DAEMON"), "the louder row stands alone; got:\n{out}");
+        assert!(
+            !out.contains("DAEMON"),
+            "the louder row stands alone; got:\n{out}"
+        );
     }
 
     #[test]
@@ -824,7 +969,10 @@ mod tests {
         std::fs::create_dir_all(dir.path().join("federation")).unwrap();
         let out = render_status(dir.path(), 1_000).unwrap();
         assert!(out.contains("federation not configured"), "got:\n{out}");
-        assert!(out.contains("ll join"), "tell the reader what to do next; got:\n{out}");
+        assert!(
+            out.contains("ll join"),
+            "tell the reader what to do next; got:\n{out}"
+        );
     }
 
     /// R-A. `sha256` is always the hub's own word; `note_count` is whoever
@@ -834,23 +982,31 @@ mod tests {
     fn the_hub_confirmed_sha_leads_and_the_count_hangs_off_it() {
         let dir = tempfile::tempdir().unwrap();
         seeded_profile(dir.path());
-        write_state(dir.path(), &SyncState {
-            last_attempt_at: 1_000,
-            last_success_at: Some(1_000),
-            outcome: OUTCOME_OK.into(),
-            detail: None,
-            hub_holds: Some(HubHolds::Index {
-                sha256: "9f2b1c0d4e5a6b7c8d9e0f1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e".into(),
-                note_count: 3578,
-            }),
-            skipped_fetches: None,
-            refused_grants: None,
-            consecutive_failures: None,
-            first_failure_at: None,
-            terminal: None,
-        }).unwrap();
+        write_state(
+            dir.path(),
+            &SyncState {
+                last_attempt_at: 1_000,
+                last_success_at: Some(1_000),
+                outcome: OUTCOME_OK.into(),
+                detail: None,
+                hub_holds: Some(HubHolds::Index {
+                    sha256: "9f2b1c0d4e5a6b7c8d9e0f1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e"
+                        .into(),
+                    note_count: 3578,
+                }),
+                skipped_fetches: None,
+                refused_grants: None,
+                consecutive_failures: None,
+                first_failure_at: None,
+                terminal: None,
+            },
+        )
+        .unwrap();
         let out = render_status(dir.path(), 1_100).unwrap();
-        assert!(out.contains("hub holds:  sha 9f2b1c0d4e5a… (3578 notes)"), "got:\n{out}");
+        assert!(
+            out.contains("hub holds:  sha 9f2b1c0d4e5a… (3578 notes)"),
+            "got:\n{out}"
+        );
     }
 
     /// R-C. `read_state` returns `Ok(None)` for a missing file AND for a
@@ -861,10 +1017,18 @@ mod tests {
         seeded_profile(dir.path());
         let out = render_status(dir.path(), 1_000).unwrap();
         assert!(out.contains("no information"), "got:\n{out}");
-        assert!(!out.contains("STALE"), "no information is not a verdict; got:\n{out}");
-        assert!(!out.contains("WARNING"), "no information is not a verdict; got:\n{out}");
-        assert!(!out.contains("never synced"),
-            "the file may be sitting right there unparseable; got:\n{out}");
+        assert!(
+            !out.contains("STALE"),
+            "no information is not a verdict; got:\n{out}"
+        );
+        assert!(
+            !out.contains("WARNING"),
+            "no information is not a verdict; got:\n{out}"
+        );
+        assert!(
+            !out.contains("never synced"),
+            "the file may be sitting right there unparseable; got:\n{out}"
+        );
     }
 
     /// R-C, and the same on a file that exists but does not parse: the two
@@ -875,10 +1039,16 @@ mod tests {
         seeded_profile(missing.path());
         let corrupt = tempfile::tempdir().unwrap();
         seeded_profile(corrupt.path());
-        std::fs::write(corrupt.path().join("federation/sync-state.json"), "{not json").unwrap();
+        std::fs::write(
+            corrupt.path().join("federation/sync-state.json"),
+            "{not json",
+        )
+        .unwrap();
 
-        assert_eq!(render_status(missing.path(), 1_000).unwrap(),
-                   render_status(corrupt.path(), 1_000).unwrap());
+        assert_eq!(
+            render_status(missing.path(), 1_000).unwrap(),
+            render_status(corrupt.path(), 1_000).unwrap()
+        );
     }
 
     /// R-F. Every value on this page came off the disk.
@@ -886,22 +1056,34 @@ mod tests {
     fn nothing_in_the_output_implies_the_hub_was_contacted() {
         let dir = tempfile::tempdir().unwrap();
         seeded_profile(dir.path());
-        write_state(dir.path(), &SyncState {
-            last_attempt_at: 1_000,
-            last_success_at: Some(1_000),
-            outcome: OUTCOME_OK.into(),
-            detail: None,
-            hub_holds: Some(HubHolds::Index { sha256: "abc123".into(), note_count: 10 }),
-            skipped_fetches: None,
-            refused_grants: None,
-            consecutive_failures: None,
-            first_failure_at: None,
-            terminal: None,
-        }).unwrap();
+        write_state(
+            dir.path(),
+            &SyncState {
+                last_attempt_at: 1_000,
+                last_success_at: Some(1_000),
+                outcome: OUTCOME_OK.into(),
+                detail: None,
+                hub_holds: Some(HubHolds::Index {
+                    sha256: "abc123".into(),
+                    note_count: 10,
+                }),
+                skipped_fetches: None,
+                refused_grants: None,
+                consecutive_failures: None,
+                first_failure_at: None,
+                terminal: None,
+            },
+        )
+        .unwrap();
         let out = render_status(dir.path(), 1_100).unwrap();
-        assert!(out.contains("Nothing here contacted the hub"), "got:\n{out}");
-        assert!(out.contains("(pinned)"),
-            "the hub key is a pin read from config, not a key the hub just presented; got:\n{out}");
+        assert!(
+            out.contains("Nothing here contacted the hub"),
+            "got:\n{out}"
+        );
+        assert!(
+            out.contains("(pinned)"),
+            "the hub key is a pin read from config, not a key the hub just presented; got:\n{out}"
+        );
     }
 
     /// The fingerprints are the whole point of the key lines: they are what a
@@ -913,10 +1095,18 @@ mod tests {
         let out = render_status(dir.path(), 1_000).unwrap();
         let client = KeyId::from_pubkey(&SigningKey::from_bytes(&CLIENT_SEED).verifying_key());
         let hub = KeyId::parse(&hub_key_id()).unwrap();
-        assert!(out.contains(&crate::sync::words::fingerprint(&client)), "got:\n{out}");
-        assert!(out.contains(&crate::sync::words::fingerprint(&hub)), "got:\n{out}");
-        assert!(!out.contains(client.as_str()),
-            "the key_id is elided beside the fingerprint, not printed whole; got:\n{out}");
+        assert!(
+            out.contains(&crate::sync::words::fingerprint(&client)),
+            "got:\n{out}"
+        );
+        assert!(
+            out.contains(&crate::sync::words::fingerprint(&hub)),
+            "got:\n{out}"
+        );
+        assert!(
+            !out.contains(client.as_str()),
+            "the key_id is elided beside the fingerprint, not printed whole; got:\n{out}"
+        );
     }
 
     /// A failed cycle names what failed, and says when the last good one was
@@ -925,23 +1115,32 @@ mod tests {
     fn a_failed_cycle_names_the_failure_and_the_last_good_sync() {
         let dir = tempfile::tempdir().unwrap();
         seeded_profile(dir.path());
-        write_state(dir.path(), &SyncState {
-            last_attempt_at: 1_000 + 9 * 86_400,
-            last_success_at: Some(1_000),
-            outcome: OUTCOME_ERROR.into(),
-            detail: Some("hub key mismatch".into()),
-            hub_holds: None,
-            skipped_fetches: None,
-            refused_grants: None,
-            consecutive_failures: None,
-            first_failure_at: None,
-            terminal: None,
-        }).unwrap();
+        write_state(
+            dir.path(),
+            &SyncState {
+                last_attempt_at: 1_000 + 9 * 86_400,
+                last_success_at: Some(1_000),
+                outcome: OUTCOME_ERROR.into(),
+                detail: Some("hub key mismatch".into()),
+                hub_holds: None,
+                skipped_fetches: None,
+                refused_grants: None,
+                consecutive_failures: None,
+                first_failure_at: None,
+                terminal: None,
+            },
+        )
+        .unwrap();
         let out = render_status(dir.path(), 1_000 + 9 * 86_400).unwrap();
         assert!(out.contains("error: hub key mismatch"), "got:\n{out}");
-        assert!(out.contains("STALE"), "nine days without a good sync is stale; got:\n{out}");
-        assert!(out.contains("hub holds:  unknown"),
-            "a cycle that died before the handshake learnt nothing about the hub; got:\n{out}");
+        assert!(
+            out.contains("STALE"),
+            "nine days without a good sync is stale; got:\n{out}"
+        );
+        assert!(
+            out.contains("hub holds:  unknown"),
+            "a cycle that died before the handshake learnt nothing about the hub; got:\n{out}"
+        );
     }
 
     /// `last_success_at: None` is worse than stale, not better, and the old
@@ -950,18 +1149,22 @@ mod tests {
     fn a_vault_that_has_never_synced_successfully_is_loud_about_it() {
         let dir = tempfile::tempdir().unwrap();
         seeded_profile(dir.path());
-        write_state(dir.path(), &SyncState {
-            last_attempt_at: 1_000,
-            last_success_at: None,
-            outcome: OUTCOME_ERROR.into(),
-            detail: Some("hub unreachable".into()),
-            hub_holds: None,
-            skipped_fetches: None,
-            refused_grants: None,
-            consecutive_failures: None,
-            first_failure_at: None,
-            terminal: None,
-        }).unwrap();
+        write_state(
+            dir.path(),
+            &SyncState {
+                last_attempt_at: 1_000,
+                last_success_at: None,
+                outcome: OUTCOME_ERROR.into(),
+                detail: Some("hub unreachable".into()),
+                hub_holds: None,
+                skipped_fetches: None,
+                refused_grants: None,
+                consecutive_failures: None,
+                first_failure_at: None,
+                terminal: None,
+            },
+        )
+        .unwrap();
         let out = render_status(dir.path(), 1_100).unwrap();
         assert!(out.contains("last ok:    never"), "got:\n{out}");
         assert!(out.contains("STALE"), "got:\n{out}");
@@ -981,7 +1184,6 @@ mod tests {
         assert!(out.contains("ll join"), "got:\n{out}");
     }
 
-
     /// Found by running this against the real profile on disk: `join` writes
     /// bare base64, and pre-v5 configs carry the same bytes behind an
     /// `ed25519:` prefix. Both are the same key and must fingerprint alike.
@@ -995,8 +1197,9 @@ mod tests {
         config.identity.pubkey = format!("ed25519:{}", config.identity.pubkey);
         write_config(prefixed.path(), &config).unwrap();
 
-        let expected = crate::sync::words::fingerprint(
-            &KeyId::from_pubkey(&SigningKey::from_bytes(&CLIENT_SEED).verifying_key()));
+        let expected = crate::sync::words::fingerprint(&KeyId::from_pubkey(
+            &SigningKey::from_bytes(&CLIENT_SEED).verifying_key(),
+        ));
         let out = render_status(prefixed.path(), 1_000).unwrap();
         assert!(out.contains(&expected), "got:\n{out}");
         assert!(!out.contains("not a public key"), "got:\n{out}");
@@ -1017,17 +1220,22 @@ mod tests {
         config.hub.endpoint = "ws://100.64.0.2:9473/ws".into();
         write_config(dir.path(), &config).unwrap();
 
-        let expected = crate::sync::config::load_config(dir.path()).unwrap()
-            .validate().unwrap_err().to_string();
+        let expected = crate::sync::config::load_config(dir.path())
+            .unwrap()
+            .validate()
+            .unwrap_err()
+            .to_string();
         let out = render_status(dir.path(), 1_000).unwrap();
         // Compared with whitespace flattened: the reason is wrapped into the
         // label column, so the words are what must match, not the line breaks.
         let flat = out.split_whitespace().collect::<Vec<_>>().join(" ");
         let expected = expected.split_whitespace().collect::<Vec<_>>().join(" ");
         assert!(out.contains("BLOCKED"), "got:\n{out}");
-        assert!(flat.contains(&expected),
+        assert!(
+            flat.contains(&expected),
             "the reason is the validator's to give, so it cannot drift from what \
-             sync enforces; got:\n{out}");
+             sync enforces; got:\n{out}"
+        );
     }
 
     /// The seed IS the identity, and this is the test that says so against
@@ -1043,8 +1251,10 @@ mod tests {
 
         let pending = crate::sync::link::pending_offline(dir.path()).unwrap();
         let out = render_status(dir.path(), 1_000).unwrap();
-        assert!(out.contains(&pending.fingerprint),
-            "status and `ll link code` must show one machine one fingerprint; got:\n{out}");
+        assert!(
+            out.contains(&pending.fingerprint),
+            "status and `ll link code` must show one machine one fingerprint; got:\n{out}"
+        );
     }
 
     /// `ll recover` writes the seed and leaves `config.json` alone. Reading
@@ -1059,10 +1269,14 @@ mod tests {
         let stale = KeyId::from_pubkey(&SigningKey::from_bytes(&CLIENT_SEED).verifying_key());
 
         let out = render_status(dir.path(), 1_000).unwrap();
-        assert!(out.contains(&crate::sync::words::fingerprint(&recovered)),
-            "the seed's fingerprint is the machine's; got:\n{out}");
-        assert!(!out.contains(&crate::sync::words::fingerprint(&stale)),
-            "config.json's copy must not be printed as this machine's key; got:\n{out}");
+        assert!(
+            out.contains(&crate::sync::words::fingerprint(&recovered)),
+            "the seed's fingerprint is the machine's; got:\n{out}"
+        );
+        assert!(
+            !out.contains(&crate::sync::words::fingerprint(&stale)),
+            "config.json's copy must not be printed as this machine's key; got:\n{out}"
+        );
     }
 
     /// And it says the enrollment beside it is the old key's. `recover`
@@ -1104,8 +1318,10 @@ mod tests {
 
         let out = render_status(dir.path(), 1_000).unwrap();
         assert!(out.contains("no seed on this machine"), "got:\n{out}");
-        assert!(!out.contains("RECOVERED"),
-            "nothing to compare is not a disagreement; got:\n{out}");
+        assert!(
+            !out.contains("RECOVERED"),
+            "nothing to compare is not a disagreement; got:\n{out}"
+        );
     }
     /// The invisible property, made visible. A person whose peer results have
     /// gone quiet has no other way to find out whether this machine still
@@ -1115,18 +1331,23 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         seeded_profile(dir.path());
         let me = plant_seed(dir.path(), CLIENT_SEED);
-        crate::sync::state::write_readable_vaults(dir.path(),
+        crate::sync::state::write_readable_vaults(
+            dir.path(),
             &crate::sync::state::ReadableVaults {
                 me,
                 at: 1_000,
                 vault_ids: vec!["v-a".into(), "v-b".into()],
-            }).unwrap();
+            },
+        )
+        .unwrap();
 
         let out = render_status(dir.path(), 1_100).unwrap();
         assert!(out.contains("read auth:"), "got:\n{out}");
         assert!(out.contains("2 vault(s)"), "got:\n{out}");
-        assert!(!out.contains("WARNING"),
-            "a list a hundred seconds old is not a warning; got:\n{out}");
+        assert!(
+            !out.contains("WARNING"),
+            "a list a hundred seconds old is not a warning; got:\n{out}"
+        );
     }
 
     /// A stale list keeps serving — there is no way to be both
@@ -1138,21 +1359,28 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         seeded_profile(dir.path());
         let me = plant_seed(dir.path(), CLIENT_SEED);
-        crate::sync::state::write_readable_vaults(dir.path(),
+        crate::sync::state::write_readable_vaults(
+            dir.path(),
             &crate::sync::state::ReadableVaults {
                 me,
                 at: 1_000,
                 vault_ids: vec!["v-a".into()],
-            }).unwrap();
+            },
+        )
+        .unwrap();
 
         let fresh = render_status(dir.path(), 1_000 + STALE_AFTER_SECS - 60).unwrap();
-        assert!(!fresh.contains("read authority"),
-            "one second inside the threshold is fine; got:\n{fresh}");
+        assert!(
+            !fresh.contains("read authority"),
+            "one second inside the threshold is fine; got:\n{fresh}"
+        );
 
         let out = render_status(dir.path(), 1_000 + 41 * 86_400).unwrap();
         assert!(out.contains("read authority 41 days old"), "got:\n{out}");
-        assert!(out.contains("until the grant behind it expires"),
-            "the reader keeps serving; say what still bounds it; got:\n{out}");
+        assert!(
+            out.contains("until the grant behind it expires"),
+            "the reader keeps serving; say what still bounds it; got:\n{out}"
+        );
     }
 
     /// **The count on this page has to agree with what the reader serves, and
@@ -1169,27 +1397,44 @@ mod tests {
         seeded_profile(dir.path());
         let me = plant_seed(dir.path(), CLIENT_SEED);
         let other = KeyId::from_pubkey(&SigningKey::from_bytes(&[42u8; 32]).verifying_key());
-        assert_ne!(me, other, "the fixture must plant a listing this key did not earn");
-        crate::sync::state::write_readable_vaults(dir.path(),
+        assert_ne!(
+            me, other,
+            "the fixture must plant a listing this key did not earn"
+        );
+        crate::sync::state::write_readable_vaults(
+            dir.path(),
             &crate::sync::state::ReadableVaults {
                 me: other,
                 at: 1_000,
                 vault_ids: vec!["v-a".into(), "v-b".into()],
-            }).unwrap();
+            },
+        )
+        .unwrap();
         // The dangerous state has to be reachable, or the assertion below
         // passes against a file nothing could read.
-        assert!(crate::sync::state::read_readable_vaults(dir.path()).unwrap().is_some(),
-            "the listing must parse, or this tests the parse and not the key");
+        assert!(
+            crate::sync::state::read_readable_vaults(dir.path())
+                .unwrap()
+                .is_some(),
+            "the listing must parse, or this tests the parse and not the key"
+        );
 
         let out = render_status(dir.path(), 1_100).unwrap();
-        assert!(!out.contains("vault(s)"),
-            "a listing this key did not earn is not a count it can give; got:\n{out}");
+        assert!(
+            !out.contains("vault(s)"),
+            "a listing this key did not earn is not a count it can give; got:\n{out}"
+        );
         // The renderer wraps at `WIDTH`, so a literal `contains` over the row
         // would be asserting the column count.
         let flowed = out.split_whitespace().collect::<Vec<_>>().join(" ");
-        assert!(flowed.contains("no cached peer index is searched"), "got:\n{out}");
-        assert!(!flowed.contains("as the hub listed them"),
-            "the count row must not render for a listing this key did not earn; got:\n{out}");
+        assert!(
+            flowed.contains("no cached peer index is searched"),
+            "got:\n{out}"
+        );
+        assert!(
+            !flowed.contains("as the hub listed them"),
+            "the count row must not render for a listing this key did not earn; got:\n{out}"
+        );
     }
 
     /// The same verdict from the other direction: a machine holding no key
@@ -1199,14 +1444,21 @@ mod tests {
     fn a_machine_with_no_key_gives_no_count_for_a_listing_it_cannot_claim() {
         let dir = tempfile::tempdir().unwrap();
         seeded_profile(dir.path());
-        crate::sync::state::write_readable_vaults(dir.path(),
+        crate::sync::state::write_readable_vaults(
+            dir.path(),
             &crate::sync::state::ReadableVaults {
                 me: KeyId::from_pubkey(&SigningKey::from_bytes(&CLIENT_SEED).verifying_key()),
                 at: 1_000,
                 vault_ids: vec!["v-a".into()],
-            }).unwrap();
-        assert!(crate::sync::seed_store::load_only(dir.path()).unwrap().is_none(),
-            "no seed is what makes this the other direction");
+            },
+        )
+        .unwrap();
+        assert!(
+            crate::sync::seed_store::load_only(dir.path())
+                .unwrap()
+                .is_none(),
+            "no seed is what makes this the other direction"
+        );
 
         let out = render_status(dir.path(), 1_100).unwrap();
         assert!(!out.contains("vault(s)"), "got:\n{out}");
@@ -1222,7 +1474,13 @@ mod tests {
 
         let out = render_status(dir.path(), 1_100).unwrap();
         assert!(out.contains("read auth:"), "got:\n{out}");
-        assert!(out.contains("no cached peer index is searched"), "got:\n{out}");
-        assert!(!out.contains("vault(s)"), "there is no count to give; got:\n{out}");
+        assert!(
+            out.contains("no cached peer index is searched"),
+            "got:\n{out}"
+        );
+        assert!(
+            !out.contains("vault(s)"),
+            "there is no count to give; got:\n{out}"
+        );
     }
 }

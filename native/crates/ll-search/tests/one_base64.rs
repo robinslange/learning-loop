@@ -55,7 +55,10 @@ fn rust_sources() -> Vec<PathBuf> {
 }
 
 fn relative(p: &Path) -> String {
-    p.strip_prefix(crate_root()).unwrap_or(p).to_string_lossy().replace('\\', "/")
+    p.strip_prefix(crate_root())
+        .unwrap_or(p)
+        .to_string_lossy()
+        .replace('\\', "/")
 }
 
 #[test]
@@ -68,8 +71,16 @@ fn the_sweep_reaches_the_crate_and_finds_the_one_file_that_is_allowed() {
     assert!(files.len() > 40, "swept only {} files", files.len());
 
     let names: Vec<String> = files.iter().map(|p| relative(p)).collect();
-    for expected in [THE_ONE, "src/main.rs", "src/sync/link.rs", "tests/one_base64.rs"] {
-        assert!(names.iter().any(|n| n == expected), "the sweep must reach {expected}");
+    for expected in [
+        THE_ONE,
+        "src/main.rs",
+        "src/sync/link.rs",
+        "tests/one_base64.rs",
+    ] {
+        assert!(
+            names.iter().any(|n| n == expected),
+            "the sweep must reach {expected}"
+        );
     }
 
     // The module path, not the engine's name. Which engine it is belongs to

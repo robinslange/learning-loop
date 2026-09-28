@@ -12,9 +12,8 @@ const SCHEMA_VERSION: u32 = 5;
 pub(crate) const DTYPE: &str = "q8";
 
 /// Embedded migration sources, applied in version order.
-const MIGRATIONS: &[(u32, &str, &str)] = &[
-    (1, "indices", include_str!("migrations/0001_indices.sql")),
-];
+const MIGRATIONS: &[(u32, &str, &str)] =
+    &[(1, "indices", include_str!("migrations/0001_indices.sql"))];
 
 /// Open the database at `db_path`, requiring that the file already exists.
 ///
@@ -43,10 +42,11 @@ pub fn open_or_create_db(db_path: &str) -> Result<Connection> {
         fs::create_dir_all(parent).ok();
     }
 
-    let conn = Connection::open(db_path)
-        .context("failed to open database")?;
-    conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA busy_timeout = 5000;")
-        .context("failed to set pragmas")?;
+    let conn = Connection::open(db_path).context("failed to open database")?;
+    conn.execute_batch(
+        "PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA busy_timeout = 5000;",
+    )
+    .context("failed to set pragmas")?;
 
     let has_meta: bool = conn
         .query_row(
@@ -102,9 +102,7 @@ pub(crate) fn run_migrations(conn: &Connection) -> Result<()> {
     };
 
     // session_id column may not exist on a fresh DB; add it before the SQL needs it.
-    let has_session_col = conn
-        .prepare("SELECT session_id FROM notes LIMIT 0")
-        .is_ok();
+    let has_session_col = conn.prepare("SELECT session_id FROM notes LIMIT 0").is_ok();
     if !has_session_col {
         conn.execute_batch("ALTER TABLE notes ADD COLUMN session_id INTEGER;")
             .context("add session_id column")?;
@@ -227,7 +225,10 @@ pub(crate) fn create_schema(conn: &Connection) -> Result<()> {
     .context("failed to create schema")?;
 
     let upsert = "INSERT OR REPLACE INTO meta (key, value) VALUES (?1, ?2)";
-    conn.execute(upsert, params!["schema_version", SCHEMA_VERSION.to_string()])?;
+    conn.execute(
+        upsert,
+        params!["schema_version", SCHEMA_VERSION.to_string()],
+    )?;
     if let Some(p) = embed::try_provider() {
         conn.execute(upsert, params!["model_id", p.model_id()])?;
     }
@@ -328,17 +329,18 @@ pub fn migrate_embeddings(
     let model_id = provider.model_id();
     eprintln!("Migrating embeddings to {} ...", model_id);
 
-    conn.execute_batch("DROP TABLE IF EXISTS embeddings_new;").ok();
-    conn.execute_batch(
-        "CREATE TABLE embeddings_new (id INTEGER PRIMARY KEY, data BLOB NOT NULL);",
-    )
-    .context("failed to create embeddings_new")?;
+    conn.execute_batch("DROP TABLE IF EXISTS embeddings_new;")
+        .ok();
+    conn.execute_batch("CREATE TABLE embeddings_new (id INTEGER PRIMARY KEY, data BLOB NOT NULL);")
+        .context("failed to create embeddings_new")?;
 
     let notes: Vec<(i64, String)> = {
         let mut stmt = conn
             .prepare("SELECT n.id, nc.body FROM notes n JOIN notes_content nc ON n.id = nc.id")?;
         let rows = stmt
-            .query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)))?
+            .query_map([], |row| {
+                Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+            })?
             .filter_map(|r| r.ok())
             .collect();
         rows

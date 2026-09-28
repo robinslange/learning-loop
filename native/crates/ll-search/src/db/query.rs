@@ -3,10 +3,10 @@ use std::collections::{HashMap, HashSet};
 use rusqlite::{params, Connection};
 use serde::Serialize;
 
+use super::index::walk_vault;
 use crate::config::{
     SESSION_SEARCH_RANGE_MAX_M, SESSION_SEARCH_RANGE_MIN_M, SESSION_THRESHOLD_DEFAULT_M,
 };
-use super::index::walk_vault;
 
 #[derive(Serialize)]
 pub struct Status {
@@ -87,9 +87,9 @@ pub fn load_embedding(conn: &Connection, note_id: i64) -> Option<Vec<f32>> {
 }
 
 pub fn load_all_embeddings(conn: &Connection) -> Vec<(i64, String, Vec<f32>)> {
-    let mut stmt = match conn.prepare(
-        "SELECT e.id, n.path, e.data FROM embeddings e JOIN notes n ON e.id = n.id",
-    ) {
+    let mut stmt = match conn
+        .prepare("SELECT e.id, n.path, e.data FROM embeddings e JOIN notes n ON e.id = n.id")
+    {
         Ok(s) => s,
         Err(_) => return Vec::new(),
     };
@@ -216,14 +216,15 @@ pub fn list_intentions_for_context(conn: &Connection, context: &str) -> Vec<Inte
 pub fn compute_sessions(conn: &Connection) {
     let has_session_col = conn.prepare("SELECT session_id FROM notes LIMIT 0").is_ok();
     if !has_session_col {
-        conn.execute_batch("ALTER TABLE notes ADD COLUMN session_id INTEGER;").unwrap();
+        conn.execute_batch("ALTER TABLE notes ADD COLUMN session_id INTEGER;")
+            .unwrap();
     }
 
     let mut notes: Vec<(i64, f64)> = Vec::new();
     if let Ok(mut stmt) = conn.prepare("SELECT id, mtime FROM notes ORDER BY mtime") {
-        if let Ok(rows) = stmt.query_map([], |row| {
-            Ok((row.get::<_, i64>(0)?, row.get::<_, f64>(1)?))
-        }) {
+        if let Ok(rows) =
+            stmt.query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, f64>(1)?)))
+        {
             for row in rows.flatten() {
                 notes.push(row);
             }
@@ -234,12 +235,17 @@ pub fn compute_sessions(conn: &Connection) {
         return;
     }
 
-    let gaps_min: Vec<f64> = notes.windows(2)
+    let gaps_min: Vec<f64> = notes
+        .windows(2)
         .map(|w| ((w[1].1 - w[0].1) / 60_000.0).max(0.0))
         .collect();
 
     let threshold_min = find_session_threshold(&gaps_min);
-    eprintln!("Session threshold: {:.0} minutes ({} notes)", threshold_min, notes.len());
+    eprintln!(
+        "Session threshold: {:.0} minutes ({} notes)",
+        threshold_min,
+        notes.len()
+    );
 
     let mut session_id: i64 = 0;
     let mut assignments: Vec<(i64, i64)> = Vec::with_capacity(notes.len());
@@ -258,11 +264,16 @@ pub fn compute_sessions(conn: &Connection) {
         conn.execute(
             "UPDATE notes SET session_id = ?1 WHERE id = ?2",
             params![sid, note_id],
-        ).ok();
+        )
+        .ok();
     }
     conn.execute_batch("COMMIT;").unwrap();
 
-    eprintln!("Assigned {} sessions across {} notes", session_id + 1, notes.len());
+    eprintln!(
+        "Assigned {} sessions across {} notes",
+        session_id + 1,
+        notes.len()
+    );
 }
 
 fn find_session_threshold(gaps_min: &[f64]) -> f64 {
@@ -297,7 +308,12 @@ fn find_session_threshold(gaps_min: &[f64]) -> f64 {
     let mut min_val = f64::MAX;
     let mut min_idx = SESSION_THRESHOLD_DEFAULT_M as usize;
 
-    for (m, &val) in smoothed.iter().enumerate().take(search_end + 1).skip(search_start) {
+    for (m, &val) in smoothed
+        .iter()
+        .enumerate()
+        .take(search_end + 1)
+        .skip(search_start)
+    {
         if val < min_val {
             min_val = val;
             min_idx = m;
@@ -314,12 +330,15 @@ pub fn compute_project_phases(conn: &Connection) {
             first_mtime REAL,
             last_mtime REAL,
             note_count INTEGER
-        );"
-    ).ok();
+        );",
+    )
+    .ok();
 
     let mut tag_data: HashMap<String, (f64, f64, usize)> = HashMap::new();
 
-    if let Ok(mut stmt) = conn.prepare("SELECT tags, mtime FROM notes WHERE tags IS NOT NULL AND tags != ''") {
+    if let Ok(mut stmt) =
+        conn.prepare("SELECT tags, mtime FROM notes WHERE tags IS NOT NULL AND tags != ''")
+    {
         if let Ok(rows) = stmt.query_map([], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, f64>(1)?))
         }) {
@@ -400,11 +419,19 @@ pub fn list_sessions(conn: &Connection, min_notes: usize) -> Vec<SessionInfo> {
         })
         .collect();
 
-    result.sort_by(|a, b| b.first_mtime.partial_cmp(&a.first_mtime).unwrap_or(std::cmp::Ordering::Equal));
+    result.sort_by(|a, b| {
+        b.first_mtime
+            .partial_cmp(&a.first_mtime)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     result
 }
 
-pub fn link_stats(conn: &Connection, folder_filter: Option<&str>, include_orphans: bool) -> LinkStats {
+pub fn link_stats(
+    conn: &Connection,
+    folder_filter: Option<&str>,
+    include_orphans: bool,
+) -> LinkStats {
     let total_notes: i64 = conn
         .query_row("SELECT COUNT(*) FROM notes", [], |r| r.get(0))
         .unwrap_or(0);
@@ -412,7 +439,8 @@ pub fn link_stats(conn: &Connection, folder_filter: Option<&str>, include_orphan
     let total_links: i64 = conn
         .query_row(
             "SELECT COUNT(*) FROM links WHERE target_path NOT LIKE '%[%'",
-            [], |r| r.get(0),
+            [],
+            |r| r.get(0),
         )
         .unwrap_or(0);
 
@@ -459,7 +487,15 @@ pub fn link_stats(conn: &Connection, folder_filter: Option<&str>, include_orphan
 
     let by_folder: HashMap<String, FolderStats> = folder_counts
         .into_iter()
-        .map(|(k, (count, zero))| (k, FolderStats { count, zero_inlinks: zero }))
+        .map(|(k, (count, zero))| {
+            (
+                k,
+                FolderStats {
+                    count,
+                    zero_inlinks: zero,
+                },
+            )
+        })
         .collect();
 
     let perm_count = by_folder.get("3-permanent").map(|f| f.count).unwrap_or(0) as f64;
@@ -532,10 +568,12 @@ mod tests {
         )
         .unwrap();
         for path in notes {
-            conn.execute("INSERT INTO notes (path) VALUES (?1)", [path]).unwrap();
+            conn.execute("INSERT INTO notes (path) VALUES (?1)", [path])
+                .unwrap();
         }
         for target in links {
-            conn.execute("INSERT INTO links (target_path) VALUES (?1)", [target]).unwrap();
+            conn.execute("INSERT INTO links (target_path) VALUES (?1)", [target])
+                .unwrap();
         }
         conn
     }
@@ -545,7 +583,10 @@ mod tests {
         // 0-inbox/foo.md is linked via [[foo]]
         let conn = setup_db(&["0-inbox/foo.md"], &["foo"]);
         let stats = link_stats(&conn, None, true);
-        assert!(stats.orphans.as_ref().unwrap().is_empty(), "depth-1 linked note wrongly flagged");
+        assert!(
+            stats.orphans.as_ref().unwrap().is_empty(),
+            "depth-1 linked note wrongly flagged"
+        );
     }
 
     #[test]
@@ -553,7 +594,10 @@ mod tests {
         // 2-literature/sub/note.md — old SQL produced stem "sub/note", never matched
         let conn = setup_db(&["2-literature/sub/note.md"], &["note"]);
         let stats = link_stats(&conn, Some("2-literature/"), true);
-        assert!(stats.orphans.as_ref().unwrap().is_empty(), "depth-2 note wrongly flagged as orphan");
+        assert!(
+            stats.orphans.as_ref().unwrap().is_empty(),
+            "depth-2 note wrongly flagged as orphan"
+        );
     }
 
     #[test]
@@ -561,7 +605,10 @@ mod tests {
         // 4-projects/deep/nested/path/x.md — old SQL produced "deep/nested/path/x"
         let conn = setup_db(&["4-projects/deep/nested/path/x.md"], &["x"]);
         let stats = link_stats(&conn, Some("4-projects/"), true);
-        assert!(stats.orphans.as_ref().unwrap().is_empty(), "depth-3 note wrongly flagged as orphan");
+        assert!(
+            stats.orphans.as_ref().unwrap().is_empty(),
+            "depth-3 note wrongly flagged as orphan"
+        );
     }
 
     #[test]
@@ -569,7 +616,10 @@ mod tests {
         // 0-inbox/Foo-Bar.md linked via [[foo-bar]] (target_path is lowercase)
         let conn = setup_db(&["0-inbox/Foo-Bar.md"], &["foo-bar"]);
         let stats = link_stats(&conn, Some("0-inbox/"), true);
-        assert!(stats.orphans.as_ref().unwrap().is_empty(), "case-mixed note wrongly flagged as orphan");
+        assert!(
+            stats.orphans.as_ref().unwrap().is_empty(),
+            "case-mixed note wrongly flagged as orphan"
+        );
     }
 
     #[test]
@@ -582,12 +632,20 @@ mod tests {
     #[test]
     fn mixed_linked_and_unlinked() {
         let conn = setup_db(
-            &["3-permanent/a.md", "3-permanent/sub/b.md", "3-permanent/c.md"],
+            &[
+                "3-permanent/a.md",
+                "3-permanent/sub/b.md",
+                "3-permanent/c.md",
+            ],
             &["a", "b"],
         );
         let stats = link_stats(&conn, None, true);
         let orphans = stats.orphans.as_ref().unwrap();
-        assert_eq!(orphans, &["3-permanent/c.md"], "only unlinked note should be orphan");
+        assert_eq!(
+            orphans,
+            &["3-permanent/c.md"],
+            "only unlinked note should be orphan"
+        );
     }
 
     /// Seed a tempdb with notes + intentions matching the production schema
@@ -680,9 +738,7 @@ mod tests {
 
     #[test]
     fn list_intentions_for_context_returns_empty_when_unknown() {
-        let conn = setup_intentions_db(&[
-            ("a.md", "known context", None),
-        ]);
+        let conn = setup_intentions_db(&[("a.md", "known context", None)]);
         assert!(list_intentions_for_context(&conn, "no such context").is_empty());
     }
 }

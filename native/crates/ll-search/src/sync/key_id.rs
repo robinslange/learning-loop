@@ -88,7 +88,9 @@ impl KeyId {
         Ok(())
     }
 
-    pub fn as_str(&self) -> &str { &self.0 }
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
 }
 
 impl serde::Serialize for KeyId {
@@ -131,10 +133,15 @@ mod tests {
         let expected = KeyId::from_pubkey(&signing.verifying_key());
         let encoded = pubkey_b64(&signing);
         assert_eq!(key_id_from_b64(&encoded), Some(expected.clone()));
-        assert_eq!(key_id_from_b64(&format!("ed25519:{encoded}")), Some(expected));
+        assert_eq!(
+            key_id_from_b64(&format!("ed25519:{encoded}")),
+            Some(expected)
+        );
     }
 
-    fn key() -> SigningKey { SigningKey::generate(&mut rand::thread_rng()) }
+    fn key() -> SigningKey {
+        SigningKey::generate(&mut rand::thread_rng())
+    }
 
     #[test]
     fn matches_the_hub_encoding_for_a_known_key() {
@@ -149,7 +156,10 @@ mod tests {
         let sk = SigningKey::from_bytes(&seed);
         let id = KeyId::from_pubkey(&sk.verifying_key());
         assert!(id.as_str().starts_with('z'));
-        assert_eq!(id.as_str(), "z6MkvDqGT54cXesYGvABpF1UapVNwjCqRcafi4Px6Thv5T3Z");
+        assert_eq!(
+            id.as_str(),
+            "z6MkvDqGT54cXesYGvABpF1UapVNwjCqRcafi4Px6Thv5T3Z"
+        );
         assert_eq!(KeyId::parse(id.as_str()).unwrap(), id);
     }
 
@@ -157,8 +167,10 @@ mod tests {
     fn round_trips_through_parse() {
         let sk = key();
         let id = KeyId::from_pubkey(&sk.verifying_key());
-        assert_eq!(KeyId::parse(id.as_str()).unwrap().verifying_key().unwrap(),
-                   sk.verifying_key());
+        assert_eq!(
+            KeyId::parse(id.as_str()).unwrap().verifying_key().unwrap(),
+            sk.verifying_key()
+        );
     }
 
     #[test]
@@ -225,8 +237,16 @@ mod tests {
 
         let big = bs58::encode(biggest).into_string();
         let small = bs58::encode(smallest).into_string();
-        assert!(big.len() <= MAX_KEY_ID_BODY_LEN, "bound too low: {}", big.len());
-        assert!(small.len() <= MAX_KEY_ID_BODY_LEN, "bound too low: {}", small.len());
+        assert!(
+            big.len() <= MAX_KEY_ID_BODY_LEN,
+            "bound too low: {}",
+            big.len()
+        );
+        assert!(
+            small.len() <= MAX_KEY_ID_BODY_LEN,
+            "bound too low: {}",
+            small.len()
+        );
         assert_eq!(
             big.len(),
             MAX_KEY_ID_BODY_LEN,

@@ -17,5 +17,8 @@ fn force_reindex_of_a_locked_index_is_an_error_not_a_panic() {
     let Err(err) = ll_search::db::reindex(&conn, tmp.path().to_str().unwrap(), true) else {
         panic!("a locked index cannot be rebuilt");
     };
-    assert!(format!("{err:#}").contains("failed to drop tables"), "{err:#}");
+    assert!(
+        format!("{err:#}").contains("failed to drop tables"),
+        "{err:#}"
+    );
 }

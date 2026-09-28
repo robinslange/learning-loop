@@ -71,17 +71,15 @@ pub fn backfill_public(
             // Fail closed. A bulk rewrite of thousands of notes must not
             // continue past the first sign that the writer is doing more than
             // inserting one line. Everything already written passed this check.
-            frontmatter::verify_upsert(&raw, &updated, "visibility", "public").map_err(
-                |why| {
-                    anyhow::anyhow!(
-                        "ABORTED at {}: {why}\n\
+            frontmatter::verify_upsert(&raw, &updated, "visibility", "public").map_err(|why| {
+                anyhow::anyhow!(
+                    "ABORTED at {}: {why}\n\
                          {} note(s) were written before this and are verified correct.\n\
                          Nothing further was touched.",
-                        entry.rel_path,
-                        report.written - 1
-                    )
-                },
-            )?;
+                    entry.rel_path,
+                    report.written - 1
+                )
+            })?;
             std::fs::write(&full, updated)?;
         }
     }
@@ -109,8 +107,16 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         fs::create_dir_all(dir.path().join("3-permanent")).unwrap();
         fs::create_dir_all(dir.path().join("1-fleeting")).unwrap();
-        fs::write(dir.path().join("3-permanent/a.md"), "---\ntitle: A\n---\n\nBody.").unwrap();
-        fs::write(dir.path().join("1-fleeting/b.md"), "---\ntitle: B\n---\n\nBody.").unwrap();
+        fs::write(
+            dir.path().join("3-permanent/a.md"),
+            "---\ntitle: A\n---\n\nBody.",
+        )
+        .unwrap();
+        fs::write(
+            dir.path().join("1-fleeting/b.md"),
+            "---\ntitle: B\n---\n\nBody.",
+        )
+        .unwrap();
 
         let config = cfg(&[("3-permanent/**", "public"), ("1-fleeting/**", "listed")]);
         let report = backfill_public(dir.path(), &config, false).unwrap();
@@ -158,7 +164,10 @@ mod tests {
         let config = cfg(&[("3-permanent/**", "public")]);
         let report = backfill_public(dir.path(), &config, true).unwrap();
 
-        assert_eq!(report.written, 1, "dry run still reports what it would write");
+        assert_eq!(
+            report.written, 1,
+            "dry run still reports what it would write"
+        );
         assert_eq!(fs::read_to_string(&p).unwrap(), before);
     }
 

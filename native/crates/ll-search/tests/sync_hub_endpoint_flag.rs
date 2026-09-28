@@ -62,7 +62,11 @@ fn hub_endpoint_override_reaches_validation() {
         "visibility": {"default": "private", "rules": []},
         "hub": {"endpoint": "wss://on-disk.example/ws", "key_id": "zAbc"},
     });
-    std::fs::write(fed.join("config.json"), serde_json::to_string(&config).unwrap()).unwrap();
+    std::fs::write(
+        fed.join("config.json"),
+        serde_json::to_string(&config).unwrap(),
+    )
+    .unwrap();
 
     let db = tmp.path().join("vault-index.db");
     let vault = tmp.path().join("vault");
@@ -84,7 +88,10 @@ fn hub_endpoint_override_reaches_validation() {
         .expect("spawn ll-search");
 
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(!out.status.success(), "expected non-zero exit; got success. stderr: {stderr}");
+    assert!(
+        !out.status.success(),
+        "expected non-zero exit; got success. stderr: {stderr}"
+    );
     assert!(
         stderr.contains("http://overridden.example/ws"),
         "expected validate() to reject the overridden endpoint; stderr: {stderr}"

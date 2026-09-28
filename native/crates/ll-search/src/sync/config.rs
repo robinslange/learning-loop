@@ -1,5 +1,5 @@
-use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
 
 #[derive(Clone, Deserialize, Serialize)]
 pub struct FederationConfig {
@@ -209,7 +209,10 @@ fn vault_md_paths(dir: &Path, root: &Path, paths: &mut Vec<String>) -> u64 {
     if let Ok(entries) = std::fs::read_dir(dir) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.file_name().is_some_and(|n| n.to_str().is_some_and(|s| s.starts_with('.'))) {
+            if path
+                .file_name()
+                .is_some_and(|n| n.to_str().is_some_and(|s| s.starts_with('.')))
+            {
                 continue;
             }
             if path.is_dir() {
@@ -344,7 +347,8 @@ mod tests {
             "hub": {"endpoint": "wss://h.example/ws", "key_id": "zAbc"},
             "vault_id": "019abc",
             "vault_path": "/home/r/brain"
-        }).to_string();
+        })
+        .to_string();
         let c: FederationConfig = serde_json::from_str(&raw).unwrap();
         assert_eq!(c.vault_id.as_deref(), Some("019abc"));
         assert_eq!(c.hub.key_id.as_deref(), Some("zAbc"));
@@ -356,7 +360,8 @@ mod tests {
             "identity": {"displayName": "robin", "pubkey": "ed25519:AAAA"},
             "visibility": {"default": "private", "rules": []},
             "hub": {"endpoint": "wss://h.example/ws"}
-        }).to_string();
+        })
+        .to_string();
         let c: FederationConfig = serde_json::from_str(&raw).unwrap();
         assert!(c.vault_id.is_none());
     }
@@ -365,8 +370,10 @@ mod tests {
     fn a_config_without_a_pinned_hub_key_is_invalid() {
         let c = FederationConfig::test_fixture("private", vec![]);
         let err = c.validate().unwrap_err();
-        assert!(err.to_string().contains("hub.key_id"),
-            "an unpinned hub was a warning in v4 and is an error in v5");
+        assert!(
+            err.to_string().contains("hub.key_id"),
+            "an unpinned hub was a warning in v4 and is an error in v5"
+        );
     }
 
     #[test]
@@ -413,17 +420,27 @@ mod tests {
         let mut offenders = Vec::new();
         for entry in walkdir::WalkDir::new(src_root) {
             let entry = entry.unwrap();
-            if entry.path().extension().is_none_or(|e| e != "rs") { continue; }
+            if entry.path().extension().is_none_or(|e| e != "rs") {
+                continue;
+            }
             let src = std::fs::read_to_string(entry.path()).unwrap();
-            if !src.contains(NEEDLE) { continue; }
-            let rel = entry.path().strip_prefix(src_root).unwrap()
-                .to_string_lossy().replace('\\', "/");
+            if !src.contains(NEEDLE) {
+                continue;
+            }
+            let rel = entry
+                .path()
+                .strip_prefix(src_root)
+                .unwrap()
+                .to_string_lossy()
+                .replace('\\', "/");
             if !PEER_ID_ALLOWLIST.contains(&rel.as_str()) {
                 offenders.push(rel);
             }
         }
-        assert!(offenders.is_empty(),
+        assert!(
+            offenders.is_empty(),
             "{NEEDLE} found outside the allowlist (update PEER_ID_ALLOWLIST if this \
-             file's removal was scheduled, otherwise fix it): {offenders:?}");
+             file's removal was scheduled, otherwise fix it): {offenders:?}"
+        );
     }
 }

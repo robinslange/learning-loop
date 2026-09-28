@@ -99,7 +99,10 @@ pub fn load_only(config_dir: &Path) -> anyhow::Result<Option<LoadResult>> {
                 return Ok(None);
             }
             other => {
-                anyhow::bail!("unknown LL_SEED_BACKEND value: '{}'; use keyring, encrypted, or mock", other);
+                anyhow::bail!(
+                    "unknown LL_SEED_BACKEND value: '{}'; use keyring, encrypted, or mock",
+                    other
+                );
             }
         }
     }
@@ -157,18 +160,29 @@ pub fn load_or_create(config_dir: &Path) -> anyhow::Result<LoadResult> {
             "encrypted" => return encrypted::load_or_create_seed(config_dir),
             "keyring" => return keyring::load_or_create_seed(config_dir),
             other => {
-                anyhow::bail!("unknown LL_SEED_BACKEND value: '{}'; use keyring, encrypted, or mock", other);
+                anyhow::bail!(
+                    "unknown LL_SEED_BACKEND value: '{}'; use keyring, encrypted, or mock",
+                    other
+                );
             }
         }
     }
 
     if let Some(seed) = read_keyring(config_dir)? {
         let key = SigningKey::from_bytes(&seed);
-        return Ok(LoadResult { signing_key: key, backend: SeedBackend::Keyring, created: false });
+        return Ok(LoadResult {
+            signing_key: key,
+            backend: SeedBackend::Keyring,
+            created: false,
+        });
     }
     if let Some(seed) = read_encrypted(config_dir)? {
         let key = SigningKey::from_bytes(&seed);
-        return Ok(LoadResult { signing_key: key, backend: SeedBackend::Encrypted, created: false });
+        return Ok(LoadResult {
+            signing_key: key,
+            backend: SeedBackend::Encrypted,
+            created: false,
+        });
     }
 
     let mut raw = Zeroizing::new([0u8; 32]);
@@ -178,13 +192,21 @@ pub fn load_or_create(config_dir: &Path) -> anyhow::Result<LoadResult> {
         write_keyring(config_dir, &raw)?;
         let key = SigningKey::from_bytes(&raw);
         write_seed_meta(config_dir, SeedBackend::Keyring, false)?;
-        return Ok(LoadResult { signing_key: key, backend: SeedBackend::Keyring, created: true });
+        return Ok(LoadResult {
+            signing_key: key,
+            backend: SeedBackend::Keyring,
+            created: true,
+        });
     }
 
     write_encrypted(config_dir, &raw)?;
     let key = SigningKey::from_bytes(&raw);
     write_seed_meta(config_dir, SeedBackend::Encrypted, false)?;
-    Ok(LoadResult { signing_key: key, backend: SeedBackend::Encrypted, created: true })
+    Ok(LoadResult {
+        signing_key: key,
+        backend: SeedBackend::Encrypted,
+        created: true,
+    })
 }
 
 /// Store `seed` as this config dir's signing seed, replacing whatever is
@@ -263,7 +285,9 @@ pub fn store_seed(config_dir: &Path, seed: &[u8; 32]) -> anyhow::Result<SeedBack
 /// races, and the production keyring entry is globally namespaced), so a
 /// mutation deleting that branch's guard reddened nothing.
 pub(super) fn refuse_second_identity(config_dir: &Path) -> anyhow::Result<()> {
-    let Some(recorded) = recorded_backend(config_dir) else { return Ok(()) };
+    let Some(recorded) = recorded_backend(config_dir) else {
+        return Ok(());
+    };
     if load_only(config_dir)?.is_some() {
         return Ok(());
     }
@@ -332,7 +356,10 @@ fn auto_migrate_plaintext(config_dir: &Path) -> anyhow::Result<Option<LoadResult
     };
     match super::seed_migrate::migrate(config_dir) {
         Ok(res) => {
-            eprintln!("learning-loop: auto-migrated legacy plaintext seed to {} backend", res.to);
+            eprintln!(
+                "learning-loop: auto-migrated legacy plaintext seed to {} backend",
+                res.to
+            );
             Ok(Some(LoadResult {
                 signing_key: SigningKey::from_bytes(&seed),
                 backend: res.to,
@@ -408,8 +435,14 @@ mod tests {
         init_test_backend();
         let tmp = tempdir().unwrap();
         let first = load_or_create(tmp.path()).unwrap();
-        assert!(first.created, "precondition: an identity exists and was recorded");
-        assert!(recorded_backend(tmp.path()).is_some(), "precondition: the record is on disk");
+        assert!(
+            first.created,
+            "precondition: an identity exists and was recorded"
+        );
+        assert!(
+            recorded_backend(tmp.path()).is_some(),
+            "precondition: the record is on disk"
+        );
         std::fs::remove_file(super::super::config::encrypted_seed_path(tmp.path())).unwrap();
 
         // Matched rather than `unwrap_err`: `LoadResult` has no `Debug`, and it
@@ -419,7 +452,10 @@ mod tests {
             Err(e) => e.to_string(),
         };
 
-        assert!(err.contains("Refusing to create a second identity"), "got: {err}");
+        assert!(
+            err.contains("Refusing to create a second identity"),
+            "got: {err}"
+        );
         assert!(err.contains("recover"), "and names the way back: {err}");
     }
 
@@ -430,7 +466,10 @@ mod tests {
     fn a_machine_with_no_record_at_all_still_mints_its_first_identity() {
         init_test_backend();
         let tmp = tempdir().unwrap();
-        assert!(recorded_backend(tmp.path()).is_none(), "precondition: nothing recorded");
+        assert!(
+            recorded_backend(tmp.path()).is_none(),
+            "precondition: nothing recorded"
+        );
 
         let result = load_or_create(tmp.path()).unwrap();
 
@@ -464,9 +503,15 @@ mod tests {
 
         let result = load_or_create(tmp.path()).unwrap();
 
-        assert_ne!(result.backend, SeedBackend::PlaintextLegacy,
-            "auto-migrate must move off the plaintext backend");
-        assert!(!legacy_path.exists(), "plaintext seed must be shredded after auto-migrate");
+        assert_ne!(
+            result.backend,
+            SeedBackend::PlaintextLegacy,
+            "auto-migrate must move off the plaintext backend"
+        );
+        assert!(
+            !legacy_path.exists(),
+            "plaintext seed must be shredded after auto-migrate"
+        );
 
         use ed25519_dalek::Signer;
         let migrated = SigningKey::from_bytes(&[13u8; 32]);
@@ -482,7 +527,10 @@ mod tests {
     fn store_seed_is_what_load_only_then_reads() {
         init_test_backend();
         let tmp = tempdir().unwrap();
-        assert_eq!(store_seed(tmp.path(), &[23u8; 32]).unwrap(), SeedBackend::Encrypted);
+        assert_eq!(
+            store_seed(tmp.path(), &[23u8; 32]).unwrap(),
+            SeedBackend::Encrypted
+        );
         let loaded = load_only(tmp.path()).unwrap().unwrap();
         assert_eq!(loaded.signing_key.to_bytes(), [23u8; 32]);
         assert_eq!(loaded.backend, SeedBackend::Encrypted);
@@ -495,7 +543,11 @@ mod tests {
         write_encrypted(tmp.path(), &[1u8; 32]).unwrap();
         store_seed(tmp.path(), &[2u8; 32]).unwrap();
         assert_eq!(
-            load_only(tmp.path()).unwrap().unwrap().signing_key.to_bytes(),
+            load_only(tmp.path())
+                .unwrap()
+                .unwrap()
+                .signing_key
+                .to_bytes(),
             [2u8; 32],
             "a stored seed that does not become the loaded seed is a silent no-op",
         );
@@ -516,9 +568,19 @@ mod tests {
 
         store_seed(tmp.path(), &[5u8; 32]).unwrap();
 
-        assert_eq!(load_only(tmp.path()).unwrap().unwrap().signing_key.to_bytes(), [5u8; 32]);
-        assert_eq!(std::fs::read(&legacy).unwrap(), [9u8; 32],
-            "still there, and still the old key: `migrate-seed` shreds it, `store_seed` does not");
+        assert_eq!(
+            load_only(tmp.path())
+                .unwrap()
+                .unwrap()
+                .signing_key
+                .to_bytes(),
+            [5u8; 32]
+        );
+        assert_eq!(
+            std::fs::read(&legacy).unwrap(),
+            [9u8; 32],
+            "still there, and still the old key: `migrate-seed` shreds it, `store_seed` does not"
+        );
     }
 
     // NOTE: `keyring_roundtrip_when_available` removed. It wrote `[11u8; 32]`

@@ -67,8 +67,7 @@ fn app_state_constructs_from_fixture_db() {
     let dir = TempDir::new().expect("tempdir");
     let db_path = create_fixture_db(&dir);
 
-    let state = ll_search::app::AppState::from_db(&db_path, None)
-        .expect("AppState::from_db");
+    let state = ll_search::app::AppState::from_db(&db_path, None).expect("AppState::from_db");
 
     let count = state.note_count().expect("note_count");
     assert_eq!(count, 2, "expected 2 notes");
@@ -92,7 +91,10 @@ fn app_state_constructs_from_fixture_db() {
     let tags = state.storage.tags_map().expect("tags_map");
     assert!(tags.contains_key("a.md"), "a.md must be in tags_map");
     let a_tags = tags.get("a.md").unwrap();
-    assert!(a_tags.contains(&"alpha".to_string()), "a.md must have tag 'alpha'");
+    assert!(
+        a_tags.contains(&"alpha".to_string()),
+        "a.md must have tag 'alpha'"
+    );
 }
 
 #[test]
@@ -100,8 +102,7 @@ fn app_state_peer_cache_default_empty() {
     let dir = TempDir::new().expect("tempdir");
     let db_path = create_fixture_db(&dir);
 
-    let state = ll_search::app::AppState::from_db(&db_path, None)
-        .expect("AppState::from_db");
+    let state = ll_search::app::AppState::from_db(&db_path, None).expect("AppState::from_db");
 
     let cache = state.peers.read();
     assert!(cache.peers.is_empty(), "peer cache must start empty");
@@ -112,15 +113,17 @@ fn ensure_search_context_rebuilds_after_data_version_bump() {
     let dir = TempDir::new().expect("tempdir");
     let db_path = create_fixture_db(&dir);
 
-    let state = ll_search::app::AppState::from_db(&db_path, None)
-        .expect("AppState::from_db");
+    let state = ll_search::app::AppState::from_db(&db_path, None).expect("AppState::from_db");
 
     // Reader connection — this is what the daemon would hold long-lived.
     let reader_conn = open_rw_conn(&db_path);
 
     // First call builds the context.
     let ctx_v1 = state.ensure_search_context(&reader_conn);
-    assert!(!ctx_v1.is_stale(&reader_conn), "freshly built context must not be stale");
+    assert!(
+        !ctx_v1.is_stale(&reader_conn),
+        "freshly built context must not be stale"
+    );
 
     // Write via a separate connection — PRAGMA data_version increments on the
     // reader only when a *different* connection commits a write (SQLite semantics).
@@ -133,11 +136,17 @@ fn ensure_search_context_rebuilds_after_data_version_bump() {
     }
 
     // The cached context should now be stale as seen from the reader.
-    assert!(ctx_v1.is_stale(&reader_conn), "context must be stale after external write");
+    assert!(
+        ctx_v1.is_stale(&reader_conn),
+        "context must be stale after external write"
+    );
 
     // ensure_search_context must return a fresh context.
     let ctx_v2 = state.ensure_search_context(&reader_conn);
-    assert!(!ctx_v2.is_stale(&reader_conn), "rebuilt context must not be stale");
+    assert!(
+        !ctx_v2.is_stale(&reader_conn),
+        "rebuilt context must not be stale"
+    );
 }
 
 #[test]
@@ -145,15 +154,17 @@ fn ensure_search_context_reuses_when_not_stale() {
     let dir = TempDir::new().expect("tempdir");
     let db_path = create_fixture_db(&dir);
 
-    let state = ll_search::app::AppState::from_db(&db_path, None)
-        .expect("AppState::from_db");
+    let state = ll_search::app::AppState::from_db(&db_path, None).expect("AppState::from_db");
 
     let conn = open_rw_conn(&db_path);
 
     let ctx_v1 = state.ensure_search_context(&conn);
     let ctx_v2 = state.ensure_search_context(&conn);
     // Both should point to the same Arc allocation.
-    assert!(Arc::ptr_eq(&ctx_v1, &ctx_v2), "second call must reuse the same Arc");
+    assert!(
+        Arc::ptr_eq(&ctx_v1, &ctx_v2),
+        "second call must reuse the same Arc"
+    );
 }
 
 #[test]
@@ -161,11 +172,13 @@ fn app_state_storage_is_arc_clone() {
     let dir = TempDir::new().expect("tempdir");
     let db_path = create_fixture_db(&dir);
 
-    let state = ll_search::app::AppState::from_db(&db_path, None)
-        .expect("AppState::from_db");
+    let state = ll_search::app::AppState::from_db(&db_path, None).expect("AppState::from_db");
 
     let storage_clone: Arc<dyn ll_search::app::Storage> = Arc::clone(&state.storage);
-    let count_a = state.storage.note_count().expect("note_count from original");
+    let count_a = state
+        .storage
+        .note_count()
+        .expect("note_count from original");
     let count_b = storage_clone.note_count().expect("note_count from clone");
     assert_eq!(count_a, count_b, "cloned Arc must see same data");
 }

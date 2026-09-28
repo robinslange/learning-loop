@@ -85,9 +85,11 @@ mod tests {
     fn fingerprint_words_all_come_from_the_bip39_list() {
         let fp = fingerprint(&test_key_id());
         for w in fp.split('-') {
-            assert!(bip39::Language::English.word_list().contains(&w),
+            assert!(
+                bip39::Language::English.word_list().contains(&w),
                 "{w} is not a BIP-39 word — a second wordlist is a maintenance \
-                 and confusion cost for no gain");
+                 and confusion cost for no gain"
+            );
         }
     }
 
@@ -103,7 +105,10 @@ mod tests {
         // in either encoding is visible from this test too. Regenerate by
         // printing `fingerprint(&test_key_id())` after a deliberate change.
         let id = test_key_id();
-        assert_eq!(id.as_str(), "z6MkvDqGT54cXesYGvABpF1UapVNwjCqRcafi4Px6Thv5T3Z");
+        assert_eq!(
+            id.as_str(),
+            "z6MkvDqGT54cXesYGvABpF1UapVNwjCqRcafi4Px6Thv5T3Z"
+        );
         assert_eq!(fingerprint(&id), "rapid-party-illegal-theme-blossom-assume");
     }
 
@@ -122,8 +127,10 @@ mod tests {
     fn a_phrase_with_the_wrong_word_count_is_rejected() {
         let phrase = recovery_phrase(&[42u8; 32]).unwrap();
         let broken = phrase.replacen(' ', " zzzz ", 1);
-        assert!(seed_from_phrase(&broken).is_err(),
-            "a wrong phrase must fail loudly, not restore a different identity");
+        assert!(
+            seed_from_phrase(&broken).is_err(),
+            "a wrong phrase must fail loudly, not restore a different identity"
+        );
     }
 
     #[test]
@@ -135,7 +142,11 @@ mod tests {
         let phrase = recovery_phrase(&[42u8; 32]).unwrap();
         let mut words: Vec<&str> = phrase.split_whitespace().collect();
         let list = bip39::Language::English.word_list();
-        let replacement = if words[0] == list[0] { list[1] } else { list[0] };
+        let replacement = if words[0] == list[0] {
+            list[1]
+        } else {
+            list[0]
+        };
         words[0] = replacement;
         let broken = words.join(" ");
         assert_ne!(broken, phrase);

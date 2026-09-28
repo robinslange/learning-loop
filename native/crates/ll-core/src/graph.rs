@@ -135,9 +135,7 @@ pub fn personalized_pagerank_holdout(
 
     let mut results: Vec<(String, f64)> = scores
         .into_iter()
-        .filter(|(path, score)| {
-            *score > 1e-6 && !seed_set.contains(path.as_str()) && !masked(path)
-        })
+        .filter(|(path, score)| *score > 1e-6 && !seed_set.contains(path.as_str()) && !masked(path))
         .collect();
     results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
     results.truncate(crate::config::TOP_K);
@@ -183,9 +181,18 @@ mod tests {
 
         let held = personalized_pagerank_holdout(&graph, &seeds, 0.5, 20, Some("s"));
         let held_paths: Vec<&str> = held.iter().map(|r| r.0.as_str()).collect();
-        assert!(!held_paths.contains(&"s"), "held-out node must not be returned: {held_paths:?}");
-        assert!(!held_paths.contains(&"g"), "held-out node's edges must not propagate: {held_paths:?}");
-        assert!(held_paths.contains(&"x"), "unrelated structure must survive the holdout: {held_paths:?}");
+        assert!(
+            !held_paths.contains(&"s"),
+            "held-out node must not be returned: {held_paths:?}"
+        );
+        assert!(
+            !held_paths.contains(&"g"),
+            "held-out node's edges must not propagate: {held_paths:?}"
+        );
+        assert!(
+            held_paths.contains(&"x"),
+            "unrelated structure must survive the holdout: {held_paths:?}"
+        );
     }
 
     // Convergence: the early stop must not change what the walk produces, only
@@ -202,7 +209,10 @@ mod tests {
     fn dense_graph(n: usize) -> GraphEdges {
         let mut graph: GraphEdges = HashMap::new();
         for i in 0..n {
-            let targets: Vec<String> = (0..n).filter(|j| *j != i).map(|j| format!("n{j}")).collect();
+            let targets: Vec<String> = (0..n)
+                .filter(|j| *j != i)
+                .map(|j| format!("n{j}"))
+                .collect();
             graph.insert(format!("n{i}"), targets);
         }
         graph
@@ -265,7 +275,11 @@ mod tests {
         let uncapped = personalized_pagerank(&graph, &seeds, 0.5, 400);
 
         let order: Vec<&str> = capped.iter().map(|r| r.0.as_str()).collect();
-        assert_eq!(order, vec!["b", "c", "d", "e"], "hop order is score order on a chain");
+        assert_eq!(
+            order,
+            vec!["b", "c", "d", "e"],
+            "hop order is score order on a chain"
+        );
         assert_eq!(
             order,
             uncapped.iter().map(|r| r.0.as_str()).collect::<Vec<_>>(),
@@ -300,8 +314,14 @@ mod tests {
 
         let one = personalized_pagerank(&graph, &["a".to_string()], 0.5, 1);
         let paths: Vec<&str> = one.iter().map(|r| r.0.as_str()).collect();
-        assert!(paths.contains(&"b"), "one step must reach the direct neighbour: {paths:?}");
-        assert!(!paths.contains(&"c"), "one step must not reach two hops out: {paths:?}");
+        assert!(
+            paths.contains(&"b"),
+            "one step must reach the direct neighbour: {paths:?}"
+        );
+        assert!(
+            !paths.contains(&"c"),
+            "one step must not reach two hops out: {paths:?}"
+        );
     }
 
     #[test]

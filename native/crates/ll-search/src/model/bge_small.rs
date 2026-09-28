@@ -41,8 +41,8 @@ impl BgeSmallProvider {
             .commit_from_file(model_path)
             .map_err(|e| anyhow::anyhow!("{}", e))?;
 
-        let mut tokenizer = Tokenizer::from_file(tokenizer_path)
-            .map_err(|e| anyhow::anyhow!("{}", e))?;
+        let mut tokenizer =
+            Tokenizer::from_file(tokenizer_path).map_err(|e| anyhow::anyhow!("{}", e))?;
         tokenizer
             .with_truncation(Some(tokenizers::TruncationParams {
                 max_length: MAX_TOKENS,
@@ -71,7 +71,11 @@ impl EmbeddingProvider for BgeSmallProvider {
             .encode_batch(texts.to_vec(), true)
             .map_err(|e| anyhow::anyhow!("{}", e))?;
 
-        let max_len = encodings.iter().map(|e| e.get_ids().len()).max().unwrap_or(0);
+        let max_len = encodings
+            .iter()
+            .map(|e| e.get_ids().len())
+            .max()
+            .unwrap_or(0);
 
         let mut input_ids_flat: Vec<i64> = Vec::with_capacity(batch_size * max_len);
         let mut attention_mask_flat: Vec<i64> = Vec::with_capacity(batch_size * max_len);

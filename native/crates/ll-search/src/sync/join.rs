@@ -38,9 +38,7 @@ use rand::RngCore;
 use zeroize::Zeroizing;
 
 use super::client::{check_hub_scheme, connect_and_authenticate};
-use super::config::{
-    self, FederationConfig, HubEndpoint, Identity, VisibilityConfig,
-};
+use super::config::{self, FederationConfig, HubEndpoint, Identity, VisibilityConfig};
 use super::key_id::KeyId;
 use super::protocol_v5::PROTOCOL_VERSION;
 use super::well_known::HubIdentity;
@@ -102,7 +100,10 @@ impl TtyConfirm {
         if std::io::stdin().lock().read_line(&mut line)? == 0 {
             return Ok(false);
         }
-        Ok(matches!(line.trim().to_ascii_lowercase().as_str(), "y" | "yes"))
+        Ok(matches!(
+            line.trim().to_ascii_lowercase().as_str(),
+            "y" | "yes"
+        ))
     }
 }
 
@@ -189,7 +190,10 @@ pub async fn join(
         &hub.hub_key_id,
         Some(recovery_key_id.as_str()),
     );
-    let vault_id = config.vault_id.clone().expect("fresh_config always mints one");
+    let vault_id = config
+        .vault_id
+        .clone()
+        .expect("fresh_config always mints one");
 
     // The round trip. `authenticate` re-checks the pinned key against the one
     // the hub presents, so a hub that publishes one identity and signs with
@@ -273,7 +277,10 @@ pub(super) fn fresh_config(
             display_name: display_name_for(vault_path),
             pubkey: super::key_id::pubkey_b64(signing_key),
         },
-        visibility: VisibilityConfig { default: "private".into(), rules: Vec::new() },
+        visibility: VisibilityConfig {
+            default: "private".into(),
+            rules: Vec::new(),
+        },
         hub: HubEndpoint {
             endpoint: hub_endpoint.to_string(),
             key_id: Some(hub_key_id.to_string()),
@@ -299,7 +306,9 @@ pub(super) fn fresh_config(
 /// a legacy config, or both; a directory whose parent holds neither IS the
 /// root.
 pub(super) fn require_a_profile_if_this_is_not_the_root(config_dir: &Path) -> anyhow::Result<()> {
-    let Some(parent) = config_dir.parent() else { return Ok(()) };
+    let Some(parent) = config_dir.parent() else {
+        return Ok(());
+    };
     let has_registry = parent.join("vaults.json").exists();
     if !has_registry && !config::config_path(parent).exists() {
         return Ok(());
@@ -307,7 +316,9 @@ pub(super) fn require_a_profile_if_this_is_not_the_root(config_dir: &Path) -> an
     // With a registry present `registry::load` reads only the registry doc, so
     // this cannot trip over a legacy config that has no vault_path.
     let named = has_registry
-        && registry::load(parent)?.iter().any(|p| same_dir(&p.config_dir, config_dir));
+        && registry::load(parent)?
+            .iter()
+            .any(|p| same_dir(&p.config_dir, config_dir));
     if !named {
         anyhow::bail!(
             "{} sits under the plugin data root {} but no vault profile names it. \
@@ -342,19 +353,22 @@ pub(super) fn display_name_for(vault_path: &Path) -> String {
         .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
         .take(64)
         .collect();
-    if cleaned.is_empty() { "vault".to_string() } else { cleaned }
+    if cleaned.is_empty() {
+        "vault".to_string()
+    } else {
+        cleaned
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::sync::config::load_config;
-    use crate::sync::test_hub::{
-        self, fake_hub_happy_path, fake_hub_happy_path_signed_by,
-        fake_hub_that_forgets_the_vault, fake_hub_that_rejects_the_invite, hub_key_id_str, HubVaults,
-        MockHub,
-    };
     use crate::sync::protocol_v5::ClientMsg;
+    use crate::sync::test_hub::{
+        self, fake_hub_happy_path, fake_hub_happy_path_signed_by, fake_hub_that_forgets_the_vault,
+        fake_hub_that_rejects_the_invite, hub_key_id_str, HubVaults, MockHub,
+    };
     use std::path::Path;
     use std::sync::MutexGuard;
 
@@ -390,7 +404,10 @@ mod tests {
 
     impl DeclineAt {
         fn new(step: Step) -> Self {
-            DeclineAt { step, reached: None }
+            DeclineAt {
+                step,
+                reached: None,
+            }
         }
     }
 
@@ -438,9 +455,12 @@ mod tests {
 
     fn hello_of(hub: &MockHub) -> Option<(Vec<String>, Option<String>, String)> {
         match hub.last_hello()? {
-            ClientMsg::ClientHello { vault_ids, invite_code, key_id, .. } => {
-                Some((vault_ids, invite_code, key_id))
-            }
+            ClientMsg::ClientHello {
+                vault_ids,
+                invite_code,
+                key_id,
+                ..
+            } => Some((vault_ids, invite_code, key_id)),
             _ => None,
         }
     }
@@ -451,13 +471,24 @@ mod tests {
         let hub = fake_hub_that_rejects_the_invite().await;
         let dir = tempfile::tempdir().unwrap();
 
-        let err = join(dir.path(), &hub.ws_url(), "BAD-CODE", Path::new("/v"), &mut Yes::default())
-            .await
-            .unwrap_err();
+        let err = join(
+            dir.path(),
+            &hub.ws_url(),
+            "BAD-CODE",
+            Path::new("/v"),
+            &mut Yes::default(),
+        )
+        .await
+        .unwrap_err();
 
-        assert!(err.to_string().contains("invite redemption failed"), "{err}");
-        assert!(!config::config_path(dir.path()).exists(),
-            "a failed join must leave no config, so re-running enters cleanly");
+        assert!(
+            err.to_string().contains("invite redemption failed"),
+            "{err}"
+        );
+        assert!(
+            !config::config_path(dir.path()).exists(),
+            "a failed join must leave no config, so re-running enters cleanly"
+        );
     }
 
     /// Authentication succeeding is not registration succeeding. Under v5 the
@@ -472,13 +503,21 @@ mod tests {
         let hub = fake_hub_that_forgets_the_vault().await;
         let dir = tempfile::tempdir().unwrap();
 
-        let err = join(dir.path(), &hub.ws_url(), "CODE", Path::new("/v"), &mut Yes::default())
-            .await
-            .unwrap_err();
+        let err = join(
+            dir.path(),
+            &hub.ws_url(),
+            "CODE",
+            Path::new("/v"),
+            &mut Yes::default(),
+        )
+        .await
+        .unwrap_err();
 
         assert!(err.to_string().contains("did not register vault"), "{err}");
-        assert!(!config::config_path(dir.path()).exists(),
-            "no config for a vault the hub will not accept uploads for");
+        assert!(
+            !config::config_path(dir.path()).exists(),
+            "no config for a vault the hub will not accept uploads for"
+        );
     }
 
     #[tokio::test]
@@ -489,9 +528,15 @@ mod tests {
         let hub = fake_hub_happy_path(HubVaults::new()).await;
         let dir = tempfile::tempdir().unwrap();
 
-        join(dir.path(), &hub.ws_url(), "GOOD-CODE", Path::new("/v"), &mut Yes::default())
-            .await
-            .unwrap();
+        join(
+            dir.path(),
+            &hub.ws_url(),
+            "GOOD-CODE",
+            Path::new("/v"),
+            &mut Yes::default(),
+        )
+        .await
+        .unwrap();
 
         assert!(config::config_path(dir.path()).exists());
     }
@@ -502,9 +547,15 @@ mod tests {
         let hub = fake_hub_happy_path(HubVaults::new()).await;
         let dir = tempfile::tempdir().unwrap();
 
-        join(dir.path(), &hub.ws_url(), "GOOD-CODE", Path::new("/v"), &mut Yes::default())
-            .await
-            .unwrap();
+        join(
+            dir.path(),
+            &hub.ws_url(),
+            "GOOD-CODE",
+            Path::new("/v"),
+            &mut Yes::default(),
+        )
+        .await
+        .unwrap();
 
         let cfg = load_config(dir.path()).unwrap();
         assert_eq!(cfg.hub.key_id.as_deref(), Some(hub.key_id.as_str()));
@@ -523,9 +574,15 @@ mod tests {
         let hub = fake_hub_happy_path_signed_by(other, &hub_key_id_str(), HubVaults::new()).await;
         let dir = tempfile::tempdir().unwrap();
 
-        let err = join(dir.path(), &hub.ws_url(), "GOOD-CODE", Path::new("/v"), &mut Yes::default())
-            .await
-            .unwrap_err();
+        let err = join(
+            dir.path(),
+            &hub.ws_url(),
+            "GOOD-CODE",
+            Path::new("/v"),
+            &mut Yes::default(),
+        )
+        .await
+        .unwrap_err();
 
         assert!(err.to_string().contains("hub key mismatch"), "{err}");
         assert!(!config::config_path(dir.path()).exists());
@@ -538,14 +595,23 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mut confirm = Yes::default();
 
-        let out = join(dir.path(), &hub.ws_url(), "GOOD-CODE", Path::new("/v"), &mut confirm)
-            .await
-            .unwrap();
+        let out = join(
+            dir.path(),
+            &hub.ws_url(),
+            "GOOD-CODE",
+            Path::new("/v"),
+            &mut confirm,
+        )
+        .await
+        .unwrap();
 
         let expected = words::fingerprint(&KeyId::parse(&hub.key_id).unwrap());
-        assert_eq!(confirm.fingerprint.as_deref(), Some(expected.as_str()),
+        assert_eq!(
+            confirm.fingerprint.as_deref(),
+            Some(expected.as_str()),
             "the six words the user compares must be derived from the key that ends \
-             up pinned, or the comparison guards nothing");
+             up pinned, or the comparison guards nothing"
+        );
         assert_eq!(out.hub_fingerprint, expected);
     }
 
@@ -555,9 +621,15 @@ mod tests {
         let hub = fake_hub_happy_path(HubVaults::new()).await;
         let dir = tempfile::tempdir().unwrap();
 
-        let out = join(dir.path(), &hub.ws_url(), "GOOD-CODE", Path::new("/v"), &mut Yes::default())
-            .await
-            .unwrap();
+        let out = join(
+            dir.path(),
+            &hub.ws_url(),
+            "GOOD-CODE",
+            Path::new("/v"),
+            &mut Yes::default(),
+        )
+        .await
+        .unwrap();
 
         assert_eq!(out.recovery_phrase.split_whitespace().count(), 24);
 
@@ -571,8 +643,10 @@ mod tests {
         assert_eq!(out.recovery_key_id, from_phrase.as_str());
 
         let written = std::fs::read_to_string(config::config_path(dir.path())).unwrap();
-        assert!(!written.contains(&out.recovery_phrase),
-            "the recovery secret must never be written to disk in usable form");
+        assert!(
+            !written.contains(&out.recovery_phrase),
+            "the recovery secret must never be written to disk in usable form"
+        );
         // A single BIP-39 word is an ordinary English word, and every
         // `config.json` this writes legitimately contains seven of them inside
         // quoted keys and values: display, end, hub, key, private, rule, vault.
@@ -588,8 +662,10 @@ mod tests {
         let words: Vec<&str> = out.recovery_phrase.split_whitespace().collect();
         for pair in words.windows(2) {
             let fragment = pair.join(" ");
-            assert!(!written.contains(&fragment),
-                "a fragment of the recovery phrase ({fragment:?}) reached the config");
+            assert!(
+                !written.contains(&fragment),
+                "a fragment of the recovery phrase ({fragment:?}) reached the config"
+            );
         }
     }
 
@@ -599,17 +675,29 @@ mod tests {
         let hub = fake_hub_happy_path(HubVaults::new()).await;
         let dir = tempfile::tempdir().unwrap();
 
-        let out = join(dir.path(), &hub.ws_url(), "GOOD-CODE", Path::new("/v"), &mut Yes::default())
-            .await
-            .unwrap();
+        let out = join(
+            dir.path(),
+            &hub.ws_url(),
+            "GOOD-CODE",
+            Path::new("/v"),
+            &mut Yes::default(),
+        )
+        .await
+        .unwrap();
 
         let (vault_ids, invite, key_id) = hello_of(&hub).expect("hub saw a client-hello");
-        assert_eq!(vault_ids, vec![out.vault_id.clone()],
+        assert_eq!(
+            vault_ids,
+            vec![out.vault_id.clone()],
             "the hub creates the vaults row from what the hello declares; a join that \
-             declares nothing registers nothing");
+             declares nothing registers nothing"
+        );
         assert_eq!(invite.as_deref(), Some("GOOD-CODE"));
         assert_eq!(key_id, out.key_id);
-        assert_eq!(load_config(dir.path()).unwrap().vault_id.as_deref(), Some(out.vault_id.as_str()));
+        assert_eq!(
+            load_config(dir.path()).unwrap().vault_id.as_deref(),
+            Some(out.vault_id.as_str())
+        );
     }
 
     #[tokio::test]
@@ -618,9 +706,15 @@ mod tests {
         let hub = fake_hub_happy_path(HubVaults::new()).await;
         let dir = tempfile::tempdir().unwrap();
 
-        let out = join(dir.path(), &hub.ws_url(), "GOOD-CODE", Path::new("/v"), &mut Yes::default())
-            .await
-            .unwrap();
+        let out = join(
+            dir.path(),
+            &hub.ws_url(),
+            "GOOD-CODE",
+            Path::new("/v"),
+            &mut Yes::default(),
+        )
+        .await
+        .unwrap();
 
         let parsed = uuid::Uuid::parse_str(&out.vault_id).unwrap();
         assert_eq!(parsed.get_version_num(), 7);
@@ -628,8 +722,13 @@ mod tests {
         // lowercase/digit/`_`/`-`. A hyphenated lowercase UUID passes; an
         // uppercase or braced rendering would be rejected on arrival.
         assert!(out.vault_id.len() <= 64);
-        assert!(out.vault_id.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-'),
-            "{}", out.vault_id);
+        assert!(
+            out.vault_id
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-'),
+            "{}",
+            out.vault_id
+        );
     }
 
     /// One switch decides this, and the control is the same endpoint with the
@@ -647,20 +746,40 @@ mod tests {
         std::env::remove_var("LL_ALLOW_INSECURE_WS");
 
         let dir = tempfile::tempdir().unwrap();
-        let err = join(dir.path(), "ws://insecure.example", "C", Path::new("/v"), &mut Yes::default())
-            .await
-            .unwrap_err();
+        let err = join(
+            dir.path(),
+            "ws://insecure.example",
+            "C",
+            Path::new("/v"),
+            &mut Yes::default(),
+        )
+        .await
+        .unwrap_err();
         assert!(err.to_string().contains("wss://"), "{err}");
-        let loopback = join(dir.path(), "ws://127.0.0.1:1", "C", Path::new("/v"), &mut Yes::default())
-            .await
-            .unwrap_err();
-        assert!(loopback.to_string().contains("wss://"),
-            "loopback is not exempt: {loopback}");
+        let loopback = join(
+            dir.path(),
+            "ws://127.0.0.1:1",
+            "C",
+            Path::new("/v"),
+            &mut Yes::default(),
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            loopback.to_string().contains("wss://"),
+            "loopback is not exempt: {loopback}"
+        );
 
         std::env::set_var("LL_ALLOW_INSECURE_WS", "1");
-        let nowhere = join(dir.path(), "ws://127.0.0.1:1", "C", Path::new("/v"), &mut Yes::default())
-            .await
-            .unwrap_err();
+        let nowhere = join(
+            dir.path(),
+            "ws://127.0.0.1:1",
+            "C",
+            Path::new("/v"),
+            &mut Yes::default(),
+        )
+        .await
+        .unwrap_err();
         std::env::remove_var("LL_ALLOW_INSECURE_WS");
         assert!(!nowhere.to_string().contains("wss://"), "{nowhere}");
     }
@@ -672,16 +791,29 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mut confirm = DeclineAt::new(Step::Fingerprint);
 
-        let err = join(dir.path(), &hub.ws_url(), "GOOD-CODE", Path::new("/v"), &mut confirm)
-            .await
-            .unwrap_err();
+        let err = join(
+            dir.path(),
+            &hub.ws_url(),
+            "GOOD-CODE",
+            Path::new("/v"),
+            &mut confirm,
+        )
+        .await
+        .unwrap_err();
 
-        assert!(err.to_string().contains("fingerprint not confirmed"), "{err}");
-        assert!(hub.last_hello().is_none(),
+        assert!(
+            err.to_string().contains("fingerprint not confirmed"),
+            "{err}"
+        );
+        assert!(
+            hub.last_hello().is_none(),
             "the invite must not reach an unconfirmed hub — it is redeemed on the \
-             hello, so sending it burns it");
-        assert!(!dir.path().join("federation").exists(),
-            "declining before the identity exists must not create one");
+             hello, so sending it burns it"
+        );
+        assert!(
+            !dir.path().join("federation").exists(),
+            "declining before the identity exists must not create one"
+        );
     }
 
     #[tokio::test]
@@ -691,15 +823,30 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mut confirm = DeclineAt::new(Step::Phrase);
 
-        let err = join(dir.path(), &hub.ws_url(), "GOOD-CODE", Path::new("/v"), &mut confirm)
-            .await
-            .unwrap_err();
+        let err = join(
+            dir.path(),
+            &hub.ws_url(),
+            "GOOD-CODE",
+            Path::new("/v"),
+            &mut confirm,
+        )
+        .await
+        .unwrap_err();
 
-        assert_eq!(confirm.reached, Some(Step::Phrase),
+        assert_eq!(
+            confirm.reached,
+            Some(Step::Phrase),
             "the phrase must actually be put to the user; a join that never asks \
-             cannot be stopped here");
-        assert!(err.to_string().contains("recovery phrase not confirmed"), "{err}");
-        assert!(hub.last_hello().is_none(), "nothing should have been sent to the hub");
+             cannot be stopped here"
+        );
+        assert!(
+            err.to_string().contains("recovery phrase not confirmed"),
+            "{err}"
+        );
+        assert!(
+            hub.last_hello().is_none(),
+            "nothing should have been sent to the hub"
+        );
         assert!(!config::config_path(dir.path()).exists());
 
         // The seed was created before the prompt and stays. That is deliberate,
@@ -707,9 +854,13 @@ mod tests {
         // the one who needs to know the next `join` reuses this identity rather
         // than minting a fresh one.
         let kept = seed_store::load_only(dir.path()).unwrap();
-        assert!(kept.is_some(), "the identity created before the prompt is kept");
-        let key_id =
-            KeyId::from_pubkey(&kept.unwrap().signing_key.verifying_key()).as_str().to_string();
+        assert!(
+            kept.is_some(),
+            "the identity created before the prompt is kept"
+        );
+        let key_id = KeyId::from_pubkey(&kept.unwrap().signing_key.verifying_key())
+            .as_str()
+            .to_string();
         assert!(
             err.to_string().contains(&key_id),
             "and the abort names it, or the user cannot tell which identity was kept: {err}"
@@ -722,18 +873,33 @@ mod tests {
         let hub = fake_hub_happy_path(HubVaults::new()).await;
         let dir = tempfile::tempdir().unwrap();
 
-        join(dir.path(), &hub.ws_url(), "GOOD-CODE", Path::new("/v"), &mut Yes::default())
-            .await
-            .unwrap();
+        join(
+            dir.path(),
+            &hub.ws_url(),
+            "GOOD-CODE",
+            Path::new("/v"),
+            &mut Yes::default(),
+        )
+        .await
+        .unwrap();
         let first = std::fs::read_to_string(config::config_path(dir.path())).unwrap();
 
-        let err = join(dir.path(), &hub.ws_url(), "ANOTHER", Path::new("/v"), &mut Yes::default())
-            .await
-            .unwrap_err();
+        let err = join(
+            dir.path(),
+            &hub.ws_url(),
+            "ANOTHER",
+            Path::new("/v"),
+            &mut Yes::default(),
+        )
+        .await
+        .unwrap_err();
 
         assert!(err.to_string().contains("already exists"), "{err}");
-        assert_eq!(std::fs::read_to_string(config::config_path(dir.path())).unwrap(), first,
-            "a refused re-join must not have touched the config it refused to replace");
+        assert_eq!(
+            std::fs::read_to_string(config::config_path(dir.path())).unwrap(),
+            first,
+            "a refused re-join must not have touched the config it refused to replace"
+        );
     }
 
     #[tokio::test]
@@ -743,14 +909,22 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mut confirm = Yes::default();
 
-        let err = join(dir.path(), &hub.ws_url(), "GOOD-CODE", Path::new("/v"), &mut confirm)
-            .await
-            .unwrap_err();
+        let err = join(
+            dir.path(),
+            &hub.ws_url(),
+            "GOOD-CODE",
+            Path::new("/v"),
+            &mut confirm,
+        )
+        .await
+        .unwrap_err();
 
         assert!(err.to_string().contains("protocol"), "{err}");
-        assert!(confirm.fingerprint.is_none(),
+        assert!(
+            confirm.fingerprint.is_none(),
             "a version this client cannot speak is settled before the user is asked \
-             to compare anything");
+             to compare anything"
+        );
     }
 
     /// The seed is the one thing a failed join deliberately leaves behind. It
@@ -762,18 +936,32 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
 
         let rejecting = fake_hub_that_rejects_the_invite().await;
-        assert!(join(dir.path(), &rejecting.ws_url(), "BAD", Path::new("/v"), &mut Yes::default())
-            .await
-            .is_err());
+        assert!(join(
+            dir.path(),
+            &rejecting.ws_url(),
+            "BAD",
+            Path::new("/v"),
+            &mut Yes::default()
+        )
+        .await
+        .is_err());
         let (_, _, first_key) = hello_of(&rejecting).expect("hub saw a client-hello");
 
         let good = fake_hub_happy_path(HubVaults::new()).await;
-        let out = join(dir.path(), &good.ws_url(), "GOOD-CODE", Path::new("/v"), &mut Yes::default())
-            .await
-            .unwrap();
+        let out = join(
+            dir.path(),
+            &good.ws_url(),
+            "GOOD-CODE",
+            Path::new("/v"),
+            &mut Yes::default(),
+        )
+        .await
+        .unwrap();
 
-        assert_eq!(out.key_id, first_key,
-            "the retry must present the identity the first attempt created");
+        assert_eq!(
+            out.key_id, first_key,
+            "the retry must present the identity the first attempt created"
+        );
     }
 
     /// A plugin data root that already holds a joined vault: the shape every
@@ -803,9 +991,15 @@ mod tests {
         let plugin_data = home.path().join("plugin-data");
         std::fs::create_dir_all(&plugin_data).unwrap();
 
-        join(&plugin_data, &hub.ws_url(), "GOOD-CODE", Path::new("/home/r/brain"), &mut Yes::default())
-            .await
-            .unwrap();
+        join(
+            &plugin_data,
+            &hub.ws_url(),
+            "GOOD-CODE",
+            Path::new("/home/r/brain"),
+            &mut Yes::default(),
+        )
+        .await
+        .unwrap();
 
         assert_eq!(
             registry::load(&plugin_data).unwrap().len(),
@@ -823,16 +1017,25 @@ mod tests {
         plugin_data_with_a_root_vault(pd.path());
         let work = pd.path().join("work");
         std::fs::create_dir_all(&work).unwrap();
-        registry::add(pd.path(), registry::VaultProfile {
-            id: "work".into(),
-            config_dir: work.clone(),
-            vault_path: "/home/r/work-vault".into(),
-        })
+        registry::add(
+            pd.path(),
+            registry::VaultProfile {
+                id: "work".into(),
+                config_dir: work.clone(),
+                vault_path: "/home/r/work-vault".into(),
+            },
+        )
         .unwrap();
 
-        join(&work, &hub.ws_url(), "GOOD-CODE", Path::new("/home/r/work-vault"), &mut Yes::default())
-            .await
-            .unwrap();
+        join(
+            &work,
+            &hub.ws_url(),
+            "GOOD-CODE",
+            Path::new("/home/r/work-vault"),
+            &mut Yes::default(),
+        )
+        .await
+        .unwrap();
 
         assert!(config::config_path(&work).exists());
     }
@@ -843,21 +1046,35 @@ mod tests {
         let hub = fake_hub_happy_path(HubVaults::new()).await;
         let pd = tempfile::tempdir().unwrap();
         plugin_data_with_a_root_vault(pd.path());
-        registry::add(pd.path(), registry::VaultProfile {
-            id: "work".into(),
-            config_dir: pd.path().join("work"),
-            vault_path: "/home/r/work-vault".into(),
-        })
+        registry::add(
+            pd.path(),
+            registry::VaultProfile {
+                id: "work".into(),
+                config_dir: pd.path().join("work"),
+                vault_path: "/home/r/work-vault".into(),
+            },
+        )
         .unwrap();
         let unregistered = pd.path().join("side-project");
 
-        let err = join(&unregistered, &hub.ws_url(), "GOOD-CODE", Path::new("/home/r/side"), &mut Yes::default())
-            .await
-            .unwrap_err();
+        let err = join(
+            &unregistered,
+            &hub.ws_url(),
+            "GOOD-CODE",
+            Path::new("/home/r/side"),
+            &mut Yes::default(),
+        )
+        .await
+        .unwrap_err();
 
-        assert!(err.to_string().contains("ll vault add"),
-            "the operator has to be told the command that fixes it: {err}");
-        assert!(hub.last_hello().is_none(), "nothing should have reached the hub");
+        assert!(
+            err.to_string().contains("ll vault add"),
+            "the operator has to be told the command that fixes it: {err}"
+        );
+        assert!(
+            hub.last_hello().is_none(),
+            "nothing should have reached the hub"
+        );
         assert!(!config::config_path(&unregistered).exists());
     }
 
@@ -872,9 +1089,15 @@ mod tests {
         plugin_data_with_a_root_vault(pd.path());
         let work = pd.path().join("work");
 
-        let err = join(&work, &hub.ws_url(), "GOOD-CODE", Path::new("/home/r/work-vault"), &mut Yes::default())
-            .await
-            .unwrap_err();
+        let err = join(
+            &work,
+            &hub.ws_url(),
+            "GOOD-CODE",
+            Path::new("/home/r/work-vault"),
+            &mut Yes::default(),
+        )
+        .await
+        .unwrap_err();
 
         assert!(err.to_string().contains("ll vault add"), "{err}");
         assert!(!config::config_path(&work).exists());

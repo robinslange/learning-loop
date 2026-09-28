@@ -39,13 +39,13 @@ use ed25519_dalek::{Signer, SigningKey};
 use serde_json::Value;
 
 use super::grant::{
-    DecisionStatement, GrantKind, GrantStatement, RevocationStatement, canonical_bytes, grant_id,
-    verify, verify_decision, verify_revocation,
+    canonical_bytes, grant_id, verify, verify_decision, verify_revocation, DecisionStatement,
+    GrantKind, GrantStatement, RevocationStatement,
 };
 use super::key_id::KeyId;
 use super::protocol_v5::{
-    ChunkedBody, ChunkedUploadLimits, ClientMsg, GrantWire, HeldIndex, HubMsg, PROTOCOL_VERSION, RevocationWire,
-    VaultState, client_auth_message, hub_challenge_message,
+    client_auth_message, hub_challenge_message, ChunkedBody, ChunkedUploadLimits, ClientMsg,
+    GrantWire, HeldIndex, HubMsg, RevocationWire, VaultState, PROTOCOL_VERSION,
 };
 
 /// `include_str!` rather than a runtime read: a missing or moved transcript is
@@ -57,11 +57,15 @@ fn transcript() -> Value {
 }
 
 fn text<'a>(v: &'a Value, key: &str) -> &'a str {
-    v[key].as_str().unwrap_or_else(|| panic!("transcript has no string at `{key}`"))
+    v[key]
+        .as_str()
+        .unwrap_or_else(|| panic!("transcript has no string at `{key}`"))
 }
 
 fn num(v: &Value, key: &str) -> i64 {
-    v[key].as_i64().unwrap_or_else(|| panic!("transcript has no number at `{key}`"))
+    v[key]
+        .as_i64()
+        .unwrap_or_else(|| panic!("transcript has no number at `{key}`"))
 }
 
 fn seed(inputs: &Value, key: &str) -> SigningKey {
@@ -179,7 +183,10 @@ fn this_client_produces_every_message_in_the_transcript() {
     );
     emit(
         "fetch_index",
-        serde_json::to_string(&ClientMsg::FetchIndex { vault_id: vault_one.into() }).unwrap(),
+        serde_json::to_string(&ClientMsg::FetchIndex {
+            vault_id: vault_one.into(),
+        })
+        .unwrap(),
     );
     emit(
         "hub_challenge",
@@ -202,8 +209,14 @@ fn this_client_produces_every_message_in_the_transcript() {
             }),
             protocol_version: PROTOCOL_VERSION,
             vault_state: vec![
-                VaultState { vault_id: vault_one.into(), holds: None },
-                VaultState { vault_id: vault_two.into(), holds: Some(held()) },
+                VaultState {
+                    vault_id: vault_one.into(),
+                    holds: None,
+                },
+                VaultState {
+                    vault_id: vault_two.into(),
+                    holds: Some(held()),
+                },
             ],
             grants: vec![GrantWire {
                 statement_b64: b64_of(st, "grant_follow", "statement_b64"),
@@ -219,8 +232,10 @@ fn this_client_produces_every_message_in_the_transcript() {
     );
     emit(
         "reject",
-        serde_json::to_string(&HubMsg::Reject { reason: text(inp, "reject_reason").into() })
-            .unwrap(),
+        serde_json::to_string(&HubMsg::Reject {
+            reason: text(inp, "reject_reason").into(),
+        })
+        .unwrap(),
     );
     emit(
         "upload_ack",
@@ -282,10 +297,17 @@ fn this_client_produces_every_message_in_the_transcript() {
     // failure mode that matters.
     let mut covered: Vec<&str> = produced.iter().map(|(n, _)| *n).collect();
     covered.sort_unstable();
-    let mut present: Vec<&str> =
-        m.as_object().expect("messages is an object").keys().map(String::as_str).collect();
+    let mut present: Vec<&str> = m
+        .as_object()
+        .expect("messages is an object")
+        .keys()
+        .map(String::as_str)
+        .collect();
     present.sort_unstable();
-    assert_eq!(covered, present, "every transcript message must be produced above");
+    assert_eq!(
+        covered, present,
+        "every transcript message must be produced above"
+    );
 }
 
 /// The other direction: this crate's deserialiser accepts the hub's bytes and
@@ -301,14 +323,29 @@ fn this_client_accepts_every_message_in_the_transcript() {
     let st = &t["statements"];
     let mut seen: Vec<&str> = Vec::new();
 
-    for name in ["client_hello", "client_auth", "upload_index", "put_grant", "revoke_grant",
-                 "put_decision", "fetch_index"] {
+    for name in [
+        "client_hello",
+        "client_auth",
+        "upload_index",
+        "put_grant",
+        "revoke_grant",
+        "put_decision",
+        "fetch_index",
+    ] {
         seen.push(name);
         serde_json::from_str::<ClientMsg>(text(m, name))
             .unwrap_or_else(|e| panic!("client message `{name}` must parse: {e}"));
     }
-    for name in ["hub_challenge", "sync_ready", "reject", "upload_ack", "grant_ack",
-                 "index_header_holds", "index_header_empty", "index_header_chunked"] {
+    for name in [
+        "hub_challenge",
+        "sync_ready",
+        "reject",
+        "upload_ack",
+        "grant_ack",
+        "index_header_holds",
+        "index_header_empty",
+        "index_header_chunked",
+    ] {
         seen.push(name);
         serde_json::from_str::<HubMsg>(text(m, name))
             .unwrap_or_else(|e| panic!("hub message `{name}` must parse: {e}"));
@@ -316,10 +353,18 @@ fn this_client_accepts_every_message_in_the_transcript() {
 
     // Then the values, on the messages whose contents this client acts on.
     match serde_json::from_str::<ClientMsg>(text(m, "client_hello")).unwrap() {
-        ClientMsg::ClientHello { key_id, protocol_version, invite_code, .. } => {
+        ClientMsg::ClientHello {
+            key_id,
+            protocol_version,
+            invite_code,
+            ..
+        } => {
             assert_eq!(key_id, text(&t["key_ids"], "issuer"));
             assert_eq!(protocol_version, PROTOCOL_VERSION);
-            assert_eq!(invite_code, None, "an absent invite is null, not an empty string");
+            assert_eq!(
+                invite_code, None,
+                "an absent invite is null, not an empty string"
+            );
         }
         other => panic!("wrong variant: {other:?}"),
     }
@@ -343,12 +388,18 @@ fn this_client_accepts_every_message_in_the_transcript() {
                 vault_state[0].holds.is_none(),
                 "`null` must mean 'the hub holds nothing' — the value that triggers a re-upload"
             );
-            let held = vault_state[1].holds.as_ref().expect("vault_two holds an index");
+            let held = vault_state[1]
+                .holds
+                .as_ref()
+                .expect("vault_two holds an index");
             assert_eq!(held.sha256, text(inp, "index_sha256"));
             assert_eq!(held.note_count, num(inp, "note_count"));
             assert_eq!(held.uploaded_at, num(inp, "uploaded_at"));
             assert_eq!(grants[0].state, "active");
-            assert_eq!(grants[0].statement_b64, text(&st["grant_follow"], "statement_b64"));
+            assert_eq!(
+                grants[0].statement_b64,
+                text(&st["grant_follow"], "statement_b64")
+            );
             assert_eq!(
                 revocations[0].statement_b64,
                 text(&st["revocation_unscoped"], "statement_b64"),
@@ -358,7 +409,11 @@ fn this_client_accepts_every_message_in_the_transcript() {
         other => panic!("wrong variant: {other:?}"),
     }
     match serde_json::from_str::<HubMsg>(text(m, "hub_challenge")).unwrap() {
-        HubMsg::HubChallenge { nonce_h, hub_key_id, sig_h } => {
+        HubMsg::HubChallenge {
+            nonce_h,
+            hub_key_id,
+            sig_h,
+        } => {
             assert_eq!(hub_key_id, text(&t["key_ids"], "hub"));
             assert!(
                 KeyId::parse(&hub_key_id).is_ok(),
@@ -378,7 +433,10 @@ fn this_client_accepts_every_message_in_the_transcript() {
     match serde_json::from_str::<HubMsg>(text(m, "index_header_empty")).unwrap() {
         HubMsg::IndexHeader { holds, chunked, .. } => {
             assert!(holds.is_none());
-            assert!(chunked.is_none(), "a hub holding nothing describes no frames");
+            assert!(
+                chunked.is_none(),
+                "a hub holding nothing describes no frames"
+            );
         }
         other => panic!("wrong variant: {other:?}"),
     }
@@ -398,10 +456,17 @@ fn this_client_accepts_every_message_in_the_transcript() {
     }
 
     seen.sort_unstable();
-    let mut present: Vec<&str> =
-        m.as_object().expect("messages is an object").keys().map(String::as_str).collect();
+    let mut present: Vec<&str> = m
+        .as_object()
+        .expect("messages is an object")
+        .keys()
+        .map(String::as_str)
+        .collect();
     present.sort_unstable();
-    assert_eq!(seen, present, "every transcript message must be parsed above");
+    assert_eq!(
+        seen, present,
+        "every transcript message must be parsed above"
+    );
 }
 
 /// Every signed statement, rebuilt from the transcript's inputs through THIS
@@ -437,13 +502,21 @@ fn this_client_produces_every_signed_statement_in_the_transcript() {
             text(entry, "statement_json"),
             "statement `{name}`: {HINT}"
         );
-        assert_eq!(b64::encode(&bytes), text(entry, "statement_b64"), "statement `{name}`");
+        assert_eq!(
+            b64::encode(&bytes),
+            text(entry, "statement_b64"),
+            "statement `{name}`"
+        );
         assert_eq!(
             b64::encode(sig.to_bytes()),
             text(entry, "signature_b64"),
             "statement `{name}`: same bytes must sign to the same signature"
         );
-        assert_eq!(grant_id(&bytes), text(entry, "statement_sha256"), "statement `{name}`");
+        assert_eq!(
+            grant_id(&bytes),
+            text(entry, "statement_sha256"),
+            "statement `{name}`"
+        );
     };
 
     let grant = |kind: GrantKind, scope: Option<&str>| {
@@ -462,7 +535,11 @@ fn this_client_produces_every_signed_statement_in_the_transcript() {
     check("grant_link", &sk_issuer, grant(GrantKind::Link, None));
     check("grant_assoc", &sk_issuer, grant(GrantKind::Assoc, None));
     check("grant_peer", &sk_issuer, grant(GrantKind::Peer, None));
-    check("grant_follow_scoped", &sk_issuer, grant(GrantKind::Follow, Some(vault_one)));
+    check(
+        "grant_follow_scoped",
+        &sk_issuer,
+        grant(GrantKind::Follow, Some(vault_one)),
+    );
 
     let decision = |kind: &'static str, on: &str, at: i64| {
         canonical_bytes(&DecisionStatement {
@@ -478,7 +555,11 @@ fn this_client_produces_every_signed_statement_in_the_transcript() {
         &sk_subject,
         decision("accept", "grant_follow", num(inp, "accept_at")),
     );
-    check("decision_deny", &sk_subject, decision("deny", "grant_link", num(inp, "deny_at")));
+    check(
+        "decision_deny",
+        &sk_subject,
+        decision("deny", "grant_link", num(inp, "deny_at")),
+    );
 
     let revocation = |on: &str, scope: Option<&str>, at: i64| {
         canonical_bytes(&RevocationStatement {
@@ -498,14 +579,25 @@ fn this_client_produces_every_signed_statement_in_the_transcript() {
     check(
         "revocation_scoped",
         &sk_issuer,
-        revocation("grant_follow_scoped", Some(vault_one), num(inp, "revoke_scoped_at")),
+        revocation(
+            "grant_follow_scoped",
+            Some(vault_one),
+            num(inp, "revoke_scoped_at"),
+        ),
     );
 
     covered.sort_unstable();
-    let mut present: Vec<&str> =
-        st.as_object().expect("statements is an object").keys().map(String::as_str).collect();
+    let mut present: Vec<&str> = st
+        .as_object()
+        .expect("statements is an object")
+        .keys()
+        .map(String::as_str)
+        .collect();
     present.sort_unstable();
-    assert_eq!(covered, present, "every transcript statement must be produced above");
+    assert_eq!(
+        covered, present,
+        "every transcript statement must be produced above"
+    );
 }
 
 /// And this crate's `verify*` accepts the hub's bytes and signatures.
@@ -594,13 +686,27 @@ fn this_client_reproduces_the_transcripts_handshake_bytes() {
 
     let hub_bytes = hub_challenge_message(&nonce_h, &nonce_c, &exporter);
     let client_bytes = client_auth_message(&nonce_h, &nonce_c, hub.as_str(), &exporter);
-    assert_eq!(hex::encode(&hub_bytes), text(hs, "hub_challenge_message_hex"), "{HINT}");
-    assert_eq!(hex::encode(&client_bytes), text(hs, "client_auth_message_hex"), "{HINT}");
+    assert_eq!(
+        hex::encode(&hub_bytes),
+        text(hs, "hub_challenge_message_hex"),
+        "{HINT}"
+    );
+    assert_eq!(
+        hex::encode(&client_bytes),
+        text(hs, "client_auth_message_hex"),
+        "{HINT}"
+    );
 
-    hub.verify(&hub_bytes, &b64::decode(text(hs, "hub_challenge_signature_b64")).unwrap())
-        .expect("the hub's own sig_h must verify over the bytes this client builds");
+    hub.verify(
+        &hub_bytes,
+        &b64::decode(text(hs, "hub_challenge_signature_b64")).unwrap(),
+    )
+    .expect("the hub's own sig_h must verify over the bytes this client builds");
     issuer
-        .verify(&client_bytes, &b64::decode(text(hs, "client_auth_signature_b64")).unwrap())
+        .verify(
+            &client_bytes,
+            &b64::decode(text(hs, "client_auth_signature_b64")).unwrap(),
+        )
         .expect("a sig_c the hub accepted must verify over the bytes this client builds");
 }
 

@@ -1,9 +1,9 @@
-use std::collections::{HashMap, HashSet};
-use std::path::Path;
 use anyhow::Context;
 use regex::Regex;
 use rusqlite::{params, Connection};
 use serde::Serialize;
+use std::collections::{HashMap, HashSet};
+use std::path::Path;
 use std::sync::LazyLock;
 
 use super::config::FederationConfig;
@@ -43,14 +43,14 @@ pub fn export_index(
         std::fs::create_dir_all(parent)?;
     }
 
-    let source = Connection::open_with_flags(
-        source_db_path,
-        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
-    )
-    .context("failed to open source index")?;
+    let source =
+        Connection::open_with_flags(source_db_path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .context("failed to open source index")?;
 
     let model_id: String = source
-        .query_row("SELECT value FROM meta WHERE key = 'model_id'", [], |r| r.get(0))
+        .query_row("SELECT value FROM meta WHERE key = 'model_id'", [], |r| {
+            r.get(0)
+        })
         .map_err(|e| match e {
             rusqlite::Error::QueryReturnedNoRows => anyhow::anyhow!(
                 "this index has never been built: it carries no model_id, so there is \
@@ -58,13 +58,19 @@ pub fn export_index(
                  it first, and check the db path is the one the watcher maintains \
                  (`<vault>/.vault-search/vault-index.db`) rather than an empty file."
             ),
-            other => anyhow::Error::new(other).context("failed to read the source index's model_id"),
+            other => {
+                anyhow::Error::new(other).context("failed to read the source index's model_id")
+            }
         })?;
 
     // Counted before the SELECT filters them out, so the caller can say how
     // much of the vault the export never considered.
     let unindexed: usize = source
-        .query_row("SELECT count(*) FROM notes WHERE note_uuid IS NULL", [], |r| r.get::<_, i64>(0))
+        .query_row(
+            "SELECT count(*) FROM notes WHERE note_uuid IS NULL",
+            [],
+            |r| r.get::<_, i64>(0),
+        )
         .unwrap_or(0) as usize;
 
     let rules: Vec<(String, String)> = config
@@ -77,7 +83,6 @@ pub fn export_index(
     // A rules list shorter than the one on disk is a config that does not
     // mean what it says, and the direction it fails in is more disclosing.
     let engine = VisibilityEngine::new(&config.visibility.default, &rules)?;
-
 
     // --- Phase 1: load all rows from source and pre-compute visibility -------
     //
@@ -103,16 +108,16 @@ pub fn export_index(
             "SELECT n.id, n.note_uuid, n.path, n.title, n.tags, nc.body
              FROM notes n
              JOIN notes_content nc ON nc.id = n.id
-             WHERE n.note_uuid IS NOT NULL"
+             WHERE n.note_uuid IS NOT NULL",
         )?;
         let rows = stmt.query_map([], |row| {
             Ok(NoteRow {
-                id:        row.get::<_, i64>(0)?,
+                id: row.get::<_, i64>(0)?,
                 note_uuid: row.get::<_, String>(1)?,
-                path:      row.get::<_, String>(2)?,
-                title:     row.get::<_, Option<String>>(3)?.unwrap_or_default(),
-                tags:      row.get::<_, Option<String>>(4)?.unwrap_or_default(),
-                body:      row.get::<_, Option<String>>(5)?.unwrap_or_default(),
+                path: row.get::<_, String>(2)?,
+                title: row.get::<_, Option<String>>(3)?.unwrap_or_default(),
+                tags: row.get::<_, Option<String>>(4)?.unwrap_or_default(),
+                body: row.get::<_, Option<String>>(5)?.unwrap_or_default(),
             })
         })?;
         for row in rows {
@@ -205,15 +210,17 @@ pub fn export_index(
              source_id INTEGER NOT NULL,
              target_path TEXT NOT NULL,
              UNIQUE(source_id, target_path)
-         );"
+         );",
     )?;
 
     // O(n) glob matching, no per-row disk I/O. `evaluate_batch` used to wrap
     // this exact `map`, and its signature took owned `String` paths — so it
     // cost this loop a clone per note (5,077 of them on the real vault) to
     // satisfy a shape that added nothing.
-    let tiers: Vec<&str> =
-        vis_inputs.iter().map(|(path, declared)| engine.evaluate(path, declared)).collect();
+    let tiers: Vec<&str> = vis_inputs
+        .iter()
+        .map(|(path, declared)| engine.evaluate(path, declared))
+        .collect();
 
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -244,16 +251,26 @@ pub fn export_index(
             Body::Summary => summarize(&row.body, 300),
         };
 
-        export.prepare_cached(
-            "INSERT INTO notes (id, note_uuid, path, title, tags, tier, updated_at)
+        export
+            .prepare_cached(
+                "INSERT INTO notes (id, note_uuid, path, title, tags, tier, updated_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-        )?
-        .execute(params![row.id, row.note_uuid, row.path, row.title, row.tags, tier, now])?;
+            )?
+            .execute(params![
+                row.id,
+                row.note_uuid,
+                row.path,
+                row.title,
+                row.tags,
+                tier,
+                now
+            ])?;
 
-        export.prepare_cached(
-            "INSERT INTO notes_content (id, title, tags, body) VALUES (?1, ?2, ?3, ?4)",
-        )?
-        .execute(params![row.id, row.title, row.tags, export_body])?;
+        export
+            .prepare_cached(
+                "INSERT INTO notes_content (id, title, tags, body) VALUES (?1, ?2, ?3, ?4)",
+            )?
+            .execute(params![row.id, row.title, row.tags, export_body])?;
 
         disclosed.insert(row.id, disclosure);
         if disclosure.links {
@@ -264,9 +281,8 @@ pub fn export_index(
 
     // --- Phase 3: copy embeddings for exported notes in chunks --------------
 
-    let mut emb_stmt = source.prepare(
-        "SELECT e.id, e.data FROM embeddings e JOIN notes n ON e.id = n.id"
-    )?;
+    let mut emb_stmt =
+        source.prepare("SELECT e.id, e.data FROM embeddings e JOIN notes n ON e.id = n.id")?;
 
     let emb_rows: Vec<(i64, Vec<u8>)> = emb_stmt
         .query_map([], |row| {
@@ -293,9 +309,7 @@ pub fn export_index(
         .is_ok();
 
     if has_links {
-        let mut link_stmt = source.prepare(
-            "SELECT source_id, target_path FROM links"
-        )?;
+        let mut link_stmt = source.prepare("SELECT source_id, target_path FROM links")?;
         let link_rows: Vec<(i64, String)> = link_stmt
             .query_map([], |row| {
                 Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
@@ -313,8 +327,7 @@ pub fn export_index(
             // unresolvable link cannot default to sent.
             .filter(|(source_id, target_path)| {
                 disclosed.get(source_id).is_some_and(|d| d.links)
-                    && exported_link_names
-                        .contains(&crate::preprocess::wikilink_name(target_path))
+                    && exported_link_names.contains(&crate::preprocess::wikilink_name(target_path))
             })
             .collect();
 
@@ -331,15 +344,36 @@ pub fn export_index(
 
     let peer_id = &config.identity.display_name;
     let now_iso = crate::db::chrono_iso_now();
-    export.execute("INSERT INTO meta (key, value) VALUES ('model_id', ?1)", params![model_id])?;
-    export.execute("INSERT INTO meta (key, value) VALUES ('schema_version', ?1)", params![SCHEMA_VERSION.to_string()])?;
-    export.execute("INSERT INTO meta (key, value) VALUES ('peer_id', ?1)", params![peer_id])?;
-    export.execute("INSERT INTO meta (key, value) VALUES ('exported_at', ?1)", params![now_iso])?;
-    export.execute("INSERT INTO meta (key, value) VALUES ('note_count', ?1)", params![exported.to_string()])?;
+    export.execute(
+        "INSERT INTO meta (key, value) VALUES ('model_id', ?1)",
+        params![model_id],
+    )?;
+    export.execute(
+        "INSERT INTO meta (key, value) VALUES ('schema_version', ?1)",
+        params![SCHEMA_VERSION.to_string()],
+    )?;
+    export.execute(
+        "INSERT INTO meta (key, value) VALUES ('peer_id', ?1)",
+        params![peer_id],
+    )?;
+    export.execute(
+        "INSERT INTO meta (key, value) VALUES ('exported_at', ?1)",
+        params![now_iso],
+    )?;
+    export.execute(
+        "INSERT INTO meta (key, value) VALUES ('note_count', ?1)",
+        params![exported.to_string()],
+    )?;
 
     export.execute("COMMIT", [])?;
 
-    Ok(ExportResult { exported, skipped, unindexed, unreadable, model_id })
+    Ok(ExportResult {
+        exported,
+        skipped,
+        unindexed,
+        unreadable,
+        model_id,
+    })
 }
 
 /// Credential-shaped regexes for scrubbing `listed`-tier summaries.
@@ -359,23 +393,35 @@ pub const SECRET_PATTERN_SOURCES: [(&str, &str); 13] = [
     ("cloudflare-pat", r"cfpat-[A-Za-z0-9_-]{20,}"),
     ("bearer-token", r"Bearer\s+[A-Za-z0-9._\-/+=]{20,}"),
     ("slack-token", r"xox[abprs]-[A-Za-z0-9-]{10,}"),
-    ("jwt", r"eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}"),
+    (
+        "jwt",
+        r"eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}",
+    ),
     // `(?s:...)` so `.` matches newlines within just this alternation, which
     // is how JS's `[\s\S]*?` is spelled here. The sync test knows about this
     // one translation and about `\/`; it knows about no others, so a third
     // spelling difference fails rather than passing quietly.
-    ("pem-key", r"(?s:-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----)"),
+    (
+        "pem-key",
+        r"(?s:-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----)",
+    ),
     // The next three carry the JS `i` flag, which Rust spells as a leading
     // `(?i)`. The sync test maps one onto the other so the comparison stays
     // honest about case-insensitivity instead of dropping the flag.
-    ("url-credentials", r"(?i)([a-z][a-z0-9+.-]*://)[^\s/:@]+:[^\s/@]+@"),
+    (
+        "url-credentials",
+        r"(?i)([a-z][a-z0-9+.-]*://)[^\s/:@]+:[^\s/@]+@",
+    ),
     // The value alternation carries its own quotes: `regex` has no
     // backreferences, so the JS side was written this way to match.
     (
         "assignment-secret",
         r#"(?i)\b(password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|private[_-]?key|client[_-]?secret)\b(\s*[=:]\s*)("[^\s"']{6,}"|'[^\s"']{6,}'|[^\s"']{6,})"#,
     ),
-    ("basic-auth", r"(?i)\bAuthorization:\s*Basic\s+[A-Za-z0-9+/=]{8,}"),
+    (
+        "basic-auth",
+        r"(?i)\bAuthorization:\s*Basic\s+[A-Za-z0-9+/=]{8,}",
+    ),
 ];
 
 static SECRET_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
@@ -442,10 +488,18 @@ impl Disclosure {
     /// `None` means nothing about this note leaves the machine.
     pub(crate) fn for_tier(tier: &str) -> Option<Self> {
         match tier {
-            "public" => Some(Disclosure { body: Body::Full, embedding: true, links: true }),
+            "public" => Some(Disclosure {
+                body: Body::Full,
+                embedding: true,
+                links: true,
+            }),
             // A listed note sends a summary, so its full-body vector would
             // disclose exactly what the summary withheld.
-            "listed" => Some(Disclosure { body: Body::Summary, embedding: false, links: true }),
+            "listed" => Some(Disclosure {
+                body: Body::Summary,
+                embedding: false,
+                links: true,
+            }),
             _ => None,
         }
     }
@@ -534,9 +588,21 @@ pub(crate) fn build_linked_source_db(path: &Path, vault: &Path) {
     )
     .unwrap();
     std::fs::create_dir_all(vault).unwrap();
-    std::fs::write(vault.join("shared.md"), "---\ntitle: Shared\n---\n\nLinks [[secret]] and [[other]].").unwrap();
-    std::fs::write(vault.join("secret.md"), "---\ntitle: Secret\n---\n\nPrivate body.").unwrap();
-    std::fs::write(vault.join("other.md"),  "---\ntitle: Other\n---\n\nOther body.").unwrap();
+    std::fs::write(
+        vault.join("shared.md"),
+        "---\ntitle: Shared\n---\n\nLinks [[secret]] and [[other]].",
+    )
+    .unwrap();
+    std::fs::write(
+        vault.join("secret.md"),
+        "---\ntitle: Secret\n---\n\nPrivate body.",
+    )
+    .unwrap();
+    std::fs::write(
+        vault.join("other.md"),
+        "---\ntitle: Other\n---\n\nOther body.",
+    )
+    .unwrap();
 }
 
 #[cfg(test)]
@@ -579,8 +645,14 @@ mod tests {
         let result = summarize(text, 20);
         assert!(result.ends_with("..."), "should end with ellipsis");
         let without_ellipsis = result.trim_end_matches("...");
-        assert!(!without_ellipsis.ends_with(' '), "no trailing space before ellipsis");
-        assert!(without_ellipsis.len() < 20, "truncated portion fits within limit");
+        assert!(
+            !without_ellipsis.ends_with(' '),
+            "no trailing space before ellipsis"
+        );
+        assert!(
+            without_ellipsis.len() < 20,
+            "truncated portion fits within limit"
+        );
     }
 
     #[test]
@@ -608,10 +680,15 @@ mod tests {
         let mut text = String::from("Key AKIAIOSFODNN7EXAMPLE then ");
         text.push_str(&"padding ".repeat(60));
         let result = summarize(&text, 40);
-        assert!(result.ends_with("..."), "expected the truncated branch: {result}");
-        assert!(!result.contains("AKIA"), "AWS key shape leaked on truncated path: {result}");
+        assert!(
+            result.ends_with("..."),
+            "expected the truncated branch: {result}"
+        );
+        assert!(
+            !result.contains("AKIA"),
+            "AWS key shape leaked on truncated path: {result}"
+        );
     }
-
 
     #[test]
     fn export_carries_note_uuid() {
@@ -667,11 +744,20 @@ mod tests {
 
         let c = Connection::open(&out).unwrap();
         let ids: Vec<i64> = c
-            .prepare("SELECT id FROM embeddings").unwrap()
-            .query_map([], |r| r.get::<_, i64>(0)).unwrap()
-            .filter_map(|r| r.ok()).collect();
-        assert!(!ids.contains(&3), "a listed note shipped a full-body vector: {ids:?}");
-        assert!(!ids.contains(&2), "a withheld note shipped a vector: {ids:?}");
+            .prepare("SELECT id FROM embeddings")
+            .unwrap()
+            .query_map([], |r| r.get::<_, i64>(0))
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect();
+        assert!(
+            !ids.contains(&3),
+            "a listed note shipped a full-body vector: {ids:?}"
+        );
+        assert!(
+            !ids.contains(&2),
+            "a withheld note shipped a vector: {ids:?}"
+        );
         // Not vacuous: the public note keeps its embedding, or peer search over
         // public notes would silently lose its vector path.
         assert_eq!(ids, vec![1], "the public note must keep its embedding");
@@ -698,23 +784,36 @@ mod tests {
 
         let c = Connection::open(&out).unwrap();
         let paths: Vec<String> = c
-            .prepare("SELECT path FROM notes").unwrap()
-            .query_map([], |r| r.get::<_, String>(0)).unwrap()
-            .filter_map(|r| r.ok()).collect();
-        assert!(!paths.iter().any(|p| p == "secret.md"), "withheld note in notes: {paths:?}");
+            .prepare("SELECT path FROM notes")
+            .unwrap()
+            .query_map([], |r| r.get::<_, String>(0))
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect();
+        assert!(
+            !paths.iter().any(|p| p == "secret.md"),
+            "withheld note in notes: {paths:?}"
+        );
 
         // Its body must not be reachable by id either: the row and its content
         // are separate tables, and only one of them is what a peer reads.
         let bodies: Vec<String> = c
-            .prepare("SELECT body FROM notes_content").unwrap()
-            .query_map([], |r| r.get::<_, String>(0)).unwrap()
-            .filter_map(|r| r.ok()).collect();
+            .prepare("SELECT body FROM notes_content")
+            .unwrap()
+            .query_map([], |r| r.get::<_, String>(0))
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect();
         assert!(
             !bodies.iter().any(|b| b.contains("Private body")),
             "withheld body in notes_content: {bodies:?}"
         );
         // Not vacuous: the notes that were meant to ship are still there.
-        assert_eq!(paths.len(), 2, "shared and other must still export: {paths:?}");
+        assert_eq!(
+            paths.len(),
+            2,
+            "shared and other must still export: {paths:?}"
+        );
     }
 
     /// `listed` is documented as title, tags and a summary. Removing the cap
@@ -730,7 +829,8 @@ mod tests {
         build_source_db(&source, Some("01926d7e-0000-7000-8000-00000000000b"));
         {
             let c = Connection::open(&source).unwrap();
-            c.execute("UPDATE notes_content SET body = ?1 WHERE id = 1", [&long]).unwrap();
+            c.execute("UPDATE notes_content SET body = ?1 WHERE id = 1", [&long])
+                .unwrap();
         }
         std::fs::create_dir_all(&vault).unwrap();
         std::fs::write(vault.join("n.md"), format!("---\ntitle: N\n---\n\n{long}")).unwrap();
@@ -740,13 +840,20 @@ mod tests {
 
         let c = Connection::open(&out).unwrap();
         let body: String = c
-            .query_row("SELECT body FROM notes_content WHERE id = 1", [], |r| r.get(0))
+            .query_row("SELECT body FROM notes_content WHERE id = 1", [], |r| {
+                r.get(0)
+            })
             .unwrap();
         assert!(
             body.len() < long.len(),
-            "a listed note shipped its whole body: {} chars", body.len()
+            "a listed note shipped its whole body: {} chars",
+            body.len()
         );
-        assert!(body.len() <= 320, "summary should be capped near 300: {} chars", body.len());
+        assert!(
+            body.len() <= 320,
+            "summary should be capped near 300: {} chars",
+            body.len()
+        );
     }
 
     /// A wikilink names its target by filename, and in this vault filenames are
@@ -809,10 +916,18 @@ mod tests {
         // The row is not `skipped` either: skipping is a visibility decision
         // and this one was never offered to it. Counting it as zero-of-both
         // would report an export that considered the whole vault.
-        assert_eq!(result.skipped, 0, "a missing id is not a visibility decision");
-        assert_eq!(result.unindexed, 1, "the row the SELECT never returned must still be counted");
+        assert_eq!(
+            result.skipped, 0,
+            "a missing id is not a visibility decision"
+        );
+        assert_eq!(
+            result.unindexed, 1,
+            "the row the SELECT never returned must still be counted"
+        );
         let c = Connection::open(&out).unwrap();
-        let n: i64 = c.query_row("SELECT COUNT(*) FROM notes", [], |r| r.get(0)).unwrap();
+        let n: i64 = c
+            .query_row("SELECT COUNT(*) FROM notes", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(n, 0);
     }
 
@@ -836,7 +951,10 @@ mod tests {
         let config = FederationConfig::test_fixture("private", vec![]);
         let result = export_index(&source, &vault, &out, &config).unwrap();
 
-        assert_eq!(result.unindexed, 0, "every row had an id; nothing was unaddressable");
+        assert_eq!(
+            result.unindexed, 0,
+            "every row had an id; nothing was unaddressable"
+        );
         // `exported + skipped == 1` was what stood here, and it is true of both
         // columns: the loop increments exactly one per row and there is one row,
         // so the sum is a partition identity and holds however the note is
@@ -880,26 +998,45 @@ mod tests {
         // A rule that would publish everything it can see. Before the fix,
         // `gone.md`'s failed read read as "declared nothing" and it shipped at
         // this tier: path, title, tags and a body summary.
-        let config =
-            FederationConfig::test_fixture("private", vec![("**".to_string(), "listed".to_string())]);
+        let config = FederationConfig::test_fixture(
+            "private",
+            vec![("**".to_string(), "listed".to_string())],
+        );
         let result = export_index(&source, &vault, &out, &config).unwrap();
 
-        assert_eq!(result.unreadable, 1, "the missing note must be counted, not silently absorbed");
+        assert_eq!(
+            result.unreadable, 1,
+            "the missing note must be counted, not silently absorbed"
+        );
 
         let c = Connection::open(&out).unwrap();
         let leaked: i64 = c
-            .query_row("SELECT count(*) FROM notes WHERE path = 'gone.md'", [], |r| r.get(0))
+            .query_row(
+                "SELECT count(*) FROM notes WHERE path = 'gone.md'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
-        assert_eq!(leaked, 0, "nothing about an unreadable note may reach the export");
+        assert_eq!(
+            leaked, 0,
+            "nothing about an unreadable note may reach the export"
+        );
         let leaked_body: i64 = c
-            .query_row("SELECT count(*) FROM notes_content WHERE id = 2", [], |r| r.get(0))
+            .query_row("SELECT count(*) FROM notes_content WHERE id = 2", [], |r| {
+                r.get(0)
+            })
             .unwrap();
-        assert_eq!(leaked_body, 0, "its summary must not reach the export either");
+        assert_eq!(
+            leaked_body, 0,
+            "its summary must not reach the export either"
+        );
 
         // The readable note still went out, so this is withholding one note
         // rather than the export having failed wholesale.
         let kept: i64 = c
-            .query_row("SELECT count(*) FROM notes WHERE path = 'n.md'", [], |r| r.get(0))
+            .query_row("SELECT count(*) FROM notes WHERE path = 'n.md'", [], |r| {
+                r.get(0)
+            })
             .unwrap();
         assert_eq!(kept, 1, "the note that WAS readable must still be exported");
     }
@@ -916,15 +1053,23 @@ mod tests {
         let empty = tmp.path().join("not-the-vault");
         std::fs::create_dir_all(&empty).unwrap();
 
-        let config =
-            FederationConfig::test_fixture("private", vec![("**".to_string(), "listed".to_string())]);
+        let config = FederationConfig::test_fixture(
+            "private",
+            vec![("**".to_string(), "listed".to_string())],
+        );
         let err = export_index(&source, &empty, &out, &config).unwrap_err();
         let msg = err.to_string();
-        assert!(msg.contains("refusing to export"), "unexpected error: {msg}");
-        assert!(msg.contains("vault path"), "the error must name the likely cause: {msg}");
-        assert!(!out.exists(), "no export artefact may be left behind by a refused export");
+        assert!(
+            msg.contains("refusing to export"),
+            "unexpected error: {msg}"
+        );
+        assert!(
+            msg.contains("vault path"),
+            "the error must name the likely cause: {msg}"
+        );
+        assert!(
+            !out.exists(),
+            "no export artefact may be left behind by a refused export"
+        );
     }
-
-
-    
-    }
+}

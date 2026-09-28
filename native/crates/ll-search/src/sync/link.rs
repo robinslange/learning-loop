@@ -37,13 +37,15 @@ use sha2::{Digest, Sha256};
 
 use super::atomic_file;
 use super::client::{connect_and_authenticate, recv_json, send_json, unix_now, WsStream};
-use super::config::{self, grants_path, pairing_window_path, FederationConfig, HubEndpoint, Identity, VisibilityConfig};
+use super::config::{
+    self, grants_path, pairing_window_path, FederationConfig, HubEndpoint, Identity,
+    VisibilityConfig,
+};
 use super::grant::{self, canonical_bytes, GrantKind, GrantStatement, RevocationStatement};
 use super::handshake::random_nonce;
 use super::key_id::KeyId;
 use super::protocol_v5::{sanitise_hub_text, ClientMsg, GrantWire, HubMsg};
 use super::{seed_store, words};
-
 
 /// Tags the two strings a door puts on a screen. A string that came from
 /// somewhere else fails here, where the error can say what it wanted, rather
@@ -133,7 +135,10 @@ impl Approve for TtyApprove {
         if std::io::stdin().lock().read_line(&mut line)? == 0 {
             return Ok(false);
         }
-        Ok(matches!(line.trim().to_ascii_lowercase().as_str(), "y" | "yes"))
+        Ok(matches!(
+            line.trim().to_ascii_lowercase().as_str(),
+            "y" | "yes"
+        ))
     }
 }
 
@@ -163,7 +168,10 @@ fn issue_link_grant(
     };
     let statement = canonical_bytes(&st);
     let signature = approver.sign(&statement).to_bytes().to_vec();
-    Ok(SignedGrant { statement, signature })
+    Ok(SignedGrant {
+        statement,
+        signature,
+    })
 }
 
 /// Check a grant against nothing but its own bytes.
@@ -220,7 +228,11 @@ pub fn parse_pairing_code(code: &str) -> anyhow::Result<KeyId> {
 /// the statement already fails on any corruption, and it fails for the right
 /// reason.
 pub fn grant_blob(g: &SignedGrant) -> String {
-    format!("{GRANT_TAG}.{}.{}", b64::encode(&g.statement), b64::encode(&g.signature))
+    format!(
+        "{GRANT_TAG}.{}.{}",
+        b64::encode(&g.statement),
+        b64::encode(&g.signature)
+    )
 }
 
 pub fn parse_grant_blob(blob: &str) -> anyhow::Result<SignedGrant> {
@@ -259,8 +271,10 @@ pub struct StoredGrant {
 impl StoredGrant {
     pub(super) fn signed(&self) -> anyhow::Result<SignedGrant> {
         Ok(SignedGrant {
-            statement: b64::decode(&self.statement_b64).context("stored statement is not base64")?,
-            signature: b64::decode(&self.signature_b64).context("stored signature is not base64")?,
+            statement: b64::decode(&self.statement_b64)
+                .context("stored statement is not base64")?,
+            signature: b64::decode(&self.signature_b64)
+                .context("stored signature is not base64")?,
         })
     }
 }
@@ -312,7 +326,9 @@ pub(super) fn stored(g: &SignedGrant, lodged: bool) -> StoredGrant {
 }
 
 pub(super) fn has_id(s: &StoredGrant, id: &str) -> bool {
-    s.signed().map(|sg| grant::grant_id(&sg.statement) == id).unwrap_or(false)
+    s.signed()
+        .map(|sg| grant::grant_id(&sg.statement) == id)
+        .unwrap_or(false)
 }
 
 /// Add a grant to the store unless the same statement is already there.
@@ -378,7 +394,9 @@ fn local_signing_key(config_dir: &Path) -> anyhow::Result<SigningKey> {
 }
 
 pub(super) fn local_key_id(config_dir: &Path) -> anyhow::Result<KeyId> {
-    Ok(KeyId::from_pubkey(&local_signing_key(config_dir)?.verifying_key()))
+    Ok(KeyId::from_pubkey(
+        &local_signing_key(config_dir)?.verifying_key(),
+    ))
 }
 
 /// The `link` this machine holds to another key, and whether this call is
@@ -418,11 +436,17 @@ fn ensure_link_to(
             .into_iter()
             .find(|(_, st)| st.kind == GrantKind::Link && st.from == me && &st.to == other);
         if let Some((row, _)) = standing {
-            return Ok(Some(StandingLink { grant: row.signed()?, minted: false }));
+            return Ok(Some(StandingLink {
+                grant: row.signed()?,
+                minted: false,
+            }));
         }
         let grant = issue_link_grant(&key, other, now)?;
         grants.push(stored(&grant, false));
-        Ok(Some(StandingLink { grant, minted: true }))
+        Ok(Some(StandingLink {
+            grant,
+            minted: true,
+        }))
     })
 }
 
@@ -469,7 +493,10 @@ pub(super) fn arm_pairing_window(config_dir: &Path, now: i64) -> anyhow::Result<
     }
     atomic_file::write_json(
         &path,
-        &PairingWindow { opened_at: now, expires_at: now + PAIRING_WINDOW_SECS },
+        &PairingWindow {
+            opened_at: now,
+            expires_at: now + PAIRING_WINDOW_SECS,
+        },
     )
 }
 
@@ -508,7 +535,9 @@ pub fn pending_offline(config_dir: &Path) -> anyhow::Result<PendingLink> {
     // Showing a pairing code is a person asking to be linked. That ask is the
     // only evidence `reconcile` has that an inbound grant was wanted.
     arm_pairing_window(config_dir, unix_now())?;
-    Ok(PendingLink::for_key(KeyId::from_pubkey(&identity.signing_key.verifying_key())))
+    Ok(PendingLink::for_key(KeyId::from_pubkey(
+        &identity.signing_key.verifying_key(),
+    )))
 }
 
 /// Door 1's joining half: the same pairing code, plus everything this machine
@@ -549,7 +578,10 @@ pub async fn request(
                 display_name: super::join::display_name_for(vault_path),
                 pubkey: super::key_id::pubkey_b64(&identity.signing_key),
             },
-            visibility: VisibilityConfig { default: "private".into(), rules: Vec::new() },
+            visibility: VisibilityConfig {
+                default: "private".into(),
+                rules: Vec::new(),
+            },
             hub: HubEndpoint {
                 endpoint: hub_endpoint.to_string(),
                 key_id: Some(hub.hub_key_id.clone()),
@@ -647,7 +679,10 @@ pub fn accept_offline(config_dir: &Path, grant_blob: &str) -> anyhow::Result<Acc
     let st = verify_grant(&signed)?;
     let me = local_key_id(config_dir)?;
     if st.kind != GrantKind::Link {
-        anyhow::bail!("this is a {:?} grant, not a link; it admits no machine", st.kind);
+        anyhow::bail!(
+            "this is a {:?} grant, not a link; it admits no machine",
+            st.kind
+        );
     }
     if st.to != me {
         anyhow::bail!(
@@ -658,7 +693,10 @@ pub fn accept_offline(config_dir: &Path, grant_blob: &str) -> anyhow::Result<Acc
     }
     let now = unix_now();
     if st.expires_at <= now {
-        anyhow::bail!("this link grant expired at {}; ask for a fresh one", st.expires_at);
+        anyhow::bail!(
+            "this link grant expired at {}; ask for a fresh one",
+            st.expires_at
+        );
     }
     remember(config_dir, &signed, false)?;
     ensure_link_to(config_dir, &st.from, now)?;
@@ -671,7 +709,9 @@ pub fn accept_offline(config_dir: &Path, grant_blob: &str) -> anyhow::Result<Acc
     // would be worse than none: `link::request` refuses to run when a config
     // already exists, so the half-written one would block the command that
     // completes it.
-    Ok(Accepted { can_reach_the_hub: config::config_path(config_dir).exists() })
+    Ok(Accepted {
+        can_reach_the_hub: config::config_path(config_dir).exists(),
+    })
 }
 
 /// Door 4's issuing half: the recovery key holds a `link` from this machine,
@@ -784,7 +824,10 @@ async fn lodge_all(ws: &mut WsStream, config_dir: &Path) -> anyhow::Result<LinkO
                 // Left owed, deliberately. Marking it lodged would make the
                 // complaint go away and lose the grant with it, and the link
                 // it is half of would stay half-built forever.
-                eprintln!("Hub refused a grant ({grant_id}): {}", sanitise_hub_text(&reason));
+                eprintln!(
+                    "Hub refused a grant ({grant_id}): {}",
+                    sanitise_hub_text(&reason)
+                );
                 out.refused.push(Refusal { grant_id, reason });
             }
             Err(e) => {
@@ -831,13 +874,17 @@ pub(super) async fn reconcile(
         if wire.state != "active" {
             continue;
         }
-        let (Ok(statement), Ok(signature)) =
-            (b64::decode(&wire.statement_b64), b64::decode(&wire.signature_b64))
-        else {
+        let (Ok(statement), Ok(signature)) = (
+            b64::decode(&wire.statement_b64),
+            b64::decode(&wire.signature_b64),
+        ) else {
             eprintln!("skipping a grant that is not valid base64");
             continue;
         };
-        let signed = SignedGrant { statement, signature };
+        let signed = SignedGrant {
+            statement,
+            signature,
+        };
         let st = match verify_grant(&signed) {
             Ok(st) => st,
             Err(e) => {
@@ -874,7 +921,10 @@ pub(super) async fn reconcile(
             continue;
         }
         if ensure_link_to(config_dir, &st.from, now)?.is_some_and(|l| l.minted) {
-            eprintln!("Answered a link from {} with its reciprocal", st.from.as_str());
+            eprintln!(
+                "Answered a link from {} with its reciprocal",
+                st.from.as_str()
+            );
             // One window, one link.
             close_pairing_window(config_dir);
         }
@@ -1058,7 +1108,10 @@ pub async fn revoke(config_dir: &Path, other: &KeyId) -> anyhow::Result<Revoked>
         Ok(())
     })?;
     failure?;
-    Ok(Revoked { grant_ids: withdrawn, inbound_remains })
+    Ok(Revoked {
+        grant_ids: withdrawn,
+        inbound_remains,
+    })
 }
 
 /// One line per link this machine knows about, for `ll link list`.
@@ -1156,12 +1209,15 @@ mod tests {
                     display_name: "test".into(),
                     pubkey: "ed25519:AAAA".into(),
                 },
-                visibility: VisibilityConfig { default: "private".into(), rules: Vec::new() },
+                visibility: VisibilityConfig {
+                    default: "private".into(),
+                    rules: Vec::new(),
+                },
                 hub: HubEndpoint {
                     endpoint: ws_url.to_string(),
                     key_id: Some(test_hub::hub_key_id_str()),
                 },
-                    vault_id: Some("v1".into()),
+                vault_id: Some("v1".into()),
                 vault_path: None,
                 recovery_key_id: recovery.map(|k| k.as_str().to_string()),
             },
@@ -1177,7 +1233,8 @@ mod tests {
 
     impl Approve for Yes {
         fn confirm(&mut self, subject: &str, fingerprint: &str) -> anyhow::Result<bool> {
-            self.shown.push((subject.to_string(), fingerprint.to_string()));
+            self.shown
+                .push((subject.to_string(), fingerprint.to_string()));
             Ok(true)
         }
     }
@@ -1248,9 +1305,16 @@ mod tests {
     async fn grant_from_hub_door(approver: &Path, joiner: &KeyId) -> SignedGrant {
         let (hub, lodged) = test_hub::spawn_grant_hub(vec![], vec![]).await;
         write_hub_config(approver, &hub.ws_url(), None);
-        approve(approver, &pairing_code(joiner), &mut Yes::default()).await.unwrap();
+        approve(approver, &pairing_code(joiner), &mut Yes::default())
+            .await
+            .unwrap();
         let wire = lodged.lock().unwrap().clone();
-        assert_eq!(wire.len(), 1, "the approver lodged {} grants, not one", wire.len());
+        assert_eq!(
+            wire.len(),
+            1,
+            "the approver lodged {} grants, not one",
+            wire.len()
+        );
         wire_to_signed(&wire[0])
     }
 
@@ -1261,10 +1325,15 @@ mod tests {
     async fn grant_from_qr_door(approver: &Path, joiner: &KeyId) -> SignedGrant {
         let pending = PendingLink::for_key(joiner.clone());
         let qr = pending.qr().expect("a pairing code must fit in a QR");
-        assert!(qr.lines().count() > 10, "a rendered QR is more than a couple of lines");
+        assert!(
+            qr.lines().count() > 10,
+            "a rendered QR is more than a couple of lines"
+        );
         let (hub, lodged) = test_hub::spawn_grant_hub(vec![], vec![]).await;
         write_hub_config(approver, &hub.ws_url(), None);
-        approve(approver, &pending.code, &mut Yes::default()).await.unwrap();
+        approve(approver, &pending.code, &mut Yes::default())
+            .await
+            .unwrap();
         let wire = lodged.lock().unwrap().clone();
         assert_eq!(wire.len(), 1);
         wire_to_signed(&wire[0])
@@ -1272,8 +1341,7 @@ mod tests {
 
     /// Door 3: no hub anywhere in this function.
     fn grant_from_offline_door(approver: &Path, joiner: &KeyId) -> SignedGrant {
-        let blob =
-            approve_offline(approver, &pairing_code(joiner), &mut Yes::default()).unwrap();
+        let blob = approve_offline(approver, &pairing_code(joiner), &mut Yes::default()).unwrap();
         parse_grant_blob(&blob).unwrap()
     }
 
@@ -1308,7 +1376,10 @@ mod tests {
             assert_eq!(st.from, hub.from);
             assert_eq!(st.to, hub.to);
             assert_eq!(st.scope, hub.scope);
-            assert!(st.scope.is_none(), "a device link is unscoped — full authority");
+            assert!(
+                st.scope.is_none(),
+                "a device link is unscoped — full authority"
+            );
             assert_eq!(st.kind, GrantKind::Link);
             assert_eq!(
                 st.expires_at - st.issued_at,
@@ -1380,7 +1451,11 @@ mod tests {
     fn a_corrupted_pairing_code_fails_to_parse_rather_than_naming_a_different_key() {
         let original = key(1);
         let code = pairing_code(&original);
-        assert_eq!(parse_pairing_code(&code).unwrap(), original, "the intact code parses");
+        assert_eq!(
+            parse_pairing_code(&code).unwrap(),
+            original,
+            "the intact code parses"
+        );
 
         let body = original.as_str();
         let check = check_chars(&original);
@@ -1417,8 +1492,16 @@ mod tests {
     #[test]
     fn a_pairing_code_from_somewhere_else_is_refused() {
         let original = key(1);
-        assert!(parse_pairing_code(&format!("nope.{}.{}", original.as_str(), check_chars(&original))).is_err());
-        assert!(parse_pairing_code(original.as_str()).is_err(), "a bare key_id is not a code");
+        assert!(parse_pairing_code(&format!(
+            "nope.{}.{}",
+            original.as_str(),
+            check_chars(&original)
+        ))
+        .is_err());
+        assert!(
+            parse_pairing_code(original.as_str()).is_err(),
+            "a bare key_id is not a code"
+        );
         assert!(parse_pairing_code(&format!("{PAIRING_TAG}.{}", original.as_str())).is_err());
         assert!(parse_pairing_code(&grant_blob(&SignedGrant {
             statement: b"x".to_vec(),
@@ -1443,7 +1526,10 @@ mod tests {
         .unwrap();
 
         let st = verify_grant(&parse_grant_blob(&blob).unwrap()).unwrap();
-        let (subject, shown) = confirm.shown.last().expect("the approver was shown nothing");
+        let (subject, shown) = confirm
+            .shown
+            .last()
+            .expect("the approver was shown nothing");
         assert_eq!(subject, "new machine");
         assert_eq!(shown, &words::fingerprint(&st.to));
         assert_ne!(
@@ -1495,9 +1581,12 @@ mod tests {
         let second = fresh_dir();
         let third = fresh_dir();
 
-        let grant =
-            approve_offline(first.path(), &pending_offline(second.path()).unwrap().code, &mut Yes::default())
-                .unwrap();
+        let grant = approve_offline(
+            first.path(),
+            &pending_offline(second.path()).unwrap().code,
+            &mut Yes::default(),
+        )
+        .unwrap();
         accept_offline(second.path(), &grant).unwrap();
 
         let onward = approve_offline(
@@ -1520,22 +1609,30 @@ mod tests {
     fn a_machine_holding_only_the_inbound_half_has_not_completed_the_link() {
         let approver = seeded_dir();
         let joiner = fresh_dir();
-        let inbound =
-            approve_offline(approver.path(), &pending_offline(joiner.path()).unwrap().code, &mut Yes::default())
-                .unwrap();
+        let inbound = approve_offline(
+            approver.path(),
+            &pending_offline(joiner.path()).unwrap().code,
+            &mut Yes::default(),
+        )
+        .unwrap();
 
         // The inbound half alone, stored without the answering step.
         remember(joiner.path(), &parse_grant_blob(&inbound).unwrap(), false).unwrap();
-        assert!(has_active_link(joiner.path()).unwrap(), "it has been admitted");
+        assert!(
+            has_active_link(joiner.path()).unwrap(),
+            "it has been admitted"
+        );
         assert!(
             !is_mutual(joiner.path(), &key_of(approver.path())).unwrap(),
             "and has not yet said anything itself — a one-sided link that reads as \
              complete is the failure here"
         );
 
-        assert!(ensure_link_to(joiner.path(), &key_of(approver.path()), unix_now())
-            .unwrap()
-            .is_some_and(|l| l.minted));
+        assert!(
+            ensure_link_to(joiner.path(), &key_of(approver.path()), unix_now())
+                .unwrap()
+                .is_some_and(|l| l.minted)
+        );
         assert!(is_mutual(joiner.path(), &key_of(approver.path())).unwrap());
     }
 
@@ -1543,14 +1640,21 @@ mod tests {
     fn the_offline_door_answers_the_inbound_half_with_a_grant_of_its_own() {
         let approver = seeded_dir();
         let joiner = fresh_dir();
-        let blob =
-            approve_offline(approver.path(), &pending_offline(joiner.path()).unwrap().code, &mut Yes::default())
-                .unwrap();
+        let blob = approve_offline(
+            approver.path(),
+            &pending_offline(joiner.path()).unwrap().code,
+            &mut Yes::default(),
+        )
+        .unwrap();
         accept_offline(joiner.path(), &blob).unwrap();
 
         let reciprocal = stored_grant_to(joiner.path(), &key_of(approver.path()));
         let st = verify_grant(&reciprocal).unwrap();
-        assert_eq!(st.from, key_of(joiner.path()), "each key signs only its own sentence");
+        assert_eq!(
+            st.from,
+            key_of(joiner.path()),
+            "each key signs only its own sentence"
+        );
         assert_eq!(st.to, key_of(approver.path()));
         assert_eq!(st.kind, GrantKind::Link);
         assert!(is_mutual(joiner.path(), &key_of(approver.path())).unwrap());
@@ -1583,9 +1687,17 @@ mod tests {
         connect_and_reconcile(joiner.path()).await.unwrap();
 
         let sent = lodged_by_joiner.lock().unwrap().clone();
-        assert_eq!(sent.len(), 1, "the joiner owed exactly one grant: its own half");
+        assert_eq!(
+            sent.len(),
+            1,
+            "the joiner owed exactly one grant: its own half"
+        );
         let st = verify_grant(&wire_to_signed(&sent[0])).unwrap();
-        assert_eq!(st.from, key_of(joiner.path()), "B signs B->A; nobody signs for anybody");
+        assert_eq!(
+            st.from,
+            key_of(joiner.path()),
+            "B signs B->A; nobody signs for anybody"
+        );
         assert_eq!(st.to, key_of(approver.path()));
         assert_eq!(st.kind, GrantKind::Link);
         assert!(is_mutual(joiner.path(), &key_of(approver.path())).unwrap());
@@ -1655,7 +1767,11 @@ mod tests {
                 .await
                 .unwrap();
 
-        let listed: Vec<&str> = ready.vault_state.iter().map(|v| v.vault_id.as_str()).collect();
+        let listed: Vec<&str> = ready
+            .vault_state
+            .iter()
+            .map(|v| v.vault_id.as_str())
+            .collect();
         assert_eq!(
             listed,
             vec!["v1", "v-a-machine"],
@@ -1681,13 +1797,20 @@ mod tests {
 
         assert_eq!(read.skipped, Vec::<String>::new());
         assert_eq!(
-            read.fetched.iter().map(|f| f.vault_id.as_str()).collect::<Vec<_>>(),
+            read.fetched
+                .iter()
+                .map(|f| f.vault_id.as_str())
+                .collect::<Vec<_>>(),
             vec!["v-a-machine"],
             "the vault the grant reached was read; this machine's own was left \
              to the upload half"
         );
         crate::sync::fetch::assert_installed(joiner.path(), "v-a-machine", &index);
-        assert_eq!(lodged.lock().unwrap().len(), 1, "one grant lodged: B's own half");
+        assert_eq!(
+            lodged.lock().unwrap().len(),
+            1,
+            "one grant lodged: B's own half"
+        );
     }
 
     #[tokio::test]
@@ -1730,7 +1853,13 @@ mod tests {
     /// A `GrantWire` naming `from -> to` as a `link`, signed however the
     /// caller likes. The hostile shapes below need a statement that says all
     /// the right things and a signature that does not stand behind it.
-    fn link_wire(sk: &SigningKey, from: &KeyId, to: &KeyId, signature: Vec<u8>, state: &str) -> GrantWire {
+    fn link_wire(
+        sk: &SigningKey,
+        from: &KeyId,
+        to: &KeyId,
+        signature: Vec<u8>,
+        state: &str,
+    ) -> GrantWire {
         let now = unix_now();
         let st = GrantStatement {
             v: 5,
@@ -1870,7 +1999,11 @@ mod tests {
         write_hub_config(machine.path(), &hub.ws_url(), None);
         connect_and_reconcile(machine.path()).await.unwrap();
 
-        assert_eq!(lodged.lock().unwrap().len(), 1, "the asked-for link must be answered");
+        assert_eq!(
+            lodged.lock().unwrap().len(),
+            1,
+            "the asked-for link must be answered"
+        );
         assert!(is_mutual(machine.path(), &other).unwrap());
         assert!(
             !pairing_window_open(machine.path(), unix_now()),
@@ -1928,7 +2061,11 @@ mod tests {
         write_hub_config(machine.path(), &hub.ws_url(), None);
         connect_and_reconcile(machine.path()).await.unwrap();
 
-        assert!(lodged.lock().unwrap().is_empty(), "{:?}", lodged.lock().unwrap());
+        assert!(
+            lodged.lock().unwrap().is_empty(),
+            "{:?}",
+            lodged.lock().unwrap()
+        );
         assert!(load_grants(machine.path()).unwrap().is_empty());
     }
 
@@ -2036,7 +2173,11 @@ mod tests {
         write_hub_config(machine.path(), &hub.ws_url(), None);
         connect_and_reconcile(machine.path()).await.unwrap();
 
-        assert!(lodged.lock().unwrap().is_empty(), "{:?}", lodged.lock().unwrap());
+        assert!(
+            lodged.lock().unwrap().is_empty(),
+            "{:?}",
+            lodged.lock().unwrap()
+        );
         assert!(
             load_grants(machine.path()).unwrap().is_empty(),
             "somebody else's link is not this machine's record to keep"
@@ -2056,7 +2197,11 @@ mod tests {
         connect_and_reconcile(machine.path()).await.unwrap();
 
         let sent = lodged.lock().unwrap().clone();
-        assert_eq!(sent.len(), 1, "the recovery key had no grant and now has one");
+        assert_eq!(
+            sent.len(),
+            1,
+            "the recovery key had no grant and now has one"
+        );
         let st = verify_grant(&wire_to_signed(&sent[0])).unwrap();
         assert_eq!(st.to, recovery);
         assert_eq!(st.from, key_of(machine.path()));
@@ -2071,15 +2216,21 @@ mod tests {
         let _env = test_hub::insecure_ws_env();
         let machine = seeded_dir();
         let recovery = key(23);
-        let existing =
-            issue_link_grant(&local_signing_key(machine.path()).unwrap(), &recovery, unix_now() - 10)
-                .unwrap();
+        let existing = issue_link_grant(
+            &local_signing_key(machine.path()).unwrap(),
+            &recovery,
+            unix_now() - 10,
+        )
+        .unwrap();
         let wire = GrantWire {
             statement_b64: b64::encode(&existing.statement),
             signature_b64: b64::encode(&existing.signature),
             state: "active".into(),
         };
-        assert!(load_grants(machine.path()).unwrap().is_empty(), "precondition: the file is gone");
+        assert!(
+            load_grants(machine.path()).unwrap().is_empty(),
+            "precondition: the file is gone"
+        );
 
         let (hub, lodged) = test_hub::spawn_grant_hub(vec![wire], vec![]).await;
         write_hub_config(machine.path(), &hub.ws_url(), Some(&recovery));
@@ -2090,7 +2241,11 @@ mod tests {
             "the hub already holds this grant; signing a second would put a duplicate \
              row on it for the same relationship"
         );
-        assert_eq!(load_grants(machine.path()).unwrap().len(), 1, "and the store learned it back");
+        assert_eq!(
+            load_grants(machine.path()).unwrap().len(),
+            1,
+            "and the store learned it back"
+        );
     }
 
     #[test]
@@ -2108,11 +2263,16 @@ mod tests {
         let approver = seeded_dir();
         let intended = fresh_dir();
         let bystander = dir_with_seed(31);
-        let blob =
-            approve_offline(approver.path(), &pending_offline(intended.path()).unwrap().code, &mut Yes::default())
-                .unwrap();
+        let blob = approve_offline(
+            approver.path(),
+            &pending_offline(intended.path()).unwrap().code,
+            &mut Yes::default(),
+        )
+        .unwrap();
 
-        let err = accept_offline(bystander.path(), &blob).unwrap_err().to_string();
+        let err = accept_offline(bystander.path(), &blob)
+            .unwrap_err()
+            .to_string();
         assert!(err.contains("admits"), "{err}");
         assert!(load_grants(bystander.path()).unwrap().is_empty());
         assert!(!has_active_link(bystander.path()).unwrap());
@@ -2126,9 +2286,12 @@ mod tests {
     fn a_tampered_grant_blob_is_not_accepted() {
         let approver = seeded_dir();
         let joiner = fresh_dir();
-        let blob =
-            approve_offline(approver.path(), &pending_offline(joiner.path()).unwrap().code, &mut Yes::default())
-                .unwrap();
+        let blob = approve_offline(
+            approver.path(),
+            &pending_offline(joiner.path()).unwrap().code,
+            &mut Yes::default(),
+        )
+        .unwrap();
 
         // Flip a byte inside the statement, leaving the blob well-formed and
         // the signature untouched: only the signature check can catch this.
@@ -2136,7 +2299,10 @@ mod tests {
         let mut statement = good.statement.clone();
         let pos = statement.windows(6).position(|w| w == b"nonce\"").unwrap() + 8;
         statement[pos] ^= 0x01;
-        let tampered = grant_blob(&SignedGrant { statement, signature: good.signature.clone() });
+        let tampered = grant_blob(&SignedGrant {
+            statement,
+            signature: good.signature.clone(),
+        });
 
         assert!(accept_offline(joiner.path(), &tampered).is_err());
         assert!(load_grants(joiner.path()).unwrap().is_empty());
@@ -2165,22 +2331,33 @@ mod tests {
     async fn a_grant_the_hub_refuses_is_counted_not_propagated() {
         let _env = test_hub::insecure_ws_env();
         let approver = seeded_dir();
-        approve_offline(approver.path(), &pairing_code(&key(11)), &mut Yes::default()).unwrap();
+        approve_offline(
+            approver.path(),
+            &pairing_code(&key(11)),
+            &mut Yes::default(),
+        )
+        .unwrap();
 
         let (hub, _lodged) =
             test_hub::spawn_grant_hub(vec![], vec![GrantAnswer::Reject("no room at the inn")])
                 .await;
         write_hub_config(approver.path(), &hub.ws_url(), None);
 
-        let outcome = connect_and_reconcile(approver.path()).await.expect(
-            "a hub that answers is a hub the rest of the cycle can still use",
-        );
+        let outcome = connect_and_reconcile(approver.path())
+            .await
+            .expect("a hub that answers is a hub the rest of the cycle can still use");
         assert_eq!(outcome.lodged, 0);
         assert_eq!(outcome.refused.len(), 1);
-        assert!(outcome.refused[0].reason.contains("no room at the inn"),
-            "the hub's own words reach the caller: {:?}", outcome.refused[0]);
         assert!(
-            load_grants(approver.path()).unwrap().iter().all(|g| !g.lodged),
+            outcome.refused[0].reason.contains("no room at the inn"),
+            "the hub's own words reach the caller: {:?}",
+            outcome.refused[0]
+        );
+        assert!(
+            load_grants(approver.path())
+                .unwrap()
+                .iter()
+                .all(|g| !g.lodged),
             "a refused grant must stay owed — marking it lodged to make the complaint \
              go away loses the grant and leaves the link half-built forever"
         );
@@ -2192,8 +2369,18 @@ mod tests {
     async fn a_refused_grant_does_not_stop_the_grants_behind_it() {
         let _env = test_hub::insecure_ws_env();
         let approver = seeded_dir();
-        approve_offline(approver.path(), &pairing_code(&key(11)), &mut Yes::default()).unwrap();
-        approve_offline(approver.path(), &pairing_code(&key(13)), &mut Yes::default()).unwrap();
+        approve_offline(
+            approver.path(),
+            &pairing_code(&key(11)),
+            &mut Yes::default(),
+        )
+        .unwrap();
+        approve_offline(
+            approver.path(),
+            &pairing_code(&key(13)),
+            &mut Yes::default(),
+        )
+        .unwrap();
 
         let (hub, sent) =
             test_hub::spawn_grant_hub(vec![], vec![GrantAnswer::Reject("nope"), GrantAnswer::Ack])
@@ -2205,8 +2392,11 @@ mod tests {
         assert_eq!(outcome.lodged, 1);
         assert_eq!(outcome.refused.len(), 1);
         let stored = load_grants(approver.path()).unwrap();
-        assert_eq!(stored.iter().filter(|g| g.lodged).count(), 1,
-            "the accepted one is settled and the refused one is still owed");
+        assert_eq!(
+            stored.iter().filter(|g| g.lodged).count(),
+            1,
+            "the accepted one is settled and the refused one is still owed"
+        );
     }
 
     /// An ack naming a different grant is a refusal with a worse reason, not a
@@ -2216,7 +2406,12 @@ mod tests {
     async fn an_ack_naming_a_different_grant_is_not_an_ack() {
         let _env = test_hub::insecure_ws_env();
         let approver = seeded_dir();
-        approve_offline(approver.path(), &pairing_code(&key(11)), &mut Yes::default()).unwrap();
+        approve_offline(
+            approver.path(),
+            &pairing_code(&key(11)),
+            &mut Yes::default(),
+        )
+        .unwrap();
 
         let (hub, _lodged) = test_hub::spawn_grant_hub(vec![], vec![GrantAnswer::AckWrongId]).await;
         write_hub_config(approver.path(), &hub.ws_url(), None);
@@ -2224,9 +2419,17 @@ mod tests {
         let outcome = connect_and_reconcile(approver.path()).await.unwrap();
         assert_eq!(outcome.lodged, 0);
         assert_eq!(outcome.refused.len(), 1);
-        assert!(outcome.refused[0].reason.contains("stored something other than what was sent"),
-            "{:?}", outcome.refused[0]);
-        assert!(load_grants(approver.path()).unwrap().iter().all(|g| !g.lodged));
+        assert!(
+            outcome.refused[0]
+                .reason
+                .contains("stored something other than what was sent"),
+            "{:?}",
+            outcome.refused[0]
+        );
+        assert!(load_grants(approver.path())
+            .unwrap()
+            .iter()
+            .all(|g| !g.lodged));
     }
 
     /// What a mock hub does with the first `PutGrant` it is handed, for the
@@ -2241,29 +2444,41 @@ mod tests {
 
     async fn hub_that_mishandles_the_first_grant(what: Mishandle) -> test_hub::MockHub {
         test_hub::spawn_mock_hub(move |mut ws| async move {
-            let Some(hello) = test_hub::recv_client_msg(&mut ws).await else { return };
-            let ClientMsg::ClientHello { nonce_c, .. } = hello else { return };
+            let Some(hello) = test_hub::recv_client_msg(&mut ws).await else {
+                return;
+            };
+            let ClientMsg::ClientHello { nonce_c, .. } = hello else {
+                return;
+            };
             test_hub::send_signed_challenge(&mut ws, &test_hub::hub_signing_key(), &nonce_c).await;
             let _auth = test_hub::recv_client_msg(&mut ws).await;
-            if !test_hub::send_hub_msg(&mut ws, &HubMsg::SyncReady {
-            chunked_upload: None,
-                protocol_version: PROTOCOL_VERSION,
-                vault_state: vec![],
-                grants: vec![],
-                revocations: vec![],
-            })
+            if !test_hub::send_hub_msg(
+                &mut ws,
+                &HubMsg::SyncReady {
+                    chunked_upload: None,
+                    protocol_version: PROTOCOL_VERSION,
+                    vault_state: vec![],
+                    grants: vec![],
+                    revocations: vec![],
+                },
+            )
             .await
             {
                 return;
             }
-            let Some(_put) = test_hub::recv_client_msg(&mut ws).await else { return };
+            let Some(_put) = test_hub::recv_client_msg(&mut ws).await else {
+                return;
+            };
             match what {
                 Mishandle::Drop => {}
                 Mishandle::AnswerSomethingElse => {
-                    test_hub::send_hub_msg(&mut ws, &HubMsg::UploadAck {
-                        vault_id: "v1".into(),
-                        sha256: "abc".into(),
-                    })
+                    test_hub::send_hub_msg(
+                        &mut ws,
+                        &HubMsg::UploadAck {
+                            vault_id: "v1".into(),
+                            sha256: "abc".into(),
+                        },
+                    )
                     .await;
                 }
             }
@@ -2281,13 +2496,21 @@ mod tests {
     async fn a_dropped_connection_is_an_error_not_a_refusal() {
         let _env = test_hub::insecure_ws_env();
         let approver = seeded_dir();
-        approve_offline(approver.path(), &pairing_code(&key(11)), &mut Yes::default()).unwrap();
+        approve_offline(
+            approver.path(),
+            &pairing_code(&key(11)),
+            &mut Yes::default(),
+        )
+        .unwrap();
 
         let hub = hub_that_mishandles_the_first_grant(Mishandle::Drop).await;
         write_hub_config(approver.path(), &hub.ws_url(), None);
 
         assert!(connect_and_reconcile(approver.path()).await.is_err());
-        assert!(load_grants(approver.path()).unwrap().iter().all(|g| !g.lodged));
+        assert!(load_grants(approver.path())
+            .unwrap()
+            .iter()
+            .all(|g| !g.lodged));
     }
 
     /// A reply that is not an answer to this request leaves the stream out of
@@ -2298,14 +2521,25 @@ mod tests {
     async fn a_reply_that_is_not_an_answer_ends_the_cycle() {
         let _env = test_hub::insecure_ws_env();
         let approver = seeded_dir();
-        approve_offline(approver.path(), &pairing_code(&key(11)), &mut Yes::default()).unwrap();
+        approve_offline(
+            approver.path(),
+            &pairing_code(&key(11)),
+            &mut Yes::default(),
+        )
+        .unwrap();
 
         let hub = hub_that_mishandles_the_first_grant(Mishandle::AnswerSomethingElse).await;
         write_hub_config(approver.path(), &hub.ws_url(), None);
 
-        let err = connect_and_reconcile(approver.path()).await.unwrap_err().to_string();
+        let err = connect_and_reconcile(approver.path())
+            .await
+            .unwrap_err()
+            .to_string();
         assert!(err.contains("expected grant-ack"), "{err}");
-        assert!(load_grants(approver.path()).unwrap().iter().all(|g| !g.lodged));
+        assert!(load_grants(approver.path())
+            .unwrap()
+            .iter()
+            .all(|g| !g.lodged));
     }
 
     /// `ll link approve` is not a sync cycle. A refusal there is the whole
@@ -2319,14 +2553,24 @@ mod tests {
             test_hub::spawn_grant_hub(vec![], vec![GrantAnswer::Reject("not a member")]).await;
         write_hub_config(approver.path(), &hub.ws_url(), None);
 
-        let err = approve(approver.path(), &pairing_code(&key(11)), &mut Yes::default())
-            .await
-            .unwrap_err()
-            .to_string();
+        let err = approve(
+            approver.path(),
+            &pairing_code(&key(11)),
+            &mut Yes::default(),
+        )
+        .await
+        .unwrap_err()
+        .to_string();
         assert!(err.contains("hub refused this grant"), "{err}");
-        assert!(err.contains("not a member"), "the hub's reason reaches the user: {err}");
-        assert_eq!(load_grants(approver.path()).unwrap().len(), 1,
-            "and the grant is kept, so the next connection offers it again");
+        assert!(
+            err.contains("not a member"),
+            "the hub's reason reaches the user: {err}"
+        );
+        assert_eq!(
+            load_grants(approver.path()).unwrap().len(),
+            1,
+            "and the grant is kept, so the next connection offers it again"
+        );
     }
 
     // -- withdrawing a link ------------------------------------------------
@@ -2363,7 +2607,9 @@ mod tests {
         // anything to say about.
         let (hub_a, _lodged) = test_hub::spawn_grant_hub(vec![], vec![]).await;
         write_hub_config(approver.path(), &hub_a.ws_url(), None);
-        approve(approver.path(), &pairing_code(&joiner), &mut Yes::default()).await.unwrap();
+        approve(approver.path(), &pairing_code(&joiner), &mut Yes::default())
+            .await
+            .unwrap();
         let id = grant::grant_id(&stored_grant_to(approver.path(), &joiner).statement);
 
         let (hub_b, seen) = test_hub::spawn_grant_hub(vec![], vec![]).await;
@@ -2371,21 +2617,39 @@ mod tests {
         let done = revoke(approver.path(), &joiner).await.unwrap();
 
         assert_eq!(done.grant_ids, vec![id.clone()]);
-        assert!(!done.inbound_remains, "the joiner never answered, so there is no other half");
+        assert!(
+            !done.inbound_remains,
+            "the joiner never answered, so there is no other half"
+        );
 
         let seen = seen.lock().unwrap().clone();
-        assert_eq!(seen.len(), 1, "one link, one revocation, and nothing else: {seen:?}");
-        assert_eq!(seen[0].state, "revoked", "the hub was sent a revocation, not another grant");
+        assert_eq!(
+            seen.len(),
+            1,
+            "one link, one revocation, and nothing else: {seen:?}"
+        );
+        assert_eq!(
+            seen[0].state, "revoked",
+            "the hub was sent a revocation, not another grant"
+        );
         let rev = grant::verify_revocation(
             &b64::decode(&seen[0].statement_b64).unwrap(),
             &b64::decode(&seen[0].signature_b64).unwrap(),
             &key_of(approver.path()),
         )
         .expect("the issuer signs its own withdrawal, and the hub checks that it did");
-        assert_eq!(rev.grant_id, id, "a revocation naming another grant withdraws nothing");
-        assert_eq!(rev.scope, None, "a link is unscoped and its withdrawal has to say so");
-        assert!(load_grants(approver.path()).unwrap().is_empty(),
-            "the hub acknowledged it, so the row has nothing left to describe");
+        assert_eq!(
+            rev.grant_id, id,
+            "a revocation naming another grant withdraws nothing"
+        );
+        assert_eq!(
+            rev.scope, None,
+            "a link is unscoped and its withdrawal has to say so"
+        );
+        assert!(
+            load_grants(approver.path()).unwrap().is_empty(),
+            "the hub acknowledged it, so the row has nothing left to describe"
+        );
     }
 
     /// **The order, and it is the one thing here that cannot be recovered
@@ -2405,11 +2669,20 @@ mod tests {
             test_hub::spawn_grant_hub(vec![], vec![GrantAnswer::Reject("no such grant")]).await;
         write_hub_config(approver.path(), &hub.ws_url(), None);
 
-        let err = revoke(approver.path(), &joiner).await.unwrap_err().to_string();
+        let err = revoke(approver.path(), &joiner)
+            .await
+            .unwrap_err()
+            .to_string();
         assert!(err.contains("refused to withdraw"), "{err}");
-        assert!(err.contains("no such grant"), "the hub's reason reaches the user: {err}");
-        assert_eq!(grant_ids(approver.path()), before,
-            "the hub still serves this grant, so this machine must still know it issued it");
+        assert!(
+            err.contains("no such grant"),
+            "the hub's reason reaches the user: {err}"
+        );
+        assert_eq!(
+            grant_ids(approver.path()),
+            before,
+            "the hub still serves this grant, so this machine must still know it issued it"
+        );
     }
 
     /// The same property against the failure that is not a decision: the
@@ -2425,8 +2698,11 @@ mod tests {
         write_hub_config(approver.path(), &hub.ws_url(), None);
 
         assert!(revoke(approver.path(), &joiner).await.is_err());
-        assert_eq!(grant_ids(approver.path()), before,
-            "nothing was acknowledged, so nothing may be forgotten");
+        assert_eq!(
+            grant_ids(approver.path()),
+            before,
+            "nothing was acknowledged, so nothing may be forgotten"
+        );
     }
 
     /// An ack naming a different grant is a hub that withdrew something else.
@@ -2439,13 +2715,15 @@ mod tests {
         let approver = approver_who_admitted(&joiner);
         let before = grant_ids(approver.path());
 
-        let (hub, _seen) =
-            test_hub::spawn_grant_hub(vec![], vec![GrantAnswer::AckWrongId]).await;
+        let (hub, _seen) = test_hub::spawn_grant_hub(vec![], vec![GrantAnswer::AckWrongId]).await;
         write_hub_config(approver.path(), &hub.ws_url(), None);
 
         assert!(revoke(approver.path(), &joiner).await.is_err());
-        assert_eq!(grant_ids(approver.path()), before,
-            "the hub acknowledged some other grant; this one is still live");
+        assert_eq!(
+            grant_ids(approver.path()),
+            before,
+            "the hub acknowledged some other grant; this one is still live"
+        );
     }
 
     /// A second link this machine issued to the same key, un-lodged.
@@ -2487,11 +2765,24 @@ mod tests {
         .await;
         write_hub_config(approver.path(), &hub.ws_url(), None);
 
-        let err = revoke(approver.path(), &joiner).await.unwrap_err().to_string();
-        assert!(err.contains("refused to withdraw"), "the refusal is the answer: {err}");
-        assert_eq!(seen.lock().unwrap().len(), 2, "both halves were offered before it stopped");
-        assert_eq!(grant_ids(approver.path()), vec![kept],
-            "the acknowledged withdrawal is withdrawn, and the refused grant is still live");
+        let err = revoke(approver.path(), &joiner)
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("refused to withdraw"),
+            "the refusal is the answer: {err}"
+        );
+        assert_eq!(
+            seen.lock().unwrap().len(),
+            2,
+            "both halves were offered before it stopped"
+        );
+        assert_eq!(
+            grant_ids(approver.path()),
+            vec![kept],
+            "the acknowledged withdrawal is withdrawn, and the refused grant is still live"
+        );
     }
 
     /// A refusal ends the command rather than working through what is behind
@@ -2515,10 +2806,16 @@ mod tests {
             test_hub::spawn_grant_hub(vec![], vec![GrantAnswer::Reject("no such grant")]).await;
         write_hub_config(approver.path(), &hub.ws_url(), None);
 
-        let err = revoke(approver.path(), &joiner).await.unwrap_err().to_string();
+        let err = revoke(approver.path(), &joiner)
+            .await
+            .unwrap_err()
+            .to_string();
         assert!(err.contains("refused to withdraw"), "{err}");
-        assert_eq!(seen.lock().unwrap().len(), 1,
-            "the grant behind the refusal was never offered");
+        assert_eq!(
+            seen.lock().unwrap().len(),
+            1,
+            "the grant behind the refusal was never offered"
+        );
         assert_eq!(grant_ids(approver.path()), before, "and neither row moved");
     }
 
@@ -2537,31 +2834,45 @@ mod tests {
         let acked = grant_ids(approver.path())[0].clone();
 
         let hub = test_hub::spawn_mock_hub(move |mut ws| async move {
-            let Some(hello) = test_hub::recv_client_msg(&mut ws).await else { return };
-            let ClientMsg::ClientHello { nonce_c, .. } = hello else { return };
+            let Some(hello) = test_hub::recv_client_msg(&mut ws).await else {
+                return;
+            };
+            let ClientMsg::ClientHello { nonce_c, .. } = hello else {
+                return;
+            };
             test_hub::send_signed_challenge(&mut ws, &test_hub::hub_signing_key(), &nonce_c).await;
             let _auth = test_hub::recv_client_msg(&mut ws).await;
-            if !test_hub::send_hub_msg(&mut ws, &HubMsg::SyncReady {
-            chunked_upload: None,
-                protocol_version: PROTOCOL_VERSION,
-                vault_state: vec![],
-                grants: vec![],
-                revocations: vec![],
-            })
+            if !test_hub::send_hub_msg(
+                &mut ws,
+                &HubMsg::SyncReady {
+                    chunked_upload: None,
+                    protocol_version: PROTOCOL_VERSION,
+                    vault_state: vec![],
+                    grants: vec![],
+                    revocations: vec![],
+                },
+            )
             .await
             {
                 return;
             }
-            let Some(_first) = test_hub::recv_client_msg(&mut ws).await else { return };
+            let Some(_first) = test_hub::recv_client_msg(&mut ws).await else {
+                return;
+            };
             test_hub::send_hub_msg(&mut ws, &HubMsg::GrantAck { grant_id: acked }).await;
         })
         .await;
         write_hub_config(approver.path(), &hub.ws_url(), None);
 
-        assert!(revoke(approver.path(), &joiner).await.is_err(),
-            "a dead socket is not a completed withdrawal");
-        assert_eq!(grant_ids(approver.path()), vec![kept],
-            "what the hub acknowledged is gone; what it never answered for is not");
+        assert!(
+            revoke(approver.path(), &joiner).await.is_err(),
+            "a dead socket is not a completed withdrawal"
+        );
+        assert_eq!(
+            grant_ids(approver.path()),
+            vec![kept],
+            "what the hub acknowledged is gone; what it never answered for is not"
+        );
     }
 
     /// `revoke` withdraws links and nothing else, and the filter that says so
@@ -2591,7 +2902,10 @@ mod tests {
             expires_at: now + 100_000,
             nonce: b64::encode(&random_nonce()),
         });
-        let follow = SignedGrant { signature: signer.sign(&statement).to_bytes().to_vec(), statement };
+        let follow = SignedGrant {
+            signature: signer.sign(&statement).to_bytes().to_vec(),
+            statement,
+        };
         let follow_id = grant::grant_id(&follow.statement);
         remember(approver.path(), &follow, true).unwrap();
 
@@ -2600,10 +2914,16 @@ mod tests {
         let done = revoke(approver.path(), &joiner).await.unwrap();
 
         assert_eq!(done.grant_ids, vec![link_id], "the link, and only the link");
-        assert_eq!(seen.lock().unwrap().len(), 1,
-            "one withdrawal was signed: the follow was never offered");
-        assert_eq!(grant_ids(approver.path()), vec![follow_id],
-            "a follow is not a link and `ll link revoke` does not take it");
+        assert_eq!(
+            seen.lock().unwrap().len(),
+            1,
+            "one withdrawal was signed: the follow was never offered"
+        );
+        assert_eq!(
+            grant_ids(approver.path()),
+            vec![follow_id],
+            "a follow is not a link and `ll link revoke` does not take it"
+        );
     }
 
     /// Only the issuer may revoke, so this withdraws one half. The grant the
@@ -2616,8 +2936,7 @@ mod tests {
         let joiner_key = SigningKey::from_bytes(&[11u8; 32]);
         let joiner = key(11);
         let approver = approver_who_admitted(&joiner);
-        let inbound =
-            issue_link_grant(&joiner_key, &key_of(approver.path()), unix_now()).unwrap();
+        let inbound = issue_link_grant(&joiner_key, &key_of(approver.path()), unix_now()).unwrap();
         let inbound_id = grant::grant_id(&inbound.statement);
         remember(approver.path(), &inbound, true).unwrap();
 
@@ -2625,12 +2944,20 @@ mod tests {
         write_hub_config(approver.path(), &hub.ws_url(), None);
         let done = revoke(approver.path(), &joiner).await.unwrap();
 
-        assert_eq!(seen.lock().unwrap().len(), 1,
-            "one message: this machine may only withdraw what it signed");
-        assert!(done.inbound_remains,
-            "and the caller is told, because half a door is not a shut one");
-        assert_eq!(grant_ids(approver.path()), vec![inbound_id],
-            "the other machine's grant stays exactly where it is");
+        assert_eq!(
+            seen.lock().unwrap().len(),
+            1,
+            "one message: this machine may only withdraw what it signed"
+        );
+        assert!(
+            done.inbound_remains,
+            "and the caller is told, because half a door is not a shut one"
+        );
+        assert_eq!(
+            grant_ids(approver.path()),
+            vec![inbound_id],
+            "the other machine's grant stays exactly where it is"
+        );
     }
 
     /// Nothing to withdraw is not a connection to make. The error names the
@@ -2649,13 +2976,29 @@ mod tests {
 
         // No hub config was ever written here. A revocation that reached the
         // network step would fail on that instead, and the error says which.
-        let err = revoke(approver.path(), &stranger).await.unwrap_err().to_string();
+        let err = revoke(approver.path(), &stranger)
+            .await
+            .unwrap_err()
+            .to_string();
         assert!(err.contains("holds no link it issued"), "{err}");
-        assert!(err.contains(stranger.as_str()), "the error names the key it looked for: {err}");
-        assert!(err.contains("only"), "and says who can withdraw the half that does exist: {err}");
+        assert!(
+            err.contains(stranger.as_str()),
+            "the error names the key it looked for: {err}"
+        );
+        assert!(
+            err.contains("only"),
+            "and says who can withdraw the half that does exist: {err}"
+        );
         assert!(err.contains("link list"), "and where to look: {err}");
-        assert!(!err.contains("force"), "an error must not point at a bigger hammer: {err}");
-        assert_eq!(grant_ids(approver.path()).len(), 1, "and nothing was dropped");
+        assert!(
+            !err.contains("force"),
+            "an error must not point at a bigger hammer: {err}"
+        );
+        assert_eq!(
+            grant_ids(approver.path()).len(),
+            1,
+            "and nothing was dropped"
+        );
     }
 
     /// A withdrawal carries the id and the scope of the grant it withdraws,
@@ -2688,7 +3031,11 @@ mod tests {
 
         let (grant_id, msg) = sign_revocation(&signer, &scoped, 99).unwrap();
         assert_eq!(grant_id, grant::grant_id(&scoped.statement));
-        let ClientMsg::RevokeGrant { statement_b64, signature_b64 } = msg else {
+        let ClientMsg::RevokeGrant {
+            statement_b64,
+            signature_b64,
+        } = msg
+        else {
             panic!("a withdrawal is a revoke-grant and nothing else");
         };
         let rev = grant::verify_revocation(
@@ -2697,9 +3044,15 @@ mod tests {
             &KeyId::from_pubkey(&signer.verifying_key()),
         )
         .expect("the issuer signs its own withdrawal");
-        assert_eq!(rev.grant_id, grant_id, "a revocation naming another grant withdraws nothing");
-        assert_eq!(rev.scope.as_deref(), Some("v-personal"),
-            "the hub refuses a revocation whose scope its grant never carried");
+        assert_eq!(
+            rev.grant_id, grant_id,
+            "a revocation naming another grant withdraws nothing"
+        );
+        assert_eq!(
+            rev.scope.as_deref(),
+            Some("v-personal"),
+            "the hub refuses a revocation whose scope its grant never carried"
+        );
         assert_eq!(rev.at, 99);
     }
 
@@ -2762,20 +3115,29 @@ mod tests {
     fn list_reports_both_directions_as_one_mutual_row() {
         let approver = seeded_dir();
         let joiner = fresh_dir();
-        let blob =
-            approve_offline(approver.path(), &pending_offline(joiner.path()).unwrap().code, &mut Yes::default())
-                .unwrap();
+        let blob = approve_offline(
+            approver.path(),
+            &pending_offline(joiner.path()).unwrap().code,
+            &mut Yes::default(),
+        )
+        .unwrap();
         accept_offline(joiner.path(), &blob).unwrap();
 
         let rows = list(joiner.path()).unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].other, key_of(approver.path()).as_str());
         assert_eq!(rows[0].direction, "mutual");
-        assert_eq!(rows[0].fingerprint, words::fingerprint(&key_of(approver.path())));
+        assert_eq!(
+            rows[0].fingerprint,
+            words::fingerprint(&key_of(approver.path()))
+        );
 
         let approver_rows = list(approver.path()).unwrap();
         assert_eq!(approver_rows.len(), 1);
-        assert_eq!(approver_rows[0].direction, "outbound", "it has not heard back yet");
+        assert_eq!(
+            approver_rows[0].direction, "outbound",
+            "it has not heard back yet"
+        );
     }
 
     /// An approval nobody ever picked up, beside one that was — and the field
@@ -2811,7 +3173,12 @@ mod tests {
         remember(approver.path(), &their_half, true).unwrap();
 
         // And a machine that was admitted and never showed up.
-        approve_offline(approver.path(), &pairing_code(&abandoned), &mut Yes::default()).unwrap();
+        approve_offline(
+            approver.path(),
+            &pairing_code(&abandoned),
+            &mut Yes::default(),
+        )
+        .unwrap();
         update_grants(approver.path(), |rows| {
             for row in rows.iter_mut() {
                 row.lodged = true;
@@ -2823,14 +3190,19 @@ mod tests {
         let rows = list(approver.path()).unwrap();
         assert_eq!(rows.len(), 2, "{rows:?}");
         let row = |k: &KeyId| {
-            rows.iter().find(|r| r.other == k.as_str()).unwrap_or_else(|| panic!("no row for {k:?}"))
+            rows.iter()
+                .find(|r| r.other == k.as_str())
+                .unwrap_or_else(|| panic!("no row for {k:?}"))
         };
         assert!(
             row(&abandoned).lodged && row(&key_of(answered.path())).lodged,
             "both grants are at the hub, so `lodged` cannot be what tells them apart"
         );
-        assert_eq!(row(&abandoned).direction, "outbound",
-            "nobody answered this one, and the list has to say so or it cannot be found");
+        assert_eq!(
+            row(&abandoned).direction,
+            "outbound",
+            "nobody answered this one, and the list has to say so or it cannot be found"
+        );
         assert_eq!(row(&key_of(answered.path())).direction, "mutual");
     }
 
@@ -2870,9 +3242,7 @@ mod tests {
         let batches: Vec<Vec<SignedGrant>> = (0..WRITERS)
             .map(|w| {
                 (0..EACH)
-                    .map(|i| {
-                        issue_link_grant(&sk, &key((8 + w * EACH + i) as u8), now).unwrap()
-                    })
+                    .map(|i| issue_link_grant(&sk, &key((8 + w * EACH + i) as u8), now).unwrap())
                     .collect()
             })
             .collect();
@@ -2923,15 +3293,24 @@ mod tests {
             .into_iter()
             .filter(|(_, st)| st.kind == GrantKind::Link && st.to == other)
             .collect();
-        assert_eq!(links.len(), 1, "one relationship, one grant, {} minted", links.len());
+        assert_eq!(
+            links.len(),
+            1,
+            "one relationship, one grant, {} minted",
+            links.len()
+        );
     }
 
     #[test]
     fn a_machine_cannot_link_to_itself() {
         let dir = seeded_dir();
         let me = key_of(dir.path());
-        assert!(issue_link_grant(&local_signing_key(dir.path()).unwrap(), &me, unix_now()).is_err());
-        assert!(ensure_link_to(dir.path(), &me, unix_now()).unwrap().is_none());
+        assert!(
+            issue_link_grant(&local_signing_key(dir.path()).unwrap(), &me, unix_now()).is_err()
+        );
+        assert!(ensure_link_to(dir.path(), &me, unix_now())
+            .unwrap()
+            .is_none());
     }
 
     // -- Door 1's joining half --------------------------------------------
@@ -2940,7 +3319,8 @@ mod tests {
     async fn request_pins_the_hub_and_writes_a_config_without_connecting() {
         let _env = test_hub::insecure_ws_env();
         let dir = fresh_dir();
-        let hub = test_hub::spawn_well_known_only(&test_hub::hub_key_id_str(), PROTOCOL_VERSION).await;
+        let hub =
+            test_hub::spawn_well_known_only(&test_hub::hub_key_id_str(), PROTOCOL_VERSION).await;
         let mut confirm = Yes::default();
 
         let pending = request(
@@ -2953,7 +3333,10 @@ mod tests {
         .unwrap();
 
         let written = config::load_config(dir.path()).unwrap();
-        assert_eq!(written.hub.key_id.as_deref(), Some(test_hub::hub_key_id_str().as_str()));
+        assert_eq!(
+            written.hub.key_id.as_deref(),
+            Some(test_hub::hub_key_id_str().as_str())
+        );
         assert!(written.vault_id.is_some());
         assert!(
             written.recovery_key_id.is_none(),
@@ -2961,17 +3344,24 @@ mod tests {
         );
         assert_eq!(pending.joining_key, key_of(dir.path()));
         assert_eq!(pending.code, pairing_code(&pending.joining_key));
-        assert_eq!(pending.fingerprint, words::fingerprint(&pending.joining_key));
+        assert_eq!(
+            pending.fingerprint,
+            words::fingerprint(&pending.joining_key)
+        );
         let (subject, shown) = confirm.shown.first().unwrap();
         assert_eq!(subject, "hub identity");
-        assert_eq!(shown, &words::fingerprint(&KeyId::parse(&test_hub::hub_key_id_str()).unwrap()));
+        assert_eq!(
+            shown,
+            &words::fingerprint(&KeyId::parse(&test_hub::hub_key_id_str()).unwrap())
+        );
     }
 
     #[tokio::test]
     async fn request_refuses_a_hub_whose_fingerprint_is_not_confirmed() {
         let _env = test_hub::insecure_ws_env();
         let dir = fresh_dir();
-        let hub = test_hub::spawn_well_known_only(&test_hub::hub_key_id_str(), PROTOCOL_VERSION).await;
+        let hub =
+            test_hub::spawn_well_known_only(&test_hub::hub_key_id_str(), PROTOCOL_VERSION).await;
 
         let err = request(dir.path(), &hub.ws_url(), &PathBuf::from("/tmp/x"), &mut No)
             .await
@@ -2985,17 +3375,26 @@ mod tests {
     async fn request_refuses_a_hub_announcing_a_protocol_this_client_does_not_speak() {
         let _env = test_hub::insecure_ws_env();
         let dir = fresh_dir();
-        let hub = test_hub::spawn_well_known_only(&test_hub::hub_key_id_str(), PROTOCOL_VERSION + 1).await;
+        let hub =
+            test_hub::spawn_well_known_only(&test_hub::hub_key_id_str(), PROTOCOL_VERSION + 1)
+                .await;
         let mut confirm = Yes::default();
 
-        let err = request(dir.path(), &hub.ws_url(), &PathBuf::from("/tmp/x"), &mut confirm)
-            .await
-            .unwrap_err()
-            .to_string();
+        let err = request(
+            dir.path(),
+            &hub.ws_url(),
+            &PathBuf::from("/tmp/x"),
+            &mut confirm,
+        )
+        .await
+        .unwrap_err()
+        .to_string();
         assert!(err.contains("protocol"), "{err}");
-        assert!(confirm.shown.is_empty(),
+        assert!(
+            confirm.shown.is_empty(),
             "a version this client cannot speak is settled before the user is asked \
-             to compare anything");
+             to compare anything"
+        );
         assert!(!config::config_path(dir.path()).exists());
     }
 }

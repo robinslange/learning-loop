@@ -8,12 +8,10 @@ mod common;
 
 use std::collections::HashMap;
 
-use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use rusqlite::Connection;
 
-use common::{
-    add_ranked_rrf, build_synthetic_db_in_memory, deterministic_embedding, dot_product,
-};
+use common::{add_ranked_rrf, build_synthetic_db_in_memory, deterministic_embedding, dot_product};
 
 const DIM: usize = 384;
 const SEED: u64 = 20260511;
@@ -60,10 +58,7 @@ fn fts_query(conn: &Connection, text: &str) -> Vec<(String, f64)> {
 }
 
 /// Assemble RRF from vector + FTS signals.
-fn rrf_scores(
-    vec_scored: &[(String, f64)],
-    fts_results: &[(String, f64)],
-) -> HashMap<String, f64> {
+fn rrf_scores(vec_scored: &[(String, f64)], fts_results: &[(String, f64)]) -> HashMap<String, f64> {
     let mut scores = HashMap::new();
     add_ranked_rrf(&mut scores, vec_scored.iter().map(|(p, _)| p.clone()));
     add_ranked_rrf(&mut scores, fts_results.iter().map(|(p, _)| p.clone()));
@@ -75,27 +70,31 @@ fn rrf_scores(
 // ---------------------------------------------------------------------------
 
 fn bench_cold_first_call(c: &mut Criterion) {
-    let n: usize = if std::env::var("CARGO_BENCH_QUICK").is_ok() { 1000 } else { 10000 };
+    let n: usize = if std::env::var("CARGO_BENCH_QUICK").is_ok() {
+        1000
+    } else {
+        10000
+    };
     let query_vec = deterministic_embedding(42, DIM, SEED);
     let query_text = common::deterministic_text(42, 6);
 
-    c.bench_with_input(
-        BenchmarkId::new("cold_first_call", n),
-        &n,
-        |b, &n| {
-            b.iter(|| {
-                // Rebuild DB each iteration to simulate cold cache
-                let conn = build_synthetic_db_in_memory(n, DIM, SEED);
-                let vec_scored = vec_score(&conn, &query_vec);
-                let fts_results = fts_query(&conn, &query_text);
-                let _scores = rrf_scores(&vec_scored, &fts_results);
-            });
-        },
-    );
+    c.bench_with_input(BenchmarkId::new("cold_first_call", n), &n, |b, &n| {
+        b.iter(|| {
+            // Rebuild DB each iteration to simulate cold cache
+            let conn = build_synthetic_db_in_memory(n, DIM, SEED);
+            let vec_scored = vec_score(&conn, &query_vec);
+            let fts_results = fts_query(&conn, &query_text);
+            let _scores = rrf_scores(&vec_scored, &fts_results);
+        });
+    });
 }
 
 fn bench_warm_reused_context(c: &mut Criterion) {
-    let n: usize = if std::env::var("CARGO_BENCH_QUICK").is_ok() { 1000 } else { 10000 };
+    let n: usize = if std::env::var("CARGO_BENCH_QUICK").is_ok() {
+        1000
+    } else {
+        10000
+    };
     let conn = build_synthetic_db_in_memory(n, DIM, SEED);
     let query_vec = deterministic_embedding(42, DIM, SEED);
     let query_text = common::deterministic_text(42, 6);
@@ -110,7 +109,11 @@ fn bench_warm_reused_context(c: &mut Criterion) {
 }
 
 fn bench_warm_with_recency_filter(c: &mut Criterion) {
-    let n: usize = if std::env::var("CARGO_BENCH_QUICK").is_ok() { 1000 } else { 10000 };
+    let n: usize = if std::env::var("CARGO_BENCH_QUICK").is_ok() {
+        1000
+    } else {
+        10000
+    };
     let conn = build_synthetic_db_in_memory(n, DIM, SEED);
     let query_vec = deterministic_embedding(42, DIM, SEED);
     let query_text = common::deterministic_text(42, 6);
@@ -146,7 +149,11 @@ fn bench_warm_with_recency_filter(c: &mut Criterion) {
 /// Measures `SearchContext::build` + vec scoring + FTS + RRF assembly. This is
 /// what every query paid before 1E (context rebuilt per call).
 fn bench_warm_searchcontext_rebuilt(c: &mut Criterion) {
-    let n: usize = if std::env::var("CARGO_BENCH_QUICK").is_ok() { 1000 } else { 10000 };
+    let n: usize = if std::env::var("CARGO_BENCH_QUICK").is_ok() {
+        1000
+    } else {
+        10000
+    };
     let conn = build_synthetic_db_in_memory(n, DIM, SEED);
     let query_vec = deterministic_embedding(42, DIM, SEED);
     let query_text = common::deterministic_text(42, 6);
@@ -168,7 +175,11 @@ fn bench_warm_searchcontext_rebuilt(c: &mut Criterion) {
 /// all paths, builds title/mtime/tag/graph maps) is paid once at startup rather than
 /// once per query.
 fn bench_warm_searchcontext_cached(c: &mut Criterion) {
-    let n: usize = if std::env::var("CARGO_BENCH_QUICK").is_ok() { 1000 } else { 10000 };
+    let n: usize = if std::env::var("CARGO_BENCH_QUICK").is_ok() {
+        1000
+    } else {
+        10000
+    };
     let conn = build_synthetic_db_in_memory(n, DIM, SEED);
     let query_vec = deterministic_embedding(42, DIM, SEED);
     let query_text = common::deterministic_text(42, 6);

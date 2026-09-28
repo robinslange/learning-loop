@@ -14,7 +14,12 @@ use super::key_id::KeyId;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
-pub enum GrantKind { Follow, Link, Assoc, Peer }
+pub enum GrantKind {
+    Follow,
+    Link,
+    Assoc,
+    Peer,
+}
 
 impl GrantKind {
     pub fn default_ttl_secs(&self) -> i64 {
@@ -160,7 +165,13 @@ pub fn verify_decision(
         anyhow::bail!("decision `by` does not match the expected signer");
     }
     expected_by.verify(statement_bytes, signature)?;
-    Ok(DecisionStatement { v: raw.v, kind, grant_id: raw.grant_id, by: raw.by, at: raw.at })
+    Ok(DecisionStatement {
+        v: raw.v,
+        kind,
+        grant_id: raw.grant_id,
+        by: raw.by,
+        at: raw.at,
+    })
 }
 
 /// A grant's withdrawal, signed by the key the grant names as `from`.
@@ -248,9 +259,9 @@ pub fn verify_revocation(
 
 #[cfg(test)]
 mod tests {
-    use crate::b64;
     use super::*;
-        use ed25519_dalek::{Signer, SigningKey};
+    use crate::b64;
+    use ed25519_dalek::{Signer, SigningKey};
 
     fn pair() -> (SigningKey, KeyId) {
         let sk = SigningKey::generate(&mut rand::thread_rng());
@@ -260,7 +271,11 @@ mod tests {
 
     fn statement(from: &KeyId, to: &KeyId, kind: GrantKind) -> GrantStatement {
         GrantStatement {
-            v: 5, kind, from: from.clone(), to: to.clone(), scope: None,
+            v: 5,
+            kind,
+            from: from.clone(),
+            to: to.clone(),
+            scope: None,
             issued_at: 1_757_000_000,
             expires_at: 1_757_000_000 + kind.default_ttl_secs(),
             nonce: "ZmFrZS1ub25jZQ".into(),
@@ -372,7 +387,10 @@ mod tests {
             .expect("nonce literal present in canonical bytes");
         tampered[pos] = b'A';
         assert_ne!(tampered, bytes);
-        assert!(serde_json::from_slice::<GrantStatement>(&tampered).is_ok(), "tamper must stay valid JSON");
+        assert!(
+            serde_json::from_slice::<GrantStatement>(&tampered).is_ok(),
+            "tamper must stay valid JSON"
+        );
         assert!(verify(&tampered, &sig.to_bytes(), &a).is_err());
     }
 
@@ -429,7 +447,13 @@ mod tests {
     }
 
     fn decision(grant_id: &str, by: &KeyId, kind: &'static str, at: i64) -> DecisionStatement {
-        DecisionStatement { v: 5, kind, grant_id: grant_id.to_string(), by: by.clone(), at }
+        DecisionStatement {
+            v: 5,
+            kind,
+            grant_id: grant_id.to_string(),
+            by: by.clone(),
+            at,
+        }
     }
 
     #[test]
@@ -471,7 +495,8 @@ mod tests {
         // renamed field, and this bail — so the shorter assertion was met by
         // the very error it was meant to discriminate against.
         assert!(
-            err.to_string().contains("unsupported decision kind `maybe`"),
+            err.to_string()
+                .contains("unsupported decision kind `maybe`"),
             "expected the unknown kind to be rejected by name, got: {err}"
         );
     }
@@ -492,16 +517,24 @@ mod tests {
     #[test]
     fn a_decision_serialises_to_the_exact_hub_expected_wire_format() {
         let (_, b) = pair();
-        let json = String::from_utf8(canonical_bytes(&decision("g1", &b, "accept", 1_050))).unwrap();
+        let json =
+            String::from_utf8(canonical_bytes(&decision("g1", &b, "accept", 1_050))).unwrap();
         assert_eq!(
             json,
-            format!(r#"{{"v":5,"kind":"accept","grant_id":"g1","by":"{}","at":1050}}"#, b.as_str())
+            format!(
+                r#"{{"v":5,"kind":"accept","grant_id":"g1","by":"{}","at":1050}}"#,
+                b.as_str()
+            )
         );
 
-        let denied = String::from_utf8(canonical_bytes(&decision("g1", &b, "deny", 1_050))).unwrap();
+        let denied =
+            String::from_utf8(canonical_bytes(&decision("g1", &b, "deny", 1_050))).unwrap();
         assert_eq!(
             denied,
-            format!(r#"{{"v":5,"kind":"deny","grant_id":"g1","by":"{}","at":1050}}"#, b.as_str())
+            format!(
+                r#"{{"v":5,"kind":"deny","grant_id":"g1","by":"{}","at":1050}}"#,
+                b.as_str()
+            )
         );
     }
 
@@ -637,13 +670,19 @@ mod tests {
 
         let rev = canonical_bytes(&revocation("g1", &a, None, 1_100));
         let rev_sig = sk_a.sign(&rev);
-        assert!(verify_revocation(&rev, &rev_sig.to_bytes(), &a).is_ok(), "fixture sanity");
+        assert!(
+            verify_revocation(&rev, &rev_sig.to_bytes(), &a).is_ok(),
+            "fixture sanity"
+        );
         let err = verify_decision(&rev, &rev_sig.to_bytes(), &a).unwrap_err();
         assert!(err.to_string().contains("kind"), "got {err}");
 
         let dec = canonical_bytes(&decision("g1", &a, "deny", 1_100));
         let dec_sig = sk_a.sign(&dec);
-        assert!(verify_decision(&dec, &dec_sig.to_bytes(), &a).is_ok(), "fixture sanity");
+        assert!(
+            verify_decision(&dec, &dec_sig.to_bytes(), &a).is_ok(),
+            "fixture sanity"
+        );
         let err = verify_revocation(&dec, &dec_sig.to_bytes(), &a).unwrap_err();
         assert!(err.to_string().contains("kind"), "got {err}");
     }
@@ -681,7 +720,12 @@ mod tests {
         assert!(json.contains(r#"","scope":null,"issued_at":1757000000,"expires_at":"#));
         assert!(json.contains(r#","nonce":"ZmFrZS1ub25jZQ"}"#));
 
-        for kind in [GrantKind::Follow, GrantKind::Link, GrantKind::Assoc, GrantKind::Peer] {
+        for kind in [
+            GrantKind::Follow,
+            GrantKind::Link,
+            GrantKind::Assoc,
+            GrantKind::Peer,
+        ] {
             let json = String::from_utf8(canonical_bytes(&statement(&a, &b, kind))).unwrap();
             let expected = match kind {
                 GrantKind::Follow => r#""kind":"follow""#,
@@ -689,7 +733,10 @@ mod tests {
                 GrantKind::Assoc => r#""kind":"assoc""#,
                 GrantKind::Peer => r#""kind":"peer""#,
             };
-            assert!(json.contains(expected), "kind {kind:?} serialised as {json}");
+            assert!(
+                json.contains(expected),
+                "kind {kind:?} serialised as {json}"
+            );
         }
     }
 
@@ -708,7 +755,10 @@ mod tests {
         let bytes = b64::decode(statement_b64).unwrap();
         let sig = b64::decode(signature_b64).unwrap();
         let st = verify(&bytes, &sig, &from).unwrap();
-        assert_eq!(st.to.as_str(), "z6MkmNL6xksdEJENGk9Z1qqGsY5njKQdjU1UhnUEUvWyQUVX");
+        assert_eq!(
+            st.to.as_str(),
+            "z6MkmNL6xksdEJENGk9Z1qqGsY5njKQdjU1UhnUEUvWyQUVX"
+        );
         assert_eq!(st.kind, GrantKind::Follow);
         assert_eq!(st.issued_at, 1_757_000_000);
     }

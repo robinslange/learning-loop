@@ -22,8 +22,12 @@ async fn spawn_silent_hub() -> SocketAddr {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     tokio::spawn(async move {
-        let Ok((stream, _)) = listener.accept().await else { return };
-        let Ok(mut ws) = tokio_tungstenite::accept_async(stream).await else { return };
+        let Ok((stream, _)) = listener.accept().await else {
+            return;
+        };
+        let Ok(mut ws) = tokio_tungstenite::accept_async(stream).await else {
+            return;
+        };
         let _ = ws.next().await;
         std::future::pending::<()>().await;
     });
@@ -54,7 +58,8 @@ fn setup_config_dir(hub_addr: SocketAddr) -> tempfile::TempDir {
 /// `prepare_export` to build an export from.
 fn setup_source_db(dir: &Path) -> PathBuf {
     let db_path = dir.join("source.db");
-    let conn = ll_search::db::open_or_create_db(&db_path.to_string_lossy()).expect("open_or_create_db");
+    let conn =
+        ll_search::db::open_or_create_db(&db_path.to_string_lossy()).expect("open_or_create_db");
     conn.execute(
         "INSERT OR REPLACE INTO meta (key, value) VALUES ('model_id', ?1)",
         ["Xenova/bge-small-en-v1.5"],
@@ -87,17 +92,17 @@ async fn silent_hub_triggers_recv_timeout() {
     let config = ll_search::sync::config::load_config(dir.path()).expect("load_config");
 
     let started = Instant::now();
-    let result = ll_search::sync::client::sync_all_async(
-        &source_db,
-        vault.path(),
-        dir.path(),
-        &config,
-    )
-    .await;
+    let result =
+        ll_search::sync::client::sync_all_async(&source_db, vault.path(), dir.path(), &config)
+            .await;
     let elapsed = started.elapsed();
 
     let err = result.expect_err("silent hub must produce a timeout error");
-    let chain: String = err.chain().map(|e| e.to_string()).collect::<Vec<_>>().join(" | ");
+    let chain: String = err
+        .chain()
+        .map(|e| e.to_string())
+        .collect::<Vec<_>>()
+        .join(" | ");
     assert!(
         chain.contains("recv timed out"),
         "expected recv timeout in error chain, got: {chain}",

@@ -4,8 +4,8 @@ use serde::Serialize;
 
 use crate::embed::embed_query;
 
-use super::scoring::{add_ranked_rrf, finalize_rrf, rocchio_prf_with, PrfParams};
 use super::context::SearchContext;
+use super::scoring::{add_ranked_rrf, finalize_rrf, rocchio_prf_with, PrfParams};
 
 #[derive(Debug, Serialize)]
 pub struct TuneResult {
@@ -45,9 +45,18 @@ fn strategy_replace(
 
     let mut rrf: HashMap<String, f64> = HashMap::new();
     add_ranked_rrf(&mut rrf, prf_results.iter().map(|(p, _)| p.as_str()));
-    add_ranked_rrf(&mut rrf, signals.fts_results.iter().map(|(_, p, _)| p.as_str()));
-    add_ranked_rrf(&mut rrf, signals.ppr_results.iter().map(|(p, _)| p.as_str()));
-    add_ranked_rrf(&mut rrf, signals.tag_results.iter().map(|(p, _)| p.as_str()));
+    add_ranked_rrf(
+        &mut rrf,
+        signals.fts_results.iter().map(|(_, p, _)| p.as_str()),
+    );
+    add_ranked_rrf(
+        &mut rrf,
+        signals.ppr_results.iter().map(|(p, _)| p.as_str()),
+    );
+    add_ranked_rrf(
+        &mut rrf,
+        signals.tag_results.iter().map(|(p, _)| p.as_str()),
+    );
 
     finalize_rrf(rrf, 10)
 }
@@ -93,9 +102,18 @@ fn strategy_two_pass(
 
     let mut rrf2: HashMap<String, f64> = HashMap::new();
     add_ranked_rrf(&mut rrf2, prf_results.iter().map(|(p, _)| p.as_str()));
-    add_ranked_rrf(&mut rrf2, signals.fts_results.iter().map(|(_, p, _)| p.as_str()));
-    add_ranked_rrf(&mut rrf2, signals.ppr_results.iter().map(|(p, _)| p.as_str()));
-    add_ranked_rrf(&mut rrf2, signals.tag_results.iter().map(|(p, _)| p.as_str()));
+    add_ranked_rrf(
+        &mut rrf2,
+        signals.fts_results.iter().map(|(_, p, _)| p.as_str()),
+    );
+    add_ranked_rrf(
+        &mut rrf2,
+        signals.ppr_results.iter().map(|(p, _)| p.as_str()),
+    );
+    add_ranked_rrf(
+        &mut rrf2,
+        signals.tag_results.iter().map(|(p, _)| p.as_str()),
+    );
 
     finalize_rrf(rrf2, 10)
 }
@@ -104,13 +122,11 @@ fn rank_position(results: &[String], item: &str) -> Option<usize> {
     results.iter().position(|p| p == item)
 }
 
-pub fn tune_prf(
-    conn: &rusqlite::Connection,
-    queries: &[String],
-) -> anyhow::Result<TuneResult> {
+pub fn tune_prf(conn: &rusqlite::Connection, queries: &[String]) -> anyhow::Result<TuneResult> {
     let ctx = SearchContext::build(conn);
 
-    type StrategyFn = fn(&SearchContext, &rusqlite::Connection, &[f32], &str, &PrfParams) -> Vec<(String, f64)>;
+    type StrategyFn =
+        fn(&SearchContext, &rusqlite::Connection, &[f32], &str, &PrfParams) -> Vec<(String, f64)>;
 
     let strategy_fns: Vec<(&str, StrategyFn)> = vec![
         ("replace", strategy_replace as StrategyFn),
@@ -118,34 +134,70 @@ pub fn tune_prf(
         ("two-pass", strategy_two_pass as StrategyFn),
     ];
 
-    let baseline: Vec<QueryResult> = queries.iter().map(|q| {
-        let qvec = embed_query(q)?;
-        let signals = ctx.compute_signals(conn, &qvec, q);
-        let rrf = ctx.rrf_from_signals(&signals, None);
-        let results = finalize_rrf(rrf, 10);
-        let top10: Vec<String> = results.iter().map(|(p, _)| p.clone()).collect();
-        Ok(QueryResult { query: q.clone(), top10 })
-    }).collect::<anyhow::Result<_>>()?;
+    let baseline: Vec<QueryResult> = queries
+        .iter()
+        .map(|q| {
+            let qvec = embed_query(q)?;
+            let signals = ctx.compute_signals(conn, &qvec, q);
+            let rrf = ctx.rrf_from_signals(&signals, None);
+            let results = finalize_rrf(rrf, 10);
+            let top10: Vec<String> = results.iter().map(|(p, _)| p.clone()).collect();
+            Ok(QueryResult {
+                query: q.clone(),
+                top10,
+            })
+        })
+        .collect::<anyhow::Result<_>>()?;
 
     let param_grid = vec![
-        PrfParams { alpha: 0.5, beta: 0.5, k: 1 },
-        PrfParams { alpha: 0.5, beta: 0.5, k: 3 },
-        PrfParams { alpha: 0.7, beta: 0.3, k: 1 },
-        PrfParams { alpha: 0.7, beta: 0.3, k: 3 },
-        PrfParams { alpha: 0.9, beta: 0.1, k: 1 },
-        PrfParams { alpha: 0.9, beta: 0.1, k: 3 },
+        PrfParams {
+            alpha: 0.5,
+            beta: 0.5,
+            k: 1,
+        },
+        PrfParams {
+            alpha: 0.5,
+            beta: 0.5,
+            k: 3,
+        },
+        PrfParams {
+            alpha: 0.7,
+            beta: 0.3,
+            k: 1,
+        },
+        PrfParams {
+            alpha: 0.7,
+            beta: 0.3,
+            k: 3,
+        },
+        PrfParams {
+            alpha: 0.9,
+            beta: 0.1,
+            k: 1,
+        },
+        PrfParams {
+            alpha: 0.9,
+            beta: 0.1,
+            k: 3,
+        },
     ];
 
     let mut strategies = Vec::new();
 
     for (name, func) in &strategy_fns {
         for params in &param_grid {
-            let query_results: Vec<QueryResult> = queries.iter().map(|q| {
-                let qvec = embed_query(q)?;
-                let results = func(&ctx, conn, &qvec, q, params);
-                let top10: Vec<String> = results.iter().map(|(p, _)| p.clone()).collect();
-                Ok(QueryResult { query: q.clone(), top10 })
-            }).collect::<anyhow::Result<_>>()?;
+            let query_results: Vec<QueryResult> = queries
+                .iter()
+                .map(|q| {
+                    let qvec = embed_query(q)?;
+                    let results = func(&ctx, conn, &qvec, q, params);
+                    let top10: Vec<String> = results.iter().map(|(p, _)| p.clone()).collect();
+                    Ok(QueryResult {
+                        query: q.clone(),
+                        top10,
+                    })
+                })
+                .collect::<anyhow::Result<_>>()?;
 
             let n = queries.len() as f64;
             let mut total_new_5 = 0.0;
@@ -165,8 +217,12 @@ pub fn tune_prf(
 
                 for (rank, path) in qr.top10.iter().enumerate() {
                     if let Some(bl_rank) = rank_position(&bl.top10, path) {
-                        if rank < bl_rank { total_promoted += 1.0; }
-                        if rank > bl_rank { total_demoted += 1.0; }
+                        if rank < bl_rank {
+                            total_promoted += 1.0;
+                        }
+                        if rank > bl_rank {
+                            total_demoted += 1.0;
+                        }
                     }
                 }
             }
@@ -184,5 +240,8 @@ pub fn tune_prf(
         }
     }
 
-    Ok(TuneResult { baseline, strategies })
+    Ok(TuneResult {
+        baseline,
+        strategies,
+    })
 }

@@ -319,7 +319,10 @@ mod tests {
                     "{rel}: documented intentions example parses to nothing:\n{block}"
                 );
                 for i in &intents {
-                    assert!(!i.context.is_empty(), "{rel}: parsed an empty context:\n{block}");
+                    assert!(
+                        !i.context.is_empty(),
+                        "{rel}: parsed an empty context:\n{block}"
+                    );
                     assert!(
                         i.cue.is_some(),
                         "{rel}: documented example yields no cue, so the cue text \
@@ -329,7 +332,10 @@ mod tests {
                 checked += 1;
             }
         }
-        assert!(checked > 0, "found no documented intentions examples to check");
+        assert!(
+            checked > 0,
+            "found no documented intentions examples to check"
+        );
     }
 
     /// The fence-scoped test above only sees ```yaml examples in two files.
@@ -345,7 +351,9 @@ mod tests {
     #[test]
     fn every_documented_intentions_block_uses_block_form() {
         fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
-            let Ok(entries) = std::fs::read_dir(dir) else { return };
+            let Ok(entries) = std::fs::read_dir(dir) else {
+                return;
+            };
             for e in entries.flatten() {
                 let p = e.path();
                 if p.is_dir() {
@@ -356,7 +364,9 @@ mod tests {
             }
         }
         let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("..").join("..").join("..");
+            .join("..")
+            .join("..")
+            .join("..");
         let mut docs = Vec::new();
         walk(&root.join("plugin"), &mut docs);
         assert!(!docs.is_empty(), "found no plugin docs to scan");
@@ -464,7 +474,10 @@ mod tests {
         let fm = "intentions: [{context: \"a\", cue: \"\"}]\n";
         let intents = parse_intentions(fm);
         assert_eq!(intents.len(), 1);
-        assert!(intents[0].cue.is_none(), "empty-string cue must collapse to None");
+        assert!(
+            intents[0].cue.is_none(),
+            "empty-string cue must collapse to None"
+        );
     }
 
     #[test]
@@ -487,7 +500,8 @@ mod tests {
 
     #[test]
     fn test_parse_intentions_block_inline_object_after_dash() {
-        let fm = "intentions:\n  - {context: \"focus\", cue: \"morning\"}\n  - {context: \"rest\"}\n";
+        let fm =
+            "intentions:\n  - {context: \"focus\", cue: \"morning\"}\n  - {context: \"rest\"}\n";
         let intents = parse_intentions(fm);
         assert_eq!(intents.len(), 2);
         assert_eq!(intents[0].context, "focus");
@@ -531,7 +545,10 @@ mod tests {
         let intents = parse_intentions(fm);
         assert_eq!(intents.len(), 1);
         assert_eq!(intents[0].context, "context only");
-        assert!(intents[0].cue.is_none(), "empty post-dash segment must collapse to None");
+        assert!(
+            intents[0].cue.is_none(),
+            "empty post-dash segment must collapse to None"
+        );
     }
 
     #[test]
@@ -549,7 +566,11 @@ mod tests {
         // is the whole reason split_inline_fields exists.
         let fm = "intentions: [{context: \"first, with comma\", cue: \"more, commas\"}]\n";
         let intents = parse_intentions(fm);
-        assert_eq!(intents.len(), 1, "quoted commas must not split into two items");
+        assert_eq!(
+            intents.len(),
+            1,
+            "quoted commas must not split into two items"
+        );
         assert_eq!(intents[0].context, "first, with comma");
         assert_eq!(intents[0].cue.as_deref(), Some("more, commas"));
     }

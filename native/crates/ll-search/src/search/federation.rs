@@ -3,10 +3,10 @@ use std::path::{Path, PathBuf};
 
 use rusqlite::{params, Connection, OpenFlags};
 
+use super::scoring::{add_ranked_rrf, dot_product, fts_bm25_query};
 use crate::config::TOP_K_FEDERATION;
 use crate::sync::grants::ReadAuthority;
 use crate::sync::registry;
-use super::scoring::{add_ranked_rrf, dot_product, fts_bm25_query};
 
 /// Which vault profiles a query may read.
 ///
@@ -21,7 +21,10 @@ pub struct QueryScope {
 pub fn query_scope(plugin_data: &Path, vault: &Path, all: bool) -> anyhow::Result<QueryScope> {
     if all {
         return Ok(QueryScope {
-            config_dirs: registry::load(plugin_data)?.into_iter().map(|p| p.config_dir).collect(),
+            config_dirs: registry::load(plugin_data)?
+                .into_iter()
+                .map(|p| p.config_dir)
+                .collect(),
         });
     }
     Ok(QueryScope {
@@ -138,23 +141,24 @@ pub fn discover_peer_dbs(
             }
         };
 
-        let model_id: String = match conn.query_row(
-            "SELECT value FROM meta WHERE key = 'model_id'",
-            [],
-            |r| r.get(0),
-        ) {
-            Ok(id) => id,
-            Err(e) => {
-                eprintln!(
-                    "Peer {peer_id}: its cached index names no embedding model, so it is \
+        let model_id: String =
+            match conn.query_row("SELECT value FROM meta WHERE key = 'model_id'", [], |r| {
+                r.get(0)
+            }) {
+                Ok(id) => id,
+                Err(e) => {
+                    eprintln!(
+                        "Peer {peer_id}: its cached index names no embedding model, so it is \
                      not searched ({e}). `ll sync` refetches it."
-                );
-                continue;
-            }
-        };
+                    );
+                    continue;
+                }
+            };
 
         if model_id != local_model_id {
-            eprintln!("Peer {peer_id}: model mismatch ({model_id} vs {local_model_id}), BM25 fallback");
+            eprintln!(
+                "Peer {peer_id}: model mismatch ({model_id} vs {local_model_id}), BM25 fallback"
+            );
         }
 
         peers.push((peer_id, conn));
@@ -179,9 +183,19 @@ pub(crate) fn add_peer_rrf_scores_guarded(
     peer_embeddings: &[(i64, String, Vec<f32>)],
 ) {
     let local_dim = query_vec.len();
-    let peer_dim = peer_embeddings.first().map(|(_, _, e)| e.len()).unwrap_or(0);
+    let peer_dim = peer_embeddings
+        .first()
+        .map(|(_, _, e)| e.len())
+        .unwrap_or(0);
     if peer_dim == local_dim && peer_dim > 0 {
-        add_peer_rrf_scores(rrf_scores, peer_id, peer_conn, query_vec, query_text, peer_embeddings);
+        add_peer_rrf_scores(
+            rrf_scores,
+            peer_id,
+            peer_conn,
+            query_vec,
+            query_text,
+            peer_embeddings,
+        );
     } else {
         let peer_fts = fts_bm25_query(peer_conn, query_text, TOP_K_FEDERATION);
         add_ranked_rrf(
@@ -222,7 +236,12 @@ pub(crate) fn add_peer_rrf_scores(
     let peer_fts = fts_bm25_query(peer_conn, query_text, TOP_K_FEDERATION);
     add_ranked_rrf(
         rrf_scores,
-        peer_fts.iter().map(|(_, path, _)| format!("peer:{peer_id}/{path}")).collect::<Vec<_>>().iter().map(|s| s.as_str()),
+        peer_fts
+            .iter()
+            .map(|(_, path, _)| format!("peer:{peer_id}/{path}"))
+            .collect::<Vec<_>>()
+            .iter()
+            .map(|s| s.as_str()),
     );
 }
 
@@ -273,8 +292,10 @@ pub(crate) fn batch_load_bodies(conn: &Connection, paths: &[String]) -> HashMap<
             Err(_) => continue,
         };
 
-        let params: Vec<&dyn rusqlite::types::ToSql> =
-            chunk.iter().map(|s| s as &dyn rusqlite::types::ToSql).collect();
+        let params: Vec<&dyn rusqlite::types::ToSql> = chunk
+            .iter()
+            .map(|s| s as &dyn rusqlite::types::ToSql)
+            .collect();
         let rows = match stmt.query_map(params.as_slice(), |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
         }) {
@@ -326,18 +347,17 @@ mod tests {
     use crate::b64;
     use std::sync::atomic::{AtomicI64, Ordering};
 
-        use ed25519_dalek::{Signer, SigningKey};
+    use ed25519_dalek::{Signer, SigningKey};
     use rusqlite::Connection;
 
-    use super::*;
     use super::super::test_helpers::helpers::*;
+    use super::*;
     use crate::sync::grant::{self, GrantKind, GrantStatement};
     use crate::sync::key_id::KeyId;
     use crate::sync::protocol_v5::GrantWire;
     use crate::sync::state::ReadableVaults;
     use crate::sync::{grants, seed_store, state, test_hub};
 
-    
     /// The clock every test in this module reads. `LATER` is after it, so a
     /// grant expiring at `LATER` is live at `NOW` and lapsed at `MUCH_LATER`.
     const NOW: i64 = 5_000;
@@ -384,11 +404,14 @@ mod tests {
             nonce: format!("nonce-{}", NONCE.fetch_add(1, Ordering::Relaxed)),
         });
         let signature = signer.sign(&statement).to_bytes().to_vec();
-        grants::apply_grants(config_dir, &[GrantWire {
-            statement_b64: b64::encode(&statement),
-            signature_b64: b64::encode(&signature),
-            state: "active".to_string(),
-        }])
+        grants::apply_grants(
+            config_dir,
+            &[GrantWire {
+                statement_b64: b64::encode(&statement),
+                signature_b64: b64::encode(&signature),
+                state: "active".to_string(),
+            }],
+        )
         .unwrap();
     }
 
@@ -401,11 +424,14 @@ mod tests {
     /// is on the record for the same reason it is in the type: a list is
     /// somebody's, and every caller here has to say whose.
     fn plant_listed(config_dir: &Path, me: &KeyId, vault_ids: &[&str]) {
-        state::write_readable_vaults(config_dir, &ReadableVaults {
-            me: me.clone(),
-            at: NOW,
-            vault_ids: vault_ids.iter().map(|s| s.to_string()).collect(),
-        })
+        state::write_readable_vaults(
+            config_dir,
+            &ReadableVaults {
+                me: me.clone(),
+                at: NOW,
+                vault_ids: vault_ids.iter().map(|s| s.to_string()).collect(),
+            },
+        )
         .unwrap();
     }
 
@@ -447,17 +473,22 @@ mod tests {
     fn two_profiles(plugin_data: &Path, personal_vault: &str, work_vault: &str) {
         for (seed, id, vault) in [(1u8, "personal", personal_vault), (2, "work", work_vault)] {
             let config_dir = plugin_data.join(id);
-            std::fs::create_dir_all(config_dir.join("federation").join("data").join("peers")).unwrap();
+            std::fs::create_dir_all(config_dir.join("federation").join("data").join("peers"))
+                .unwrap();
             // A key each. Authority belongs to the key, so two profiles that
             // shared one would make "the work profile's cache is out of
             // scope" and "the work profile's grant is not ours" the same
             // assertion, and neither would be pinned.
             plant_seed(&config_dir, seed);
-            registry::add(plugin_data, registry::VaultProfile {
-                id: id.to_string(),
-                config_dir,
-                vault_path: PathBuf::from(vault),
-            }).unwrap();
+            registry::add(
+                plugin_data,
+                registry::VaultProfile {
+                    id: id.to_string(),
+                    config_dir,
+                    vault_path: PathBuf::from(vault),
+                },
+            )
+            .unwrap();
         }
     }
 
@@ -473,7 +504,8 @@ mod tests {
         std::fs::write(
             from.config_dir.join("federation").join("assoc.json"),
             serde_json::json!({"assoc": [to_id]}).to_string(),
-        ).unwrap();
+        )
+        .unwrap();
     }
 
     /// Seeds a peer index (model_id "model-x") into one profile's peer cache,
@@ -485,19 +517,32 @@ mod tests {
     fn seed_peer_cache(plugin_data: &Path, profile_id: &str, peer_id: &str) {
         let profiles = registry::load(plugin_data).unwrap();
         let profile = profiles.iter().find(|p| p.id == profile_id).unwrap();
-        let peer_dir = profile.config_dir.join("federation").join("data").join("peers").join(peer_id);
+        let peer_dir = profile
+            .config_dir
+            .join("federation")
+            .join("data")
+            .join("peers")
+            .join(peer_id);
         std::fs::create_dir_all(&peer_dir).unwrap();
         let conn = Connection::open(peer_dir.join("index.db")).unwrap();
         conn.execute_batch(
             "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
              INSERT INTO meta (key, value) VALUES ('model_id', 'model-x');",
-        ).unwrap();
+        )
+        .unwrap();
         drop(conn);
         let me = seed_store::load_only(&profile.config_dir)
             .unwrap()
             .map(|r| KeyId::from_pubkey(&r.signing_key.verifying_key()))
             .expect("two_profiles plants a seed in every profile");
-        plant_grant(&profile.config_dir, 9, &me, GrantKind::Follow, Some(peer_id), LATER);
+        plant_grant(
+            &profile.config_dir,
+            9,
+            &me,
+            GrantKind::Follow,
+            Some(peer_id),
+            LATER,
+        );
         plant_listed(&profile.config_dir, &me, &[peer_id]);
     }
 
@@ -524,9 +569,12 @@ mod tests {
         two_profiles(d.path(), "/v/personal", "/v/work");
         add_assoc_grant(d.path(), "personal", "work");
         let scope = query_scope(d.path(), Path::new("/v/personal"), false).unwrap();
-        assert_eq!(scope.config_dirs.len(), 1,
+        assert_eq!(
+            scope.config_dirs.len(),
+            1,
             "assoc is attribution only — if it widened queries, an agent composing \
-             a work artifact could silently surface personal notes");
+             a work artifact could silently surface personal notes"
+        );
     }
 
     #[test]
@@ -536,7 +584,10 @@ mod tests {
         seed_peer_cache(d.path(), "work", "v-someone");
         let scope = query_scope(d.path(), Path::new("/v/personal"), false).unwrap();
         let peers = discover_peer_dbs_for(&scope, "model-x", NOW);
-        assert!(peers.is_empty(), "the work profile's peer cache is out of scope");
+        assert!(
+            peers.is_empty(),
+            "the work profile's peer cache is out of scope"
+        );
     }
 
     #[test]
@@ -546,7 +597,11 @@ mod tests {
         seed_peer_cache(d.path(), "work", "v-someone");
         let scope = query_scope(d.path(), Path::new("/v/personal"), true).unwrap();
         let peers = discover_peer_dbs_for(&scope, "model-x", NOW);
-        assert_eq!(peers.len(), 1, "--all must still surface the work profile's peer cache");
+        assert_eq!(
+            peers.len(),
+            1,
+            "--all must still surface the work profile's peer cache"
+        );
         assert_eq!(peers[0].0, "v-someone");
     }
 
@@ -561,14 +616,20 @@ mod tests {
     fn test_discover_peer_dbs_model_mismatch() {
         let tmp = tempfile::tempdir().unwrap();
         let me = plant_seed(tmp.path(), 1);
-        let peers_dir = tmp.path().join("federation").join("data").join("peers").join("alice");
+        let peers_dir = tmp
+            .path()
+            .join("federation")
+            .join("data")
+            .join("peers")
+            .join("alice");
         std::fs::create_dir_all(&peers_dir).unwrap();
         let db_path = peers_dir.join("index.db");
         let conn = Connection::open(&db_path).unwrap();
         conn.execute_batch(
             "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
              INSERT INTO meta (key, value) VALUES ('model_id', 'wrong-model');",
-        ).unwrap();
+        )
+        .unwrap();
         drop(conn);
         plant_grant(tmp.path(), 2, &me, GrantKind::Follow, Some("alice"), LATER);
         plant_listed(tmp.path(), &me, &["alice"]);
@@ -601,11 +662,15 @@ mod tests {
         let (dir, _me) = served_setup("alice");
         std::fs::remove_file(dir.path().join("federation").join("grants.json")).unwrap();
 
-        assert!(discover_peer_dbs(dir.path(), "test-model", NOW).is_empty(),
-            "a cache the grant store does not cover must not reach federated search");
-        assert!(crate::sync::config::peer_index_path(dir.path(), "alice").exists(),
+        assert!(
+            discover_peer_dbs(dir.path(), "test-model", NOW).is_empty(),
+            "a cache the grant store does not cover must not reach federated search"
+        );
+        assert!(
+            crate::sync::config::peer_index_path(dir.path(), "alice").exists(),
             "and it is hidden without being deleted — deletion is disk hygiene now, \
-             not the boundary");
+             not the boundary"
+        );
     }
 
     /// The four-month-old cache nobody could delete: a directory under
@@ -617,8 +682,11 @@ mod tests {
         // Listed, so the ONLY thing keeping it out is that no grant covers it.
         plant_listed(dir.path(), &me, &["alice", "thomas-kirk"]);
 
-        assert_eq!(ids(&discover_peer_dbs(dir.path(), "test-model", NOW)), ["alice"],
-            "the granted cache is served and the orphan beside it is not");
+        assert_eq!(
+            ids(&discover_peer_dbs(dir.path(), "test-model", NOW)),
+            ["alice"],
+            "the granted cache is served and the orphan beside it is not"
+        );
     }
 
     /// `covers` reads `scope`. A filter that only asked "does this machine
@@ -631,7 +699,10 @@ mod tests {
         // Both listed. `bob` is out on scope alone, not on the hub's list.
         plant_listed(dir.path(), &me, &["alice", "bob"]);
 
-        assert_eq!(ids(&discover_peer_dbs(dir.path(), "test-model", NOW)), ["alice"]);
+        assert_eq!(
+            ids(&discover_peer_dbs(dir.path(), "test-model", NOW)),
+            ["alice"]
+        );
     }
 
     /// Expiry is not a sync-time sweep the reader can assume ran. spec:332
@@ -641,10 +712,15 @@ mod tests {
     fn a_grant_that_has_lapsed_stops_covering_its_cache() {
         let (dir, _me) = served_setup("alice");
 
-        assert_eq!(ids(&discover_peer_dbs(dir.path(), "test-model", NOW)), ["alice"],
-            "live at NOW");
-        assert!(discover_peer_dbs(dir.path(), "test-model", MUCH_LATER).is_empty(),
-            "the same grant, the same store, read after it expired");
+        assert_eq!(
+            ids(&discover_peer_dbs(dir.path(), "test-model", NOW)),
+            ["alice"],
+            "live at NOW"
+        );
+        assert!(
+            discover_peer_dbs(dir.path(), "test-model", MUCH_LATER).is_empty(),
+            "the same grant, the same store, read after it expired"
+        );
     }
 
     /// `to == me`. A grant addressed to someone else is on this disk all the
@@ -656,7 +732,14 @@ mod tests {
         let me = plant_seed(dir.path(), 1);
         plant_cache(dir.path(), "alice");
         let someone_else = KeyId::from_pubkey(&SigningKey::from_bytes(&[7u8; 32]).verifying_key());
-        plant_grant(dir.path(), 2, &someone_else, GrantKind::Follow, Some("alice"), LATER);
+        plant_grant(
+            dir.path(),
+            2,
+            &someone_else,
+            GrantKind::Follow,
+            Some("alice"),
+            LATER,
+        );
         plant_listed(dir.path(), &me, &["alice"]);
 
         assert!(discover_peer_dbs(dir.path(), "test-model", NOW).is_empty());
@@ -673,8 +756,11 @@ mod tests {
             plant_cache(dir.path(), "alice");
             plant_grant(dir.path(), 2, &me, kind, Some("alice"), LATER);
             plant_listed(dir.path(), &me, &["alice"]);
-            assert_eq!(discover_peer_dbs(dir.path(), "test-model", NOW).len(), expected,
-                "{kind:?} should have produced {expected} peer(s)");
+            assert_eq!(
+                discover_peer_dbs(dir.path(), "test-model", NOW).len(),
+                expected,
+                "{kind:?} should have produced {expected} peer(s)"
+            );
         }
     }
 
@@ -686,15 +772,22 @@ mod tests {
     #[test]
     fn a_recovered_identity_reads_none_of_the_old_identitys_caches() {
         let (dir, _old) = served_setup("alice");
-        assert_eq!(ids(&discover_peer_dbs(dir.path(), "test-model", NOW)), ["alice"],
-            "servable under the identity the grant names");
+        assert_eq!(
+            ids(&discover_peer_dbs(dir.path(), "test-model", NOW)),
+            ["alice"],
+            "servable under the identity the grant names"
+        );
 
         plant_seed(dir.path(), 42);
 
-        assert!(discover_peer_dbs(dir.path(), "test-model", NOW).is_empty(),
-            "every grant in the store is addressed to the key the recovery replaced");
-        assert!(crate::sync::config::peer_index_path(dir.path(), "alice").exists(),
-            "and the deletion path could never have reached them");
+        assert!(
+            discover_peer_dbs(dir.path(), "test-model", NOW).is_empty(),
+            "every grant in the store is addressed to the key the recovery replaced"
+        );
+        assert!(
+            crate::sync::config::peer_index_path(dir.path(), "alice").exists(),
+            "and the deletion path could never have reached them"
+        );
     }
 
     /// **And it stays closed once the recovered key acquires a grant of its
@@ -709,15 +802,20 @@ mod tests {
     #[test]
     fn a_new_grant_to_the_recovered_key_does_not_reopen_the_old_keys_list() {
         let (dir, k1) = served_setup("alice");
-        assert_eq!(ids(&discover_peer_dbs(dir.path(), "test-model", NOW)), ["alice"]);
+        assert_eq!(
+            ids(&discover_peer_dbs(dir.path(), "test-model", NOW)),
+            ["alice"]
+        );
 
         let k2 = plant_seed(dir.path(), 42);
         assert_ne!(k1, k2, "precondition: recovery installed a different key");
         plant_grant(dir.path(), 3, &k2, GrantKind::Link, None, LATER);
 
-        assert!(discover_peer_dbs(dir.path(), "test-model", NOW).is_empty(),
+        assert!(
+            discover_peer_dbs(dir.path(), "test-model", NOW).is_empty(),
             "a live grant covers the cache and the list still names it — the list is \
-             K1's, and K2 was never handed it");
+             K1's, and K2 was never handed it"
+        );
     }
 
     /// The same, through the door that needs no hub at all. `ll link accept
@@ -750,8 +848,10 @@ mod tests {
         crate::sync::link::accept_offline(dir.path(), &blob)
             .expect("the offline pairing door is supposed to work");
 
-        assert!(discover_peer_dbs(dir.path(), "test-model", NOW).is_empty(),
-            "the offline door lodges a grant and writes no list; K1's list is still K1's");
+        assert!(
+            discover_peer_dbs(dir.path(), "test-model", NOW).is_empty(),
+            "the offline door lodges a grant and writes no list; K1's list is still K1's"
+        );
     }
 
     /// And the recovery ends where it should: one complete cycle under K2
@@ -767,8 +867,11 @@ mod tests {
 
         plant_listed(dir.path(), &k2, &["alice"]);
 
-        assert_eq!(ids(&discover_peer_dbs(dir.path(), "test-model", NOW)), ["alice"],
-            "one `ll sync` is the whole cost of the fix");
+        assert_eq!(
+            ids(&discover_peer_dbs(dir.path(), "test-model", NOW)),
+            ["alice"],
+            "one `ll sync` is the whole cost of the fix"
+        );
     }
 
     /// The migration, by execution rather than by argument. A
@@ -782,7 +885,10 @@ mod tests {
         std::fs::write(&path, format!(r#"{{"at":{NOW},"vault_ids":["alice"]}}"#)).unwrap();
 
         assert!(discover_peer_dbs(dir.path(), "test-model", NOW).is_empty());
-        assert!(path.exists(), "refused, not deleted — `ll sync` is what rewrites it");
+        assert!(
+            path.exists(),
+            "refused, not deleted — `ll sync` is what rewrites it"
+        );
     }
 
     /// The case that made this urgent. A `link` is unscoped, so its
@@ -798,9 +904,12 @@ mod tests {
         plant_grant(dir.path(), 2, &me, GrantKind::Link, None, LATER);
         plant_listed(dir.path(), &me, &["alice"]);
 
-        assert_eq!(ids(&discover_peer_dbs(dir.path(), "test-model", NOW)), ["alice"],
+        assert_eq!(
+            ids(&discover_peer_dbs(dir.path(), "test-model", NOW)),
+            ["alice"],
             "an unscoped link covers every cache — which is exactly why its \
-             withdrawal has to be visible here");
+             withdrawal has to be visible here"
+        );
 
         let stored = crate::sync::link::load_grants(dir.path()).unwrap();
         assert_eq!(stored.len(), 1);
@@ -824,12 +933,19 @@ mod tests {
         )
         .unwrap();
 
-        assert!(swept.is_empty(), "an unscoped withdrawal names no cache to delete");
-        assert!(crate::sync::config::peer_index_path(dir.path(), "alice").exists(),
-            "so the cache is still there");
-        assert!(discover_peer_dbs(dir.path(), "test-model", NOW).is_empty(),
+        assert!(
+            swept.is_empty(),
+            "an unscoped withdrawal names no cache to delete"
+        );
+        assert!(
+            crate::sync::config::peer_index_path(dir.path(), "alice").exists(),
+            "so the cache is still there"
+        );
+        assert!(
+            discover_peer_dbs(dir.path(), "test-model", NOW).is_empty(),
             "and it is no longer served — the reader is what makes the revocation \
-             mean something");
+             mean something"
+        );
     }
 
     /// The half `covers` cannot supply. The grant is live and covers this
@@ -841,14 +957,21 @@ mod tests {
     #[test]
     fn a_cache_the_hub_no_longer_lists_is_not_searched() {
         let (dir, me) = served_setup("alice");
-        assert_eq!(ids(&discover_peer_dbs(dir.path(), "test-model", NOW)), ["alice"]);
+        assert_eq!(
+            ids(&discover_peer_dbs(dir.path(), "test-model", NOW)),
+            ["alice"]
+        );
 
         plant_listed(dir.path(), &me, &["someone-else"]);
 
-        assert!(discover_peer_dbs(dir.path(), "test-model", NOW).is_empty(),
-            "the grant still covers it; the hub no longer lists it, and that is enough");
-        assert!(crate::sync::config::peer_index_path(dir.path(), "alice").exists(),
-            "hidden without being deleted, the same as every other reason here");
+        assert!(
+            discover_peer_dbs(dir.path(), "test-model", NOW).is_empty(),
+            "the grant still covers it; the hub no longer lists it, and that is enough"
+        );
+        assert!(
+            crate::sync::config::peer_index_path(dir.path(), "alice").exists(),
+            "hidden without being deleted, the same as every other reason here"
+        );
     }
 
     /// The case an unscoped `link` made unreachable for `covers` alone: the
@@ -864,8 +987,11 @@ mod tests {
         plant_grant(dir.path(), 2, &me, GrantKind::Link, None, LATER);
         plant_listed(dir.path(), &me, &["mine"]);
 
-        assert_eq!(ids(&discover_peer_dbs(dir.path(), "test-model", NOW)), ["mine"],
-            "the link covers both caches; only one of them is a vault the hub listed");
+        assert_eq!(
+            ids(&discover_peer_dbs(dir.path(), "test-model", NOW)),
+            ["mine"],
+            "the link covers both caches; only one of them is a vault the hub listed"
+        );
     }
 
     /// And the same distinction on disk. The directory names under `peers/`
@@ -882,8 +1008,11 @@ mod tests {
         plant_grant(dir.path(), 2, &me, GrantKind::Link, None, LATER);
         plant_listed(dir.path(), &me, &["v-a"]);
 
-        assert_eq!(ids(&discover_peer_dbs(dir.path(), "test-model", NOW)), ["v-a"],
-            "`v-alice` starts with a listed id and was never listed");
+        assert_eq!(
+            ids(&discover_peer_dbs(dir.path(), "test-model", NOW)),
+            ["v-a"],
+            "`v-alice` starts with a listed id and was never listed"
+        );
     }
 
     /// A machine that has never completed a handshake has never been told it
@@ -893,8 +1022,7 @@ mod tests {
     #[test]
     fn a_machine_that_has_never_synced_serves_nothing() {
         let (dir, _me) = served_setup("alice");
-        std::fs::remove_file(
-            crate::sync::config::readable_vaults_path(dir.path())).unwrap();
+        std::fs::remove_file(crate::sync::config::readable_vaults_path(dir.path())).unwrap();
 
         assert!(discover_peer_dbs(dir.path(), "test-model", NOW).is_empty());
     }
@@ -906,7 +1034,10 @@ mod tests {
     fn an_unreadable_list_serves_nothing() {
         let (dir, _me) = served_setup("alice");
         std::fs::write(
-            crate::sync::config::readable_vaults_path(dir.path()), "{not json").unwrap();
+            crate::sync::config::readable_vaults_path(dir.path()),
+            "{not json",
+        )
+        .unwrap();
 
         assert!(discover_peer_dbs(dir.path(), "test-model", NOW).is_empty());
     }
@@ -925,14 +1056,25 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let me = plant_seed(dir.path(), 1);
         plant_cache(dir.path(), "followed");
-        plant_grant(dir.path(), 2, &me, GrantKind::Follow, Some("followed"),
-            NOW + GrantKind::Follow.default_ttl_secs());
+        plant_grant(
+            dir.path(),
+            2,
+            &me,
+            GrantKind::Follow,
+            Some("followed"),
+            NOW + GrantKind::Follow.default_ttl_secs(),
+        );
         plant_listed(dir.path(), &me, &["followed"]);
 
-        assert_eq!(ids(&discover_peer_dbs(dir.path(), "test-model", NOW + 30 * DAY)), ["followed"],
-            "a laptop shut for a month must not lose federated search");
-        assert!(discover_peer_dbs(dir.path(), "test-model", NOW + 120 * DAY).is_empty(),
-            "and past the follow's own TTL it goes dark with no hub consulted");
+        assert_eq!(
+            ids(&discover_peer_dbs(dir.path(), "test-model", NOW + 30 * DAY)),
+            ["followed"],
+            "a laptop shut for a month must not lose federated search"
+        );
+        assert!(
+            discover_peer_dbs(dir.path(), "test-model", NOW + 120 * DAY).is_empty(),
+            "and past the follow's own TTL it goes dark with no hub consulted"
+        );
     }
 
     /// **The worst case, stated rather than wished away.** An unscoped `link`
@@ -952,21 +1094,41 @@ mod tests {
         let me = plant_seed(dir.path(), 1);
         plant_cache(dir.path(), "followed");
         plant_cache(dir.path(), "linked");
-        plant_grant(dir.path(), 2, &me, GrantKind::Follow, Some("followed"),
-            NOW + GrantKind::Follow.default_ttl_secs());
-        plant_grant(dir.path(), 3, &me, GrantKind::Link, None,
-            NOW + GrantKind::Link.default_ttl_secs());
+        plant_grant(
+            dir.path(),
+            2,
+            &me,
+            GrantKind::Follow,
+            Some("followed"),
+            NOW + GrantKind::Follow.default_ttl_secs(),
+        );
+        plant_grant(
+            dir.path(),
+            3,
+            &me,
+            GrantKind::Link,
+            None,
+            NOW + GrantKind::Link.default_ttl_secs(),
+        );
         plant_listed(dir.path(), &me, &["followed", "linked"]);
 
-        let mut past_the_follow =
-            ids(&discover_peer_dbs(dir.path(), "test-model", NOW + 120 * DAY));
+        let mut past_the_follow = ids(&discover_peer_dbs(
+            dir.path(),
+            "test-model",
+            NOW + 120 * DAY,
+        ));
         past_the_follow.sort();
-        assert_eq!(past_the_follow, ["followed", "linked"],
+        assert_eq!(
+            past_the_follow,
+            ["followed", "linked"],
             "the follow lapsed, and the live link still covers its vault — the residual \
-             an unscoped grant leaves, now bounded to vaults the hub actually listed");
+             an unscoped grant leaves, now bounded to vaults the hub actually listed"
+        );
 
-        assert!(discover_peer_dbs(dir.path(), "test-model", NOW + 400 * DAY).is_empty(),
-            "past the link's TTL there is nothing left to cover anything");
+        assert!(
+            discover_peer_dbs(dir.path(), "test-model", NOW + 400 * DAY).is_empty(),
+            "past the link's TTL there is nothing left to cover anything"
+        );
     }
 
     /// A machine with caches and no identity cannot tell whether any grant is
@@ -997,22 +1159,18 @@ mod tests {
     #[test]
     fn test_batch_load_bodies_federated_routes_correctly() {
         let emb = norm(&[1.0, 0.0, 0.0]);
-        let local = create_test_db(&[
-            ("local.md", "local", "local body text", &emb),
-        ]);
-        let peer = create_peer_db(&[
-            ("peer-note.md", "peer", "peer body text", &emb),
-        ]);
+        let local = create_test_db(&[("local.md", "local", "local body text", &emb)]);
+        let peer = create_peer_db(&[("peer-note.md", "peer", "peer body text", &emb)]);
 
         let peers = vec![("eve".to_string(), peer)];
-        let paths = vec![
-            "local.md".to_string(),
-            "peer:eve/peer-note.md".to_string(),
-        ];
+        let paths = vec!["local.md".to_string(), "peer:eve/peer-note.md".to_string()];
 
         let bodies = batch_load_bodies_federated(&local, &peers, &paths);
         assert_eq!(bodies.get("local.md").unwrap(), "local body text");
-        assert_eq!(bodies.get("peer:eve/peer-note.md").unwrap(), "peer body text");
+        assert_eq!(
+            bodies.get("peer:eve/peer-note.md").unwrap(),
+            "peer body text"
+        );
     }
 
     /// **A `peer:` path resolves against a whole peer id, never a prefix of
@@ -1025,33 +1183,42 @@ mod tests {
     fn a_federated_title_resolves_against_a_whole_peer_id_and_never_a_prefix() {
         let emb = norm(&[1.0, 0.0, 0.0]);
         let local = create_test_db(&[("local.md", "local", "local body", &emb)]);
-        let held = |id: &str| vec![(id.to_string(),
-            create_peer_db(&[("p.md", "a peer's title", "peer body", &emb)]))];
+        let held = |id: &str| {
+            vec![(
+                id.to_string(),
+                create_peer_db(&[("p.md", "a peer's title", "peer body", &emb)]),
+            )]
+        };
 
-        assert_eq!(load_title_federated("peer:v-a/p.md", &local, &held("v-alice")), None,
-            "the id asked for is a prefix of the peer we hold");
-        assert_eq!(load_title_federated("peer:v-alice/p.md", &local, &held("v-a")), None,
-            "and the peer we hold is a prefix of the id asked for");
-        assert_eq!(load_title_federated("peer:v-a/p.md", &local, &held("V-A")), None,
-            "nor does case fold");
+        assert_eq!(
+            load_title_federated("peer:v-a/p.md", &local, &held("v-alice")),
+            None,
+            "the id asked for is a prefix of the peer we hold"
+        );
+        assert_eq!(
+            load_title_federated("peer:v-alice/p.md", &local, &held("v-a")),
+            None,
+            "and the peer we hold is a prefix of the id asked for"
+        );
+        assert_eq!(
+            load_title_federated("peer:v-a/p.md", &local, &held("V-A")),
+            None,
+            "nor does case fold"
+        );
         assert_eq!(
             load_title_federated("peer:v-a/p.md", &local, &held("v-a")).as_deref(),
             Some("a peer's title"),
-            "and the whole-id match does resolve, so the three above are about the id");
+            "and the whole-id match does resolve, so the three above are about the id"
+        );
     }
 
     #[test]
     fn test_batch_load_bodies_federated_missing_peer() {
         let emb = norm(&[1.0, 0.0, 0.0]);
-        let local = create_test_db(&[
-            ("local.md", "local", "local body", &emb),
-        ]);
+        let local = create_test_db(&[("local.md", "local", "local body", &emb)]);
 
         let peers: Vec<(String, Connection)> = vec![];
-        let paths = vec![
-            "local.md".to_string(),
-            "peer:unknown/note.md".to_string(),
-        ];
+        let paths = vec!["local.md".to_string(), "peer:unknown/note.md".to_string()];
 
         let bodies = batch_load_bodies_federated(&local, &peers, &paths);
         assert_eq!(bodies.len(), 1);
@@ -1095,7 +1262,14 @@ mod tests {
         let query_vec = norm(&[1.0, 0.0, 0.0]); // dim 3
         let mismatched = vec![(1i64, "p.md".to_string(), vec![1.0f32, 0.0])]; // dim 2
         let mut rrf = HashMap::new();
-        add_peer_rrf_scores_guarded(&mut rrf, "eve", &peer, &query_vec, "zzzznomatch", &mismatched);
+        add_peer_rrf_scores_guarded(
+            &mut rrf,
+            "eve",
+            &peer,
+            &query_vec,
+            "zzzznomatch",
+            &mismatched,
+        );
         assert!(
             !rrf.contains_key("peer:eve/p.md"),
             "mismatched-dim peer must NOT score a vector-only note (BM25 fallback)"
@@ -1107,7 +1281,12 @@ mod tests {
         // The BM25 fallback must still work (not a silent no-op) and not panic on
         // the dim mismatch: a note that DOES match the query text scores even
         // though the peer's embedding dim is wrong.
-        let peer = create_peer_db(&[("p.md", "p", "sticky positioning breaks", &norm(&[1.0, 0.0, 0.0]))]);
+        let peer = create_peer_db(&[(
+            "p.md",
+            "p",
+            "sticky positioning breaks",
+            &norm(&[1.0, 0.0, 0.0]),
+        )]);
         let query_vec = norm(&[1.0, 0.0, 0.0]); // dim 3
         let mismatched = vec![(1i64, "p.md".to_string(), vec![1.0f32, 0.0])]; // dim 2
         let mut rrf = HashMap::new();

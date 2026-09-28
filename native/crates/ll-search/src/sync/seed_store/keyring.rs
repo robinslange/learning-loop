@@ -8,8 +8,8 @@ use ed25519_dalek::SigningKey;
 use rand::RngCore;
 use zeroize::Zeroizing;
 
-use crate::sync::config::{keyring_user, KEYRING_SERVICE, KEYRING_USER_LEGACY};
 use super::{LoadResult, SeedBackend};
+use crate::sync::config::{keyring_user, KEYRING_SERVICE, KEYRING_USER_LEGACY};
 
 /// Attempt to read the seed from the OS keyring under the per-`config_dir`
 /// namespaced account. Returns `None` if not found.
@@ -23,8 +23,8 @@ use super::{LoadResult, SeedBackend};
 /// global-namespace stomping problem in reverse.
 pub fn read_keyring(config_dir: &Path) -> anyhow::Result<Option<[u8; 32]>> {
     let user = keyring_user(config_dir);
-    let entry = ::keyring::Entry::new(KEYRING_SERVICE, &user)
-        .context("failed to create keyring entry")?;
+    let entry =
+        ::keyring::Entry::new(KEYRING_SERVICE, &user).context("failed to create keyring entry")?;
     match entry.get_password() {
         Ok(hex_str) => return Ok(Some(decode_seed_hex(&Zeroizing::new(hex_str))?)),
         Err(::keyring::Error::NoEntry) => {}
@@ -45,18 +45,22 @@ pub fn read_keyring(config_dir: &Path) -> anyhow::Result<Option<[u8; 32]>> {
 /// Write the seed to the OS keyring under the per-`config_dir` account.
 pub fn write_keyring(config_dir: &Path, seed: &[u8; 32]) -> anyhow::Result<()> {
     let user = keyring_user(config_dir);
-    let entry = ::keyring::Entry::new(KEYRING_SERVICE, &user)
-        .context("failed to create keyring entry")?;
+    let entry =
+        ::keyring::Entry::new(KEYRING_SERVICE, &user).context("failed to create keyring entry")?;
     let hex_str = Zeroizing::new(hex::encode(seed));
-    entry.set_password(&hex_str).context("failed to write seed to keyring")
+    entry
+        .set_password(&hex_str)
+        .context("failed to write seed to keyring")
 }
 
 /// Delete the seed from the OS keyring (used by `--rollback`).
 pub fn delete_keyring(config_dir: &Path) -> anyhow::Result<()> {
     let user = keyring_user(config_dir);
-    let entry = ::keyring::Entry::new(KEYRING_SERVICE, &user)
-        .context("failed to create keyring entry")?;
-    entry.delete_credential().context("failed to delete seed from keyring")
+    let entry =
+        ::keyring::Entry::new(KEYRING_SERVICE, &user).context("failed to create keyring entry")?;
+    entry
+        .delete_credential()
+        .context("failed to delete seed from keyring")
 }
 
 /// Probe keyring support by writing and reading a sentinel value.
@@ -66,16 +70,18 @@ pub fn probe_keyring() -> anyhow::Result<()> {
     let sentinel_user = "probe-sentinel-2K";
     let entry = ::keyring::Entry::new(KEYRING_SERVICE, sentinel_user)
         .context("failed to create probe keyring entry")?;
-    entry.set_password("probe").context("keyring probe write failed")?;
+    entry
+        .set_password("probe")
+        .context("keyring probe write failed")?;
     let _ = entry.get_password();
     let _ = entry.delete_credential();
     Ok(())
 }
 
 fn decode_seed_hex(hex_str: &str) -> anyhow::Result<[u8; 32]> {
-    let bytes = hex::decode(hex_str.trim())
-        .context("keyring seed is not valid hex")?;
-    bytes.try_into()
+    let bytes = hex::decode(hex_str.trim()).context("keyring seed is not valid hex")?;
+    bytes
+        .try_into()
         .map_err(|_| anyhow::anyhow!("keyring seed must be exactly 32 bytes"))
 }
 
@@ -87,8 +93,11 @@ fn decode_seed_hex(hex_str: &str) -> anyhow::Result<[u8; 32]> {
 /// that happens to call `read_keyring`, including leaked test/dev watchers —
 /// re-introducing the same global-namespace stomping the migration is meant
 /// to prevent.
-fn try_legacy_migration(config_dir: &Path, namespaced_user: &str) -> anyhow::Result<Option<[u8; 32]>> {
-        let legacy = ::keyring::Entry::new(KEYRING_SERVICE, KEYRING_USER_LEGACY)
+fn try_legacy_migration(
+    config_dir: &Path,
+    namespaced_user: &str,
+) -> anyhow::Result<Option<[u8; 32]>> {
+    let legacy = ::keyring::Entry::new(KEYRING_SERVICE, KEYRING_USER_LEGACY)
         .context("failed to create legacy keyring entry")?;
     let hex_str = Zeroizing::new(match legacy.get_password() {
         Ok(s) => s,
@@ -103,11 +112,11 @@ fn try_legacy_migration(config_dir: &Path, namespaced_user: &str) -> anyhow::Res
         Some(pk) => pk,
         None => return Ok(None),
     };
-    let derived_pubkey = SigningKey::from_bytes(&seed)
-        .verifying_key()
-        .to_bytes();
+    let derived_pubkey = SigningKey::from_bytes(&seed).verifying_key().to_bytes();
     let expected_bytes = match b64::decode(
-        expected_pubkey.strip_prefix("ed25519:").unwrap_or(&expected_pubkey),
+        expected_pubkey
+            .strip_prefix("ed25519:")
+            .unwrap_or(&expected_pubkey),
     ) {
         Ok(b) => b,
         Err(_) => return Ok(None),
@@ -118,7 +127,9 @@ fn try_legacy_migration(config_dir: &Path, namespaced_user: &str) -> anyhow::Res
 
     let namespaced = ::keyring::Entry::new(KEYRING_SERVICE, namespaced_user)
         .context("failed to create namespaced keyring entry")?;
-    namespaced.set_password(&hex_str).context("failed to write seed to namespaced keyring entry")?;
+    namespaced
+        .set_password(&hex_str)
+        .context("failed to write seed to namespaced keyring entry")?;
     let _ = legacy.delete_credential();
     eprintln!("learning-loop: migrated keyring entry from legacy un-namespaced account to {namespaced_user}");
     Ok(Some(seed))
@@ -128,7 +139,10 @@ fn read_federation_pubkey(config_dir: &Path) -> Option<String> {
     let path = config_dir.join("federation").join("config.json");
     let text = std::fs::read_to_string(&path).ok()?;
     let v: serde_json::Value = serde_json::from_str(&text).ok()?;
-    v.get("identity")?.get("pubkey")?.as_str().map(|s| s.to_string())
+    v.get("identity")?
+        .get("pubkey")?
+        .as_str()
+        .map(|s| s.to_string())
 }
 
 /// Whether this machine has no keyring backend AT ALL — as distinct from
@@ -195,10 +209,10 @@ mod tests {
     fn a_keyring_that_refuses_is_not_a_machine_without_one() {
         // Exactly how keyring 3.6.3 renders these on macOS.
         for e in [
+            ::keyring::Error::PlatformFailure("User interaction is not allowed. (-25308)".into()),
             ::keyring::Error::PlatformFailure(
-                "User interaction is not allowed. (-25308)".into(),
+                "The user name or passphrase you entered is not correct. (-25293)".into(),
             ),
-            ::keyring::Error::PlatformFailure("The user name or passphrase you entered is not correct. (-25293)".into()),
             ::keyring::Error::NoStorageAccess("the keychain is locked".into()),
         ] {
             assert!(

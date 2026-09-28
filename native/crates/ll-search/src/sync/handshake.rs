@@ -14,9 +14,8 @@ use super::client::{recv_json, send_json, WsStream};
 use super::config::FederationConfig;
 use super::key_id::KeyId;
 use super::protocol_v5::{
-    sanitise_hub_text,
-    client_auth_message, hub_challenge_message, ChunkedUploadLimits, ClientMsg, GrantWire, HubMsg,
-    RevocationWire, VaultState, PROTOCOL_VERSION,
+    client_auth_message, hub_challenge_message, sanitise_hub_text, ChunkedUploadLimits, ClientMsg,
+    GrantWire, HubMsg, RevocationWire, VaultState, PROTOCOL_VERSION,
 };
 
 /// TLS exporter label per RFC 9266-style channel binding.
@@ -74,20 +73,28 @@ pub async fn authenticate(
     let key_id = KeyId::from_pubkey(&seed.verifying_key());
     let nonce_c = random_nonce();
 
-    send_json(ws, &ClientMsg::ClientHello {
-        key_id: key_id.as_str().to_string(),
-        nonce_c: b64::encode(&nonce_c),
-        vault_ids: vault_ids.to_vec(),
-        protocol_version: PROTOCOL_VERSION,
-        model_id: model_id.to_string(),
-        invite_code: invite.map(str::to_string),
-    }).await?;
+    send_json(
+        ws,
+        &ClientMsg::ClientHello {
+            key_id: key_id.as_str().to_string(),
+            nonce_c: b64::encode(&nonce_c),
+            vault_ids: vault_ids.to_vec(),
+            protocol_version: PROTOCOL_VERSION,
+            model_id: model_id.to_string(),
+            invite_code: invite.map(str::to_string),
+        },
+    )
+    .await?;
 
     // Exactly one acceptable message here. There is no branch that treats a
     // SyncReady as success — v4 had one, and it let a hostile endpoint skip
     // authentication entirely.
     let (nonce_h, hub_key_id, sig_h) = match recv_json::<HubMsg>(ws).await? {
-        HubMsg::HubChallenge { nonce_h, hub_key_id, sig_h } => (nonce_h, hub_key_id, sig_h),
+        HubMsg::HubChallenge {
+            nonce_h,
+            hub_key_id,
+            sig_h,
+        } => (nonce_h, hub_key_id, sig_h),
         HubMsg::Reject { reason } => anyhow::bail!("hub rejected: {}", sanitise_hub_text(&reason)),
         other => anyhow::bail!("expected hub-challenge, got {other:?}"),
     };
@@ -97,7 +104,10 @@ pub async fn authenticate(
     // a hostile hub can sign genuinely with a key of its own choosing, so
     // "the signature verifies" only means "this key produced this
     // signature", never "this is the key we pinned".
-    let pinned = config.hub.key_id.as_deref()
+    let pinned = config
+        .hub
+        .key_id
+        .as_deref()
         .ok_or_else(|| anyhow::anyhow!("no hub key pinned; re-run `ll join`"))?;
     if pinned != hub_key_id {
         anyhow::bail!(
@@ -109,29 +119,51 @@ pub async fn authenticate(
     let nonce_h_raw = b64::decode(&nonce_h)?;
     let hub_key = KeyId::parse(&hub_key_id)?;
     hub_key
-        .verify(&hub_challenge_message(&nonce_h_raw, &nonce_c, exporter), &b64::decode(&sig_h)?)
+        .verify(
+            &hub_challenge_message(&nonce_h_raw, &nonce_c, exporter),
+            &b64::decode(&sig_h)?,
+        )
         .map_err(|e| anyhow::anyhow!("hub signature did not verify: {e}"))?;
 
-    let sig_c = seed.sign(&client_auth_message(&nonce_h_raw, &nonce_c, &hub_key_id, exporter));
-    send_json(ws, &ClientMsg::ClientAuth { sig_c: b64::encode(&sig_c.to_bytes()) }).await?;
+    let sig_c = seed.sign(&client_auth_message(
+        &nonce_h_raw,
+        &nonce_c,
+        &hub_key_id,
+        exporter,
+    ));
+    send_json(
+        ws,
+        &ClientMsg::ClientAuth {
+            sig_c: b64::encode(&sig_c.to_bytes()),
+        },
+    )
+    .await?;
 
     match recv_json::<HubMsg>(ws).await? {
-        HubMsg::SyncReady { protocol_version, vault_state, grants, revocations, chunked_upload } =>
-            Ok(SyncReadyPayload {
-                protocol_version, vault_state, grants, revocations, chunked_upload,
-            }),
+        HubMsg::SyncReady {
+            protocol_version,
+            vault_state,
+            grants,
+            revocations,
+            chunked_upload,
+        } => Ok(SyncReadyPayload {
+            protocol_version,
+            vault_state,
+            grants,
+            revocations,
+            chunked_upload,
+        }),
         HubMsg::Reject { reason } => anyhow::bail!("auth failed: {}", sanitise_hub_text(&reason)),
         other => anyhow::bail!("expected sync-ready, got {other:?}"),
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::sync::test_hub::{
-        fake_hub_happy_path, hub_key_id_str, hub_signing_key, recv_client_msg, HubVaults,
-        send_hub_msg, send_signed_challenge, spawn_mock_hub, MockHub,
+        fake_hub_happy_path, hub_key_id_str, hub_signing_key, recv_client_msg, send_hub_msg,
+        send_signed_challenge, spawn_mock_hub, HubVaults, MockHub,
     };
 
     /// Config with the hub key pinned to `hub_signing_key()`'s identity —
@@ -156,7 +188,10 @@ mod tests {
         assert_eq!(EXPORTER_LABEL, b"EXPORTER-ll-federation-v5");
     }
 
-    async fn run_handshake(hub: &MockHub, config: &FederationConfig) -> anyhow::Result<SyncReadyPayload> {
+    async fn run_handshake(
+        hub: &MockHub,
+        config: &FederationConfig,
+    ) -> anyhow::Result<SyncReadyPayload> {
         run_handshake_with_exporter(hub, config, &[0u8; 32]).await
     }
 
@@ -169,7 +204,16 @@ mod tests {
             .await
             .expect("mock hub connection failed");
         let seed = SigningKey::generate(&mut rand::thread_rng());
-        authenticate(&mut ws, &seed, config, &[String::from("v1")], exporter, "test-model", None).await
+        authenticate(
+            &mut ws,
+            &seed,
+            config,
+            &[String::from("v1")],
+            exporter,
+            "test-model",
+            None,
+        )
+        .await
     }
 
     /// The hub records the embedding model from `ClientHello`, and a peer whose
@@ -187,7 +231,13 @@ mod tests {
                 if let Some(ClientMsg::ClientHello { model_id, .. }) = hello {
                     let _ = tx.send(model_id);
                 }
-                send_hub_msg(&mut ws, &HubMsg::Reject { reason: "done".into() }).await;
+                send_hub_msg(
+                    &mut ws,
+                    &HubMsg::Reject {
+                        reason: "done".into(),
+                    },
+                )
+                .await;
             }
         })
         .await;
@@ -196,8 +246,14 @@ mod tests {
         let _ = run_handshake(&hub, &config).await;
 
         let seen = rx.recv().expect("hub never received a ClientHello");
-        assert_eq!(seen, "test-model", "the model the caller supplied must reach the wire");
-        assert_ne!(seen, "unknown", "an uninitialised provider must not decide this");
+        assert_eq!(
+            seen, "test-model",
+            "the model the caller supplied must reach the wire"
+        );
+        assert_ne!(
+            seen, "unknown",
+            "an uninitialised provider must not decide this"
+        );
     }
 
     /// `join` runs before the vault has an index, so it cannot read a model id
@@ -214,36 +270,51 @@ mod tests {
         let key_id = key_id.to_string();
         spawn_mock_hub(move |mut ws| async move {
             let _hello = recv_client_msg(&mut ws).await;
-            send_hub_msg(&mut ws, &HubMsg::HubChallenge {
-                nonce_h: b64::encode(&[1u8; 32]),
-                hub_key_id: key_id,
-                sig_h: b64::encode(&[0u8; 64]),
-            }).await;
-        }).await
+            send_hub_msg(
+                &mut ws,
+                &HubMsg::HubChallenge {
+                    nonce_h: b64::encode(&[1u8; 32]),
+                    hub_key_id: key_id,
+                    sig_h: b64::encode(&[0u8; 64]),
+                },
+            )
+            .await;
+        })
+        .await
     }
 
     async fn fake_hub_that_skips_the_challenge() -> MockHub {
         spawn_mock_hub(|mut ws| async move {
             let _hello = recv_client_msg(&mut ws).await;
-            send_hub_msg(&mut ws, &HubMsg::SyncReady {
-            chunked_upload: None,
-                protocol_version: PROTOCOL_VERSION,
-                vault_state: vec![],
-                grants: vec![],
-                revocations: vec![],
-            }).await;
-        }).await
+            send_hub_msg(
+                &mut ws,
+                &HubMsg::SyncReady {
+                    chunked_upload: None,
+                    protocol_version: PROTOCOL_VERSION,
+                    vault_state: vec![],
+                    grants: vec![],
+                    revocations: vec![],
+                },
+            )
+            .await;
+        })
+        .await
     }
 
     async fn fake_hub_with_bad_signature() -> MockHub {
         spawn_mock_hub(|mut ws| async move {
             let _hello = recv_client_msg(&mut ws).await;
-            send_hub_msg(&mut ws, &HubMsg::HubChallenge {
-                nonce_h: b64::encode(&[1u8; 32]),
-                hub_key_id: hub_key_id_str(),
-                sig_h: b64::encode(&[0xffu8; 64]),
-            }).await;
-        }).await
+            send_hub_msg(
+                &mut ws,
+                &HubMsg::HubChallenge {
+                    nonce_h: b64::encode(&[1u8; 32]),
+                    hub_key_id: hub_key_id_str(),
+                    sig_h: b64::encode(&[0xffu8; 64]),
+                },
+            )
+            .await;
+        })
+        .await
     }
 
     #[tokio::test]
@@ -274,9 +345,11 @@ mod tests {
     fn the_client_signs_with_its_own_domain_prefix_only() {
         let msg = client_auth_message(b"nh", b"nc", "zK", &[0u8; 32]);
         assert!(msg.starts_with(b"ll-client-v5"));
-        assert!(!msg.starts_with(b"ll-hub-v5"),
+        assert!(
+            !msg.starts_with(b"ll-hub-v5"),
             "signing with the hub's prefix would let a client signature be replayed \
-             as a hub signature");
+             as a hub signature"
+        );
     }
 
     #[tokio::test]
@@ -298,18 +371,22 @@ mod tests {
         let attacker_sk = SigningKey::from_bytes(&[9u8; 32]);
 
         let hub = spawn_mock_hub(move |mut ws| async move {
-            let Some(ClientMsg::ClientHello { nonce_c, .. }) = recv_client_msg(&mut ws).await else {
+            let Some(ClientMsg::ClientHello { nonce_c, .. }) = recv_client_msg(&mut ws).await
+            else {
                 // Stop rather than panic: this runs in a spawned task, where a
                 // panic never fails the test that spawned it.
                 return;
             };
             send_signed_challenge(&mut ws, &attacker_sk, &nonce_c).await;
-        }).await;
+        })
+        .await;
 
         let err = run_handshake(&hub, &pinned_config()).await.unwrap_err();
-        assert!(err.to_string().contains("hub key mismatch"),
+        assert!(
+            err.to_string().contains("hub key mismatch"),
             "a genuinely valid signature for an unpinned key must still be rejected on the \
-             pin check, not accepted because the crypto happens to check out: {err}");
+             pin check, not accepted because the crypto happens to check out: {err}"
+        );
     }
 
     /// Channel binding with two well-formed, distinct exporter values — not a
@@ -322,33 +399,54 @@ mod tests {
         let client_exporter = [8u8; 32];
 
         let hub = spawn_mock_hub(move |mut ws| async move {
-            let Some(ClientMsg::ClientHello { nonce_c, .. }) = recv_client_msg(&mut ws).await else {
+            let Some(ClientMsg::ClientHello { nonce_c, .. }) = recv_client_msg(&mut ws).await
+            else {
                 // Stop rather than panic: this runs in a spawned task, where a
                 // panic never fails the test that spawned it.
                 return;
             };
             let nonce_c_raw = b64::decode(&nonce_c).unwrap();
             let nonce_h = random_nonce();
-            let sig_h = hub_signing_key().sign(&hub_challenge_message(&nonce_h, &nonce_c_raw, &hub_exporter));
-            send_hub_msg(&mut ws, &HubMsg::HubChallenge {
-                nonce_h: b64::encode(&nonce_h),
-                hub_key_id: hub_key_id_str(),
-                sig_h: b64::encode(&sig_h.to_bytes()),
-            }).await;
-        }).await;
+            let sig_h = hub_signing_key().sign(&hub_challenge_message(
+                &nonce_h,
+                &nonce_c_raw,
+                &hub_exporter,
+            ));
+            send_hub_msg(
+                &mut ws,
+                &HubMsg::HubChallenge {
+                    nonce_h: b64::encode(&nonce_h),
+                    hub_key_id: hub_key_id_str(),
+                    sig_h: b64::encode(&sig_h.to_bytes()),
+                },
+            )
+            .await;
+        })
+        .await;
 
-        let err = run_handshake_with_exporter(&hub, &pinned_config(), &client_exporter).await.unwrap_err();
-        assert!(err.to_string().contains("hub signature"),
+        let err = run_handshake_with_exporter(&hub, &pinned_config(), &client_exporter)
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("hub signature"),
             "a relay presenting a different (but legitimate) connection's exporter must fail \
-             signature verification: {err}");
+             signature verification: {err}"
+        );
     }
 
     #[tokio::test]
     async fn aborts_when_the_hub_rejects_the_hello() {
         let hub = spawn_mock_hub(|mut ws| async move {
             let _hello = recv_client_msg(&mut ws).await;
-            send_hub_msg(&mut ws, &HubMsg::Reject { reason: "unknown key_id".into() }).await;
-        }).await;
+            send_hub_msg(
+                &mut ws,
+                &HubMsg::Reject {
+                    reason: "unknown key_id".into(),
+                },
+            )
+            .await;
+        })
+        .await;
         let err = run_handshake(&hub, &pinned_config()).await.unwrap_err();
         assert!(err.to_string().contains("hub rejected: unknown key_id"));
     }
@@ -356,15 +454,23 @@ mod tests {
     #[tokio::test]
     async fn aborts_when_the_hub_rejects_after_client_auth() {
         let hub = spawn_mock_hub(|mut ws| async move {
-            let Some(ClientMsg::ClientHello { nonce_c, .. }) = recv_client_msg(&mut ws).await else {
+            let Some(ClientMsg::ClientHello { nonce_c, .. }) = recv_client_msg(&mut ws).await
+            else {
                 // Stop rather than panic: this runs in a spawned task, where a
                 // panic never fails the test that spawned it.
                 return;
             };
             send_signed_challenge(&mut ws, &hub_signing_key(), &nonce_c).await;
             let _auth = recv_client_msg(&mut ws).await;
-            send_hub_msg(&mut ws, &HubMsg::Reject { reason: "vault not permitted".into() }).await;
-        }).await;
+            send_hub_msg(
+                &mut ws,
+                &HubMsg::Reject {
+                    reason: "vault not permitted".into(),
+                },
+            )
+            .await;
+        })
+        .await;
         let err = run_handshake(&hub, &pinned_config()).await.unwrap_err();
         assert!(err.to_string().contains("auth failed: vault not permitted"));
     }
@@ -372,13 +478,15 @@ mod tests {
     #[tokio::test]
     async fn aborts_when_no_hub_key_is_pinned_locally() {
         let hub = spawn_mock_hub(|mut ws| async move {
-            let Some(ClientMsg::ClientHello { nonce_c, .. }) = recv_client_msg(&mut ws).await else {
+            let Some(ClientMsg::ClientHello { nonce_c, .. }) = recv_client_msg(&mut ws).await
+            else {
                 // Stop rather than panic: this runs in a spawned task, where a
                 // panic never fails the test that spawned it.
                 return;
             };
             send_signed_challenge(&mut ws, &hub_signing_key(), &nonce_c).await;
-        }).await;
+        })
+        .await;
 
         let err = run_handshake(&hub, &test_config()).await.unwrap_err();
         assert!(err.to_string().contains("no hub key pinned"));

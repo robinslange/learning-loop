@@ -7,11 +7,11 @@ use crate::db::load_all_embeddings;
 use crate::embed::embed_query;
 use crate::rerank::RerankReport;
 
-use super::scoring::{dot_product, finalize_rrf};
-use super::query::{SearchResult, load_titles_map};
-use super::federation::{add_peer_rrf_scores_guarded, batch_load_bodies_federated};
 use super::cluster::discriminate_pairs;
 use super::context::SearchContext;
+use super::federation::{add_peer_rrf_scores_guarded, batch_load_bodies_federated};
+use super::query::{load_titles_map, SearchResult};
+use super::scoring::{dot_product, finalize_rrf};
 
 #[derive(Serialize)]
 pub struct ReflectQueryResult {
@@ -66,8 +66,10 @@ pub(crate) fn reflect_scan_inner(
     rerank: impl Fn(&str, &[(String, String)], usize) -> RerankReport,
 ) -> ReflectScanResult {
     // Each peer's embeddings and titles, read once for every query.
-    let peer_embeddings: Vec<Vec<(i64, String, Vec<f32>)>> =
-        peers.iter().map(|(_, pc)| load_all_embeddings(pc)).collect();
+    let peer_embeddings: Vec<Vec<(i64, String, Vec<f32>)>> = peers
+        .iter()
+        .map(|(_, pc)| load_all_embeddings(pc))
+        .collect();
     let mut peer_titles: HashMap<String, Option<String>> = HashMap::new();
     for (pid, pc) in peers {
         for (path, title) in load_titles_map(pc) {
@@ -91,7 +93,10 @@ pub(crate) fn reflect_scan_inner(
             }
             None => (ctx.store.all(), p),
         };
-        embeddings.iter().find(|(_, q, _)| q == path).map(|(_, _, e)| e.as_slice())
+        embeddings
+            .iter()
+            .find(|(_, q, _)| q == path)
+            .map(|(_, _, e)| e.as_slice())
     };
 
     let mut all_candidate_paths: Vec<String> = Vec::new();
@@ -165,7 +170,10 @@ pub(crate) fn reflect_scan_inner(
             .unwrap_or(0.0);
 
         local_result_paths.extend(
-            results.iter().filter(|r| !r.path.starts_with("peer:")).map(|r| r.path.clone()),
+            results
+                .iter()
+                .filter(|r| !r.path.starts_with("peer:"))
+                .map(|r| r.path.clone()),
         );
 
         query_results.push(ReflectQueryResult {
@@ -181,7 +189,12 @@ pub(crate) fn reflect_scan_inner(
     let confusable_pairs = if local_result_paths.is_empty() {
         Vec::new()
     } else {
-        discriminate_pairs(conn, &local_result_paths, discriminate_threshold, &ctx.store)
+        discriminate_pairs(
+            conn,
+            &local_result_paths,
+            discriminate_threshold,
+            &ctx.store,
+        )
     };
 
     ReflectScanResult {
@@ -192,8 +205,8 @@ pub(crate) fn reflect_scan_inner(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::test_helpers::helpers::*;
+    use super::*;
     use crate::rerank::RerankResult;
 
     const THRESHOLD: f32 = 0.85;
@@ -211,17 +224,35 @@ mod tests {
             .collect();
         scored.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap());
         scored.truncate(top_n);
-        RerankReport { scored, failed: Vec::new() }
+        RerankReport {
+            scored,
+            failed: Vec::new(),
+        }
     }
 
     /// a/b are near-duplicates about sleep; d/e are near-duplicates about
     /// something else, so only a/b should ever come back as a confusable pair.
     fn local_vault() -> Connection {
         create_test_db(&[
-            ("a.md", "sleep stages", "sleep stages", &norm(&[1.0, 0.0, 0.0])),
-            ("b.md", "sleep cycles", "sleep cycles", &norm(&[0.99, 0.1, 0.0])),
+            (
+                "a.md",
+                "sleep stages",
+                "sleep stages",
+                &norm(&[1.0, 0.0, 0.0]),
+            ),
+            (
+                "b.md",
+                "sleep cycles",
+                "sleep cycles",
+                &norm(&[0.99, 0.1, 0.0]),
+            ),
             ("d.md", "protein", "protein", &norm(&[0.0, 1.0, 0.0])),
-            ("e.md", "protein intake", "protein intake", &norm(&[0.0, 0.99, 0.1])),
+            (
+                "e.md",
+                "protein intake",
+                "protein intake",
+                &norm(&[0.0, 0.99, 0.1]),
+            ),
         ])
     }
 
@@ -242,18 +273,29 @@ mod tests {
         let conn = local_vault();
         let ctx = SearchContext::build(&conn);
 
-        let result = reflect_scan_inner(&ctx, &conn, &[], &query(), 2, 10, THRESHOLD, contains_query);
+        let result =
+            reflect_scan_inner(&ctx, &conn, &[], &query(), 2, 10, THRESHOLD, contains_query);
 
         let scan = &result.queries[0];
         let mut paths: Vec<&str> = scan.results.iter().map(|r| r.path.as_str()).collect();
         paths.sort();
         assert_eq!(paths, ["a.md", "b.md"]);
         for r in &scan.results {
-            assert_eq!(r.title.as_deref(), Some(if r.path == "a.md" { "sleep stages" } else { "sleep cycles" }));
+            assert_eq!(
+                r.title.as_deref(),
+                Some(if r.path == "a.md" {
+                    "sleep stages"
+                } else {
+                    "sleep cycles"
+                })
+            );
             assert_eq!(r.mtime, None);
         }
         let best = ctx.store.get_arc_by_path(&scan.results[0].path).unwrap();
-        assert_eq!(scan.top_match_similarity, dot_product(&query()[0].1, &best) as f64);
+        assert_eq!(
+            scan.top_match_similarity,
+            dot_product(&query()[0].1, &best) as f64
+        );
         assert_eq!(pairs(&result), [("a.md", "b.md")]);
     }
 
@@ -261,16 +303,34 @@ mod tests {
     fn a_peer_result_is_reranked_but_never_paired() {
         let conn = local_vault();
         let ctx = SearchContext::build(&conn);
-        let peer = create_peer_db(&[("c.md", "sleep and light", "sleep and light", &norm(&[0.98, 0.2, 0.0]))]);
+        let peer = create_peer_db(&[(
+            "c.md",
+            "sleep and light",
+            "sleep and light",
+            &norm(&[0.98, 0.2, 0.0]),
+        )]);
         let peers = vec![("alice".to_string(), peer)];
 
-        let result = reflect_scan_inner(&ctx, &conn, &peers, &query(), 3, 10, THRESHOLD, contains_query);
+        let result = reflect_scan_inner(
+            &ctx,
+            &conn,
+            &peers,
+            &query(),
+            3,
+            10,
+            THRESHOLD,
+            contains_query,
+        );
 
         let scan = &result.queries[0];
         let mut paths: Vec<&str> = scan.results.iter().map(|r| r.path.as_str()).collect();
         paths.sort();
         assert_eq!(paths, ["a.md", "b.md", "peer:alice/c.md"]);
-        let peer_result = scan.results.iter().find(|r| r.path == "peer:alice/c.md").unwrap();
+        let peer_result = scan
+            .results
+            .iter()
+            .find(|r| r.path == "peer:alice/c.md")
+            .unwrap();
         assert_eq!(peer_result.title.as_deref(), Some("sleep and light"));
         assert_eq!(pairs(&result), [("a.md", "b.md")]);
     }
@@ -282,14 +342,36 @@ mod tests {
     fn a_scan_with_no_local_result_pairs_nothing() {
         let conn = local_vault();
         let ctx = SearchContext::build(&conn);
-        let peer = create_peer_db(&[("c.md", "sleep and light", "sleep and light", &norm(&[0.98, 0.2, 0.0]))]);
+        let peer = create_peer_db(&[(
+            "c.md",
+            "sleep and light",
+            "sleep and light",
+            &norm(&[0.98, 0.2, 0.0]),
+        )]);
         let peers = vec![("alice".to_string(), peer)];
         let light = vec![("light".to_string(), norm(&[1.0, 0.0, 0.0]))];
 
-        let result = reflect_scan_inner(&ctx, &conn, &peers, &light, 1, 10, THRESHOLD, contains_query);
+        let result = reflect_scan_inner(
+            &ctx,
+            &conn,
+            &peers,
+            &light,
+            1,
+            10,
+            THRESHOLD,
+            contains_query,
+        );
 
-        let paths: Vec<&str> = result.queries[0].results.iter().map(|r| r.path.as_str()).collect();
-        assert_eq!(paths, ["peer:alice/c.md"], "precondition: the only result is the peer's");
+        let paths: Vec<&str> = result.queries[0]
+            .results
+            .iter()
+            .map(|r| r.path.as_str())
+            .collect();
+        assert_eq!(
+            paths,
+            ["peer:alice/c.md"],
+            "precondition: the only result is the peer's"
+        );
         assert_eq!(pairs(&result), Vec::<(&str, &str)>::new());
     }
 }

@@ -18,9 +18,9 @@ use tokio_tungstenite::accept_async;
 use tokio_tungstenite::tungstenite::Message;
 
 use super::grant::{GrantKind, GrantStatement};
-use super::protocol::{manifest_root, ChunkedFrame};
 use super::handshake::random_nonce;
 use super::key_id::KeyId;
+use super::protocol::{manifest_root, ChunkedFrame};
 use super::protocol_v5::{
     hub_challenge_message, ChunkedBody, ClientMsg, GrantWire, HeldIndex, HubMsg, VaultState,
     PROTOCOL_VERSION,
@@ -32,7 +32,9 @@ pub fn hub_signing_key() -> SigningKey {
 }
 
 pub fn hub_key_id_str() -> String {
-    KeyId::from_pubkey(&hub_signing_key().verifying_key()).as_str().to_string()
+    KeyId::from_pubkey(&hub_signing_key().verifying_key())
+        .as_str()
+        .to_string()
 }
 
 /// Tests that read or write process-wide environment variables take this
@@ -41,7 +43,9 @@ pub fn hub_key_id_str() -> String {
 /// it must not wedge the rest of the suite.
 pub fn env_lock() -> MutexGuard<'static, ()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(())).lock().unwrap_or_else(|e| e.into_inner())
+    LOCK.get_or_init(|| Mutex::new(()))
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
 }
 
 /// Pin `LL_SEED_BACKEND=encrypted` for the whole test binary, so no test ever
@@ -125,7 +129,10 @@ impl HubVaults {
     }
 
     fn index_for(&self, vault_id: &str) -> Option<&[u8]> {
-        self.indices.iter().find(|(v, _)| v == vault_id).map(|(_, b)| b.as_slice())
+        self.indices
+            .iter()
+            .find(|(v, _)| v == vault_id)
+            .map(|(_, b)| b.as_slice())
     }
 
     /// `v5::indices::held`.
@@ -158,7 +165,7 @@ fn active_grants_to(grants: &[GrantWire], reader: &KeyId, now: i64) -> Vec<Grant
         .iter()
         .filter(|w| w.state == "active")
         .filter_map(|w| {
-                        serde_json::from_slice::<GrantStatement>(&b64::decode(&w.statement_b64).ok()?).ok()
+            serde_json::from_slice::<GrantStatement>(&b64::decode(&w.statement_b64).ok()?).ok()
         })
         .filter(|st| &st.to == reader && st.expires_at > now)
         .collect()
@@ -217,7 +224,11 @@ fn vault_state_for(
     let held = active_grants_to(grants, reader, now);
 
     let owned_by = |key: &KeyId| -> Vec<String> {
-        owners.iter().filter(|(_, o)| o == key).map(|(v, _)| v.clone()).collect()
+        owners
+            .iter()
+            .filter(|(_, o)| o == key)
+            .map(|(v, _)| v.clone())
+            .collect()
     };
     let mut candidates = owned_by(reader);
     for st in &held {
@@ -233,7 +244,10 @@ fn vault_state_for(
             continue;
         }
         if may_read(&owners, &held, reader, &vault_id) {
-            out.push(VaultState { holds: world.holds_for(&vault_id), vault_id });
+            out.push(VaultState {
+                holds: world.holds_for(&vault_id),
+                vault_id,
+            });
         }
     }
     out
@@ -312,7 +326,11 @@ where
         }
     });
 
-    MockHub { addr, key_id, hellos: Arc::new(Mutex::new(Vec::new())) }
+    MockHub {
+        addr,
+        key_id,
+        hellos: Arc::new(Mutex::new(Vec::new())),
+    }
 }
 
 /// A hub that answers `/.well-known/ll-hub` and nothing else.
@@ -334,7 +352,11 @@ pub async fn spawn_raw_http(response: &str) -> MockHub {
             let _ = stream.shutdown().await;
         }
     });
-    MockHub { addr, key_id: String::new(), hellos: Arc::new(Mutex::new(Vec::new())) }
+    MockHub {
+        addr,
+        key_id: String::new(),
+        hellos: Arc::new(Mutex::new(Vec::new())),
+    }
 }
 
 async fn peek_is_well_known(stream: &tokio::net::TcpStream) -> bool {
@@ -345,11 +367,7 @@ async fn peek_is_well_known(stream: &tokio::net::TcpStream) -> bool {
     }
 }
 
-async fn serve_well_known(
-    mut stream: tokio::net::TcpStream,
-    key_id: &str,
-    protocol_version: u32,
-) {
+async fn serve_well_known(mut stream: tokio::net::TcpStream, key_id: &str, protocol_version: u32) {
     let mut buf = [0u8; 1024];
     let _ = stream.read(&mut buf).await;
     let body = serde_json::json!({
@@ -414,15 +432,22 @@ pub async fn send_signed_challenge(
     signer: &SigningKey,
     nonce_c_b64: &str,
 ) -> bool {
-    let Ok(nonce_c) = b64::decode(nonce_c_b64) else { return false };
+    let Ok(nonce_c) = b64::decode(nonce_c_b64) else {
+        return false;
+    };
     let nonce_h = random_nonce();
     let exporter = [0u8; 32];
     let sig_h = signer.sign(&hub_challenge_message(&nonce_h, &nonce_c, &exporter));
-    send_hub_msg(ws, &HubMsg::HubChallenge {
-        nonce_h: b64::encode(&nonce_h),
-        hub_key_id: KeyId::from_pubkey(&signer.verifying_key()).as_str().to_string(),
-        sig_h: b64::encode(&sig_h.to_bytes()),
-    })
+    send_hub_msg(
+        ws,
+        &HubMsg::HubChallenge {
+            nonce_h: b64::encode(&nonce_h),
+            hub_key_id: KeyId::from_pubkey(&signer.verifying_key())
+                .as_str()
+                .to_string(),
+            sig_h: b64::encode(&sig_h.to_bytes()),
+        },
+    )
     .await
 }
 
@@ -450,28 +475,45 @@ pub async fn fake_hub_happy_path_signed_by(
 ) -> MockHub {
     let hellos = Arc::new(Mutex::new(Vec::new()));
     let recorder = Arc::clone(&hellos);
-    let mut hub = spawn_mock_hub_publishing(published_key_id, PROTOCOL_VERSION, move |mut ws| async move {
-        let Some(hello) = recv_client_msg(&mut ws).await else { return };
-        let ClientMsg::ClientHello { ref key_id, ref nonce_c, ref vault_ids, .. } = hello else {
-            return
-        };
-        let Ok(reader) = KeyId::parse(key_id) else { return };
-        let nonce_c = nonce_c.clone();
-        let declared = vault_ids.clone();
-        recorder.lock().unwrap().push(hello);
-        send_signed_challenge(&mut ws, &signer, &nonce_c).await;
+    let mut hub = spawn_mock_hub_publishing(
+        published_key_id,
+        PROTOCOL_VERSION,
+        move |mut ws| async move {
+            let Some(hello) = recv_client_msg(&mut ws).await else {
+                return;
+            };
+            let ClientMsg::ClientHello {
+                ref key_id,
+                ref nonce_c,
+                ref vault_ids,
+                ..
+            } = hello
+            else {
+                return;
+            };
+            let Ok(reader) = KeyId::parse(key_id) else {
+                return;
+            };
+            let nonce_c = nonce_c.clone();
+            let declared = vault_ids.clone();
+            recorder.lock().unwrap().push(hello);
+            send_signed_challenge(&mut ws, &signer, &nonce_c).await;
 
-        let _auth = recv_client_msg(&mut ws).await;
+            let _auth = recv_client_msg(&mut ws).await;
 
-        send_hub_msg(&mut ws, &HubMsg::SyncReady {
-            chunked_upload: None,
-            protocol_version: PROTOCOL_VERSION,
-            vault_state: vault_state_for(&world, &reader, &declared, &[], now_unix()),
-            grants: vec![],
-            revocations: vec![],
-        })
-        .await;
-    })
+            send_hub_msg(
+                &mut ws,
+                &HubMsg::SyncReady {
+                    chunked_upload: None,
+                    protocol_version: PROTOCOL_VERSION,
+                    vault_state: vault_state_for(&world, &reader, &declared, &[], now_unix()),
+                    grants: vec![],
+                    revocations: vec![],
+                },
+            )
+            .await;
+        },
+    )
     .await;
     hub.hellos = hellos;
     hub
@@ -484,20 +526,31 @@ pub async fn fake_hub_happy_path_signed_by(
 /// for a vault that will refuse its first upload.
 pub async fn fake_hub_that_forgets_the_vault() -> MockHub {
     let signer = hub_signing_key();
-    spawn_mock_hub_publishing(&hub_key_id_str(), PROTOCOL_VERSION, move |mut ws| async move {
-        let Some(hello) = recv_client_msg(&mut ws).await else { return };
-        let ClientMsg::ClientHello { nonce_c, .. } = hello else { return };
-        send_signed_challenge(&mut ws, &signer, &nonce_c).await;
-        let _auth = recv_client_msg(&mut ws).await;
-        send_hub_msg(&mut ws, &HubMsg::SyncReady {
-            chunked_upload: None,
-            protocol_version: PROTOCOL_VERSION,
-            vault_state: vec![],
-            grants: vec![],
-            revocations: vec![],
-        })
-        .await;
-    })
+    spawn_mock_hub_publishing(
+        &hub_key_id_str(),
+        PROTOCOL_VERSION,
+        move |mut ws| async move {
+            let Some(hello) = recv_client_msg(&mut ws).await else {
+                return;
+            };
+            let ClientMsg::ClientHello { nonce_c, .. } = hello else {
+                return;
+            };
+            send_signed_challenge(&mut ws, &signer, &nonce_c).await;
+            let _auth = recv_client_msg(&mut ws).await;
+            send_hub_msg(
+                &mut ws,
+                &HubMsg::SyncReady {
+                    chunked_upload: None,
+                    protocol_version: PROTOCOL_VERSION,
+                    vault_state: vec![],
+                    grants: vec![],
+                    revocations: vec![],
+                },
+            )
+            .await;
+        },
+    )
     .await
 }
 
@@ -508,9 +561,17 @@ pub async fn fake_hub_that_rejects_the_invite() -> MockHub {
     let hellos = Arc::new(Mutex::new(Vec::new()));
     let recorder = Arc::clone(&hellos);
     let mut hub = spawn_mock_hub(move |mut ws| async move {
-        let Some(hello) = recv_client_msg(&mut ws).await else { return };
+        let Some(hello) = recv_client_msg(&mut ws).await else {
+            return;
+        };
         recorder.lock().unwrap().push(hello);
-        send_hub_msg(&mut ws, &HubMsg::Reject { reason: "invite redemption failed".into() }).await;
+        send_hub_msg(
+            &mut ws,
+            &HubMsg::Reject {
+                reason: "invite redemption failed".into(),
+            },
+        )
+        .await;
     })
     .await;
     hub.hellos = hellos;
@@ -562,7 +623,11 @@ pub enum FetchAnswer {
 fn index_header(vault_id: &str, sha256: String) -> HubMsg {
     HubMsg::IndexHeader {
         vault_id: vault_id.to_string(),
-        holds: Some(HeldIndex { sha256, note_count: FETCH_NOTE_COUNT, uploaded_at: 1 }),
+        holds: Some(HeldIndex {
+            sha256,
+            note_count: FETCH_NOTE_COUNT,
+            uploaded_at: 1,
+        }),
         chunked: None,
     }
 }
@@ -663,7 +728,11 @@ pub async fn spawn_fetch_hub(
                 FetchAnswer::ChunkedBadRoot(bytes, chunk_size) => {
                     let (header, frames) = chunked_index_header(&vault_id, &bytes, chunk_size);
                     let header = match header {
-                        HubMsg::IndexHeader { vault_id, holds, chunked } => HubMsg::IndexHeader {
+                        HubMsg::IndexHeader {
+                            vault_id,
+                            holds,
+                            chunked,
+                        } => HubMsg::IndexHeader {
                             vault_id,
                             holds,
                             chunked: chunked.map(|c| ChunkedBody {
@@ -734,12 +803,20 @@ pub async fn spawn_fetch_hub(
                     }
                     continue;
                 }
-                FetchAnswer::Nothing => {
-                    (HubMsg::IndexHeader { vault_id: vault_id.clone(), holds: None, chunked: None }, None)
-                }
-                FetchAnswer::Reject(reason) => {
-                    (HubMsg::Reject { reason: reason.into() }, None)
-                }
+                FetchAnswer::Nothing => (
+                    HubMsg::IndexHeader {
+                        vault_id: vault_id.clone(),
+                        holds: None,
+                        chunked: None,
+                    },
+                    None,
+                ),
+                FetchAnswer::Reject(reason) => (
+                    HubMsg::Reject {
+                        reason: reason.into(),
+                    },
+                    None,
+                ),
             };
             if !send_hub_msg(&mut ws, &header).await {
                 return;
@@ -805,7 +882,7 @@ pub async fn spawn_grant_hub_over(
     serve: Vec<GrantWire>,
     answers: Vec<GrantAnswer>,
 ) -> (MockHub, Arc<Mutex<Vec<GrantWire>>>) {
-        use sha2::{Digest, Sha256};
+    use sha2::{Digest, Sha256};
 
     let lodged: Arc<Mutex<Vec<GrantWire>>> = Arc::new(Mutex::new(Vec::new()));
     let recorder = Arc::clone(&lodged);
@@ -814,8 +891,16 @@ pub async fn spawn_grant_hub_over(
         let mut answers = answers.into_iter();
         let note = |wire: GrantWire| recorder.lock().unwrap().push(wire);
 
-        let Some(hello) = recv_client_msg(&mut ws).await else { return };
-        let ClientMsg::ClientHello { key_id, nonce_c, vault_ids, .. } = hello else {
+        let Some(hello) = recv_client_msg(&mut ws).await else {
+            return;
+        };
+        let ClientMsg::ClientHello {
+            key_id,
+            nonce_c,
+            vault_ids,
+            ..
+        } = hello
+        else {
             return note(complaint("unexpected:not-a-hello"));
         };
         let Ok(reader) = KeyId::parse(&key_id) else {
@@ -824,20 +909,25 @@ pub async fn spawn_grant_hub_over(
         send_signed_challenge(&mut ws, &signer, &nonce_c).await;
         let _auth = recv_client_msg(&mut ws).await;
         let state = vault_state_for(&world, &reader, &vault_ids, &serve, now_unix());
-        if !send_hub_msg(&mut ws, &HubMsg::SyncReady {
-            chunked_upload: None,
-            protocol_version: PROTOCOL_VERSION,
-            vault_state: state,
-            grants: serve,
-            revocations: vec![],
-        })
+        if !send_hub_msg(
+            &mut ws,
+            &HubMsg::SyncReady {
+                chunked_upload: None,
+                protocol_version: PROTOCOL_VERSION,
+                vault_state: state,
+                grants: serve,
+                revocations: vec![],
+            },
+        )
         .await
         {
             return;
         }
 
         loop {
-            let Some(msg) = recv_client_msg(&mut ws).await else { return };
+            let Some(msg) = recv_client_msg(&mut ws).await else {
+                return;
+            };
             // A hub answers `FetchIndex` out of the same table it listed
             // from — `handle_v5_fetch_index` and `readable_vaults` share a
             // matcher, so a vault named in `SyncReady` can always be fetched.
@@ -870,14 +960,20 @@ pub async fn spawn_grant_hub_over(
             // thing left saying so.
             let decode = |b64: &str| b64::decode(b64).ok();
             let (statement_b64, signature_b64, acked, state) = match msg {
-                ClientMsg::PutGrant { statement_b64, signature_b64 } => {
+                ClientMsg::PutGrant {
+                    statement_b64,
+                    signature_b64,
+                } => {
                     let Some(bytes) = decode(&statement_b64) else {
                         return note(complaint("unparseable:statement-not-base64"));
                     };
                     let id = hex::encode(Sha256::digest(&bytes));
                     (statement_b64, signature_b64, id, "active")
                 }
-                ClientMsg::RevokeGrant { statement_b64, signature_b64 } => {
+                ClientMsg::RevokeGrant {
+                    statement_b64,
+                    signature_b64,
+                } => {
                     let Some(bytes) = decode(&statement_b64) else {
                         return note(complaint("unparseable:statement-not-base64"));
                     };
@@ -895,8 +991,12 @@ pub async fn spawn_grant_hub_over(
             });
             let reply = match answers.next().unwrap_or(GrantAnswer::Ack) {
                 GrantAnswer::Ack => HubMsg::GrantAck { grant_id: acked },
-                GrantAnswer::AckWrongId => HubMsg::GrantAck { grant_id: "00".repeat(32) },
-                GrantAnswer::Reject(reason) => HubMsg::Reject { reason: reason.into() },
+                GrantAnswer::AckWrongId => HubMsg::GrantAck {
+                    grant_id: "00".repeat(32),
+                },
+                GrantAnswer::Reject(reason) => HubMsg::Reject {
+                    reason: reason.into(),
+                },
             };
             if !send_hub_msg(&mut ws, &reply).await {
                 return;

@@ -24,7 +24,9 @@ fn init_test_backend() {
         // SAFETY (Rust 2024): set_var is unsafe because env mutation is global.
         // Set once at first invocation and never unset; test threads only ever
         // observe `encrypted`, never an empty value.
-        unsafe { std::env::set_var("LL_SEED_BACKEND", "encrypted"); }
+        unsafe {
+            std::env::set_var("LL_SEED_BACKEND", "encrypted");
+        }
     });
 }
 
@@ -41,7 +43,10 @@ fn migration_legacy_to_encrypted_removes_plaintext() {
     assert_eq!(result.to, SeedBackend::Encrypted);
 
     let plaintext = seed_path(tmp.path());
-    assert!(!plaintext.exists(), "plaintext must be gone after migration");
+    assert!(
+        !plaintext.exists(),
+        "plaintext must be gone after migration"
+    );
 
     let enc = encrypted_seed_path(tmp.path());
     assert!(enc.exists(), "encrypted file must exist after migration");
@@ -69,11 +74,20 @@ fn migration_meta_file_records_backend_and_timestamp() {
     migrate(tmp.path()).unwrap();
 
     let meta_path = seed_meta_path(tmp.path());
-    assert!(meta_path.exists(), "seed-meta.json must exist after migration");
+    assert!(
+        meta_path.exists(),
+        "seed-meta.json must exist after migration"
+    );
     let txt = std::fs::read_to_string(&meta_path).unwrap();
     let v: serde_json::Value = serde_json::from_str(&txt).unwrap();
-    assert_eq!(v["backend"].as_str(), Some("encrypted"), "backend must be recorded");
-    let migrated_at = v["migrated_at"].as_str().expect("migrated_at must be present");
+    assert_eq!(
+        v["backend"].as_str(),
+        Some("encrypted"),
+        "backend must be recorded"
+    );
+    let migrated_at = v["migrated_at"]
+        .as_str()
+        .expect("migrated_at must be present");
 
     let expected_date = &ll_search::db::chrono_iso_now()[..10];
     assert_eq!(
@@ -115,13 +129,23 @@ fn migration_rollback_restores_plaintext_and_matching_key() {
     write_plaintext_seed(tmp.path(), [8u8; 32]);
 
     migrate(tmp.path()).unwrap();
-    assert!(!seed_path(tmp.path()).exists(), "plaintext must be gone before rollback");
+    assert!(
+        !seed_path(tmp.path()).exists(),
+        "plaintext must be gone before rollback"
+    );
 
     migrate_rollback(tmp.path()).unwrap();
 
-    assert!(seed_path(tmp.path()).exists(), "plaintext must be restored after rollback");
+    assert!(
+        seed_path(tmp.path()).exists(),
+        "plaintext must be restored after rollback"
+    );
     let bytes = std::fs::read(seed_path(tmp.path())).unwrap();
-    assert_eq!(bytes.as_slice(), [8u8; 32].as_slice(), "rollback must restore original seed bytes");
+    assert_eq!(
+        bytes.as_slice(),
+        [8u8; 32].as_slice(),
+        "rollback must restore original seed bytes"
+    );
 }
 
 #[test]

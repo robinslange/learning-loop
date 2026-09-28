@@ -15,8 +15,8 @@ use rand::RngCore;
 use sha2::Sha256;
 use zeroize::Zeroizing;
 
-use crate::sync::config::encrypted_seed_path;
 use super::{LoadResult, SeedBackend};
+use crate::sync::config::encrypted_seed_path;
 
 /// Encrypted file layout v1:
 ///
@@ -33,8 +33,8 @@ const ENC_TOTAL_LEN: usize = 64;
 
 /// Derive the AEAD key from the machine ID using HKDF-SHA256.
 fn derive_enc_key() -> anyhow::Result<Zeroizing<[u8; 32]>> {
-    let machine_id = machine_uid::get()
-        .map_err(|e| anyhow::anyhow!("failed to read machine-id: {e}"))?;
+    let machine_id =
+        machine_uid::get().map_err(|e| anyhow::anyhow!("failed to read machine-id: {e}"))?;
     let hk = Hkdf::<Sha256>::new(Some(b"ll-search-seed-v1"), machine_id.as_bytes());
     let mut prk = Zeroizing::new([0u8; 32]);
     hk.expand(b"federation-signing-seed", prk.as_mut())
@@ -49,8 +49,8 @@ pub fn read_encrypted(config_dir: &Path) -> anyhow::Result<Option<[u8; 32]>> {
         return Ok(None);
     }
 
-    let data = std::fs::read(&path)
-        .with_context(|| format!("failed to read {}", path.display()))?;
+    let data =
+        std::fs::read(&path).with_context(|| format!("failed to read {}", path.display()))?;
 
     if data.len() != ENC_TOTAL_LEN {
         anyhow::bail!("encrypted seed file has unexpected length {}", data.len());
@@ -67,11 +67,10 @@ pub fn read_encrypted(config_dir: &Path) -> anyhow::Result<Option<[u8; 32]>> {
         .map_err(|e| anyhow::anyhow!("cipher init failed: {e}"))?;
     let nonce = Nonce::from_slice(nonce_bytes);
 
-    let plaintext: Zeroizing<Vec<u8>> = Zeroizing::new(
-        cipher
-            .decrypt(nonce, ciphertext)
-            .map_err(|_| anyhow::anyhow!("encrypted seed decryption failed (corrupt file or wrong machine-id)"))?,
-    );
+    let plaintext: Zeroizing<Vec<u8>> =
+        Zeroizing::new(cipher.decrypt(nonce, ciphertext).map_err(|_| {
+            anyhow::anyhow!("encrypted seed decryption failed (corrupt file or wrong machine-id)")
+        })?);
 
     let seed: [u8; 32] = plaintext
         .as_slice()
@@ -107,7 +106,11 @@ pub fn write_encrypted(config_dir: &Path, seed: &[u8; 32]) -> anyhow::Result<()>
     file_data.extend_from_slice(&nonce_bytes);
     file_data.extend_from_slice(&ciphertext);
 
-    debug_assert_eq!(file_data.len(), ENC_TOTAL_LEN, "encrypted file must be exactly 64 bytes");
+    debug_assert_eq!(
+        file_data.len(),
+        ENC_TOTAL_LEN,
+        "encrypted file must be exactly 64 bytes"
+    );
 
     crate::sync::atomic_file::write_private_bytes(&path, &file_data)
 }
@@ -174,7 +177,11 @@ mod tests {
         let tmp = tempdir().unwrap();
         write_encrypted(tmp.path(), &[7u8; 32]).unwrap();
         let data = std::fs::read(encrypted_seed_path(tmp.path())).unwrap();
-        assert_eq!(data.len(), ENC_TOTAL_LEN, "total file length must be 64 bytes");
+        assert_eq!(
+            data.len(),
+            ENC_TOTAL_LEN,
+            "total file length must be 64 bytes"
+        );
         assert_eq!(&data[..4], ENC_MAGIC, "first 4 bytes must be LLS1 magic");
     }
 
@@ -186,6 +193,9 @@ mod tests {
         let mut data = std::fs::read(&path).unwrap();
         data[20] ^= 0xFF;
         std::fs::write(&path, &data).unwrap();
-        assert!(read_encrypted(tmp.path()).is_err(), "tampered ciphertext must fail decryption");
+        assert!(
+            read_encrypted(tmp.path()).is_err(),
+            "tampered ciphertext must fail decryption"
+        );
     }
 }

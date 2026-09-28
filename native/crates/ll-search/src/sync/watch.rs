@@ -7,8 +7,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use notify::{RecursiveMode, Watcher};
-use tokio::sync::Notify;
 use tokio::sync::watch as watch_chan;
+use tokio::sync::Notify;
 
 use super::config::FederationConfig;
 
@@ -35,11 +35,7 @@ impl PidGuard {
         std::fs::create_dir_all(path.parent().unwrap_or(Path::new(".")))?;
         const MAX_RETRIES: u32 = 3;
         for _ in 0..MAX_RETRIES {
-            match OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(path)
-            {
+            match OpenOptions::new().write(true).create_new(true).open(path) {
                 Ok(mut f) => {
                     write!(f, "{}", std::process::id())?;
                     return Ok(PidGuard {
@@ -132,7 +128,8 @@ pub async fn run_watch_async(cfg: WatchConfig) -> anyhow::Result<()> {
         let shutdown_rx_dup = shutdown_rx.clone();
         tokio::spawn(async move {
             if let Err(e) =
-                crate::dup_scan_server::run_dup_scan_server(socket_path, db_path, shutdown_rx_dup).await
+                crate::dup_scan_server::run_dup_scan_server(socket_path, db_path, shutdown_rx_dup)
+                    .await
             {
                 eprintln!("UDS server task exited with error: {e}");
             }
@@ -144,7 +141,6 @@ pub async fn run_watch_async(cfg: WatchConfig) -> anyhow::Result<()> {
         eprintln!("Initial sync...");
         do_sync(&cfg.db_path, &cfg.vault_path, &cfg.config_dir, fc).await;
     }
-
 
     let mut librarian_child: Option<std::process::Child> = None;
     if let Some(ref script) = cfg.librarian_script {
@@ -305,10 +301,12 @@ fn spawn_shutdown_signals(tx: watch_chan::Sender<bool>) {
     let flag = Arc::new(AtomicBool::new(false));
     #[cfg(unix)]
     {
-        if let Err(e) = signal_hook::flag::register(signal_hook::consts::SIGINT, Arc::clone(&flag)) {
+        if let Err(e) = signal_hook::flag::register(signal_hook::consts::SIGINT, Arc::clone(&flag))
+        {
             eprintln!("SIGINT handler install failed: {e}");
         }
-        if let Err(e) = signal_hook::flag::register(signal_hook::consts::SIGTERM, Arc::clone(&flag)) {
+        if let Err(e) = signal_hook::flag::register(signal_hook::consts::SIGTERM, Arc::clone(&flag))
+        {
             eprintln!("SIGTERM handler install failed: {e}");
         }
     }
@@ -524,7 +522,11 @@ mod debounce_tests {
             }
             s.touched.insert(same_path.clone());
         }
-        assert_eq!(touched(&state), 1, "HashSet must dedup repeated atomic writes to one file");
+        assert_eq!(
+            touched(&state),
+            1,
+            "HashSet must dedup repeated atomic writes to one file"
+        );
     }
 
     // ---------------------------------------------------------------------
@@ -699,7 +701,6 @@ mod debounce_tests {
             .expect("a daemon that started before `join` must still take the config up");
         assert_eq!(now.hub.endpoint, "wss://joined.invalid/ws");
     }
-
 }
 
 #[cfg(test)]
@@ -711,8 +712,15 @@ mod tests {
     #[test]
     fn backoff_grows_with_failures_and_caps() {
         assert_eq!(backoff_ticks(0, false), 0);
-        assert_eq!(backoff_ticks(1, false), 0, "one failure retries at the normal cadence");
-        assert!(backoff_ticks(2, false) > 0, "a second failure must slow down");
+        assert_eq!(
+            backoff_ticks(1, false),
+            0,
+            "one failure retries at the normal cadence"
+        );
+        assert!(
+            backoff_ticks(2, false) > 0,
+            "a second failure must slow down"
+        );
         assert!(
             backoff_ticks(3, false) > backoff_ticks(2, false),
             "the wait grows while it keeps failing"
@@ -737,7 +745,9 @@ mod tests {
     #[test]
     fn only_an_oversize_export_is_terminal() {
         use crate::sync::error::SyncError;
-        let oversize = anyhow::Error::new(SyncError::EnvelopeOversize { cap: 16 * 1024 * 1024 });
+        let oversize = anyhow::Error::new(SyncError::EnvelopeOversize {
+            cap: 16 * 1024 * 1024,
+        });
         assert!(SyncError::is_terminal(&oversize));
 
         assert!(
@@ -748,6 +758,9 @@ mod tests {
         // The classification must survive the context the sync paths add.
         let wrapped = anyhow::Error::new(SyncError::EnvelopeOversize { cap: 1 })
             .context("the export is 30412800 bytes");
-        assert!(SyncError::is_terminal(&wrapped), "context must not erase the verdict");
+        assert!(
+            SyncError::is_terminal(&wrapped),
+            "context must not erase the verdict"
+        );
     }
 }

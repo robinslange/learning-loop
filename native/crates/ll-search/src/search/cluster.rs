@@ -4,9 +4,9 @@ use serde::Serialize;
 
 use crate::db::load_embedding;
 
-use super::scoring::dot_product;
 use super::graph::load_tags_map;
 use super::query::{find_note_id, resolve_note_id_like};
+use super::scoring::dot_product;
 use super::store::EmbeddingStore;
 
 #[derive(Serialize)]
@@ -25,7 +25,12 @@ pub struct DiscriminatePair {
     pub similarity: f64,
 }
 
-pub fn similar_notes(conn: &Connection, note_path: &str, top_n: usize, store: &EmbeddingStore) -> Vec<SimilarResult> {
+pub fn similar_notes(
+    conn: &Connection,
+    note_path: &str,
+    top_n: usize,
+    store: &EmbeddingStore,
+) -> Vec<SimilarResult> {
     let note_id = find_note_id(conn, note_path);
     let note_id = match note_id {
         Some(id) => id,
@@ -55,16 +60,17 @@ pub fn similar_notes(conn: &Connection, note_path: &str, top_n: usize, store: &E
         .map(|(_, path, sim)| {
             let score = (1.0 - (sim * sim) as f64 / 2.0) * 10000.0;
             let score = score.round() / 10000.0;
-            let tags = tags_map
-                .get(&path)
-                .cloned()
-                .unwrap_or_default();
+            let tags = tags_map.get(&path).cloned().unwrap_or_default();
             SimilarResult { path, score, tags }
         })
         .collect()
 }
 
-pub fn cluster_notes(_conn: &Connection, threshold: f32, store: &EmbeddingStore) -> Vec<Vec<String>> {
+pub fn cluster_notes(
+    _conn: &Connection,
+    threshold: f32,
+    store: &EmbeddingStore,
+) -> Vec<Vec<String>> {
     let all = store.all();
     let n = all.len();
     let mut assigned = vec![false; n];
@@ -103,7 +109,8 @@ pub fn discriminate_pairs(
     store: &EmbeddingStore,
 ) -> Vec<DiscriminatePair> {
     let embeddings: Vec<(String, Vec<f32>)> = if paths.is_empty() {
-        store.all()
+        store
+            .all()
             .iter()
             .map(|(_, path, emb)| (path.clone(), emb.clone()))
             .collect()
@@ -143,14 +150,18 @@ pub fn discriminate_pairs(
         })
         .collect();
 
-    pairs.sort_by(|a, b| b.similarity.partial_cmp(&a.similarity).unwrap_or(std::cmp::Ordering::Equal));
+    pairs.sort_by(|a, b| {
+        b.similarity
+            .partial_cmp(&a.similarity)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     pairs
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::test_helpers::helpers::*;
+    use super::*;
 
     #[test]
     fn test_cluster_deterministic_ordering() {

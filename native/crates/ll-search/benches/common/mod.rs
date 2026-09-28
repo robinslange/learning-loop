@@ -5,7 +5,7 @@
 
 #![allow(dead_code)]
 
-use rusqlite::{Connection, params};
+use rusqlite::{params, Connection};
 
 // ---------------------------------------------------------------------------
 // Deterministic PRNG — splitmix64
@@ -41,9 +41,7 @@ impl Splitmix64 {
 /// arithmetic seeded from `note_id` and `seed`.
 pub fn deterministic_embedding(note_id: u64, dim: usize, seed: u64) -> Vec<f32> {
     let mut rng = Splitmix64(seed ^ note_id.wrapping_mul(0x517cc1b727220a95));
-    let mut v: Vec<f32> = (0..dim)
-        .map(|_| rng.next_f32() * 2.0 - 1.0)
-        .collect();
+    let mut v: Vec<f32> = (0..dim).map(|_| rng.next_f32() * 2.0 - 1.0).collect();
     let norm: f32 = v.iter().map(|x| x * x).sum::<f32>().sqrt().max(1e-9);
     for x in &mut v {
         *x /= norm;
@@ -56,25 +54,101 @@ pub fn deterministic_embedding(note_id: u64, dim: usize, seed: u64) -> Vec<f32> 
 // ---------------------------------------------------------------------------
 
 const CORPUS: &[&str] = &[
-    "activation", "adaptive", "aggregate", "algorithm", "alignment",
-    "allocation", "analysis", "anchor", "annotation", "architecture",
-    "attention", "attribute", "augmentation", "bayesian", "bias",
-    "boundary", "branching", "buffer", "calibration", "capacity",
-    "causal", "channel", "classifier", "cluster", "coherence",
-    "compression", "computation", "concept", "confidence", "consolidation",
-    "constraint", "context", "convergence", "correlation", "criterion",
-    "decay", "decomposition", "delta", "density", "dependency",
-    "depth", "detection", "dimension", "distribution", "divergence",
-    "dynamics", "embedding", "encoding", "entropy", "evaluation",
-    "evidence", "evolution", "expansion", "extraction", "feedback",
-    "filter", "flow", "focus", "frequency", "function",
-    "gradient", "graph", "heuristic", "hierarchy", "hypothesis",
-    "inference", "integration", "interaction", "invariance", "iteration",
-    "kernel", "knowledge", "label", "latent", "layer",
-    "learning", "likelihood", "loss", "manifold", "mapping",
-    "memory", "metric", "mixture", "model", "momentum",
-    "network", "noise", "normalization", "objective", "optimization",
-    "output", "parameter", "pattern", "penalty", "perception",
+    "activation",
+    "adaptive",
+    "aggregate",
+    "algorithm",
+    "alignment",
+    "allocation",
+    "analysis",
+    "anchor",
+    "annotation",
+    "architecture",
+    "attention",
+    "attribute",
+    "augmentation",
+    "bayesian",
+    "bias",
+    "boundary",
+    "branching",
+    "buffer",
+    "calibration",
+    "capacity",
+    "causal",
+    "channel",
+    "classifier",
+    "cluster",
+    "coherence",
+    "compression",
+    "computation",
+    "concept",
+    "confidence",
+    "consolidation",
+    "constraint",
+    "context",
+    "convergence",
+    "correlation",
+    "criterion",
+    "decay",
+    "decomposition",
+    "delta",
+    "density",
+    "dependency",
+    "depth",
+    "detection",
+    "dimension",
+    "distribution",
+    "divergence",
+    "dynamics",
+    "embedding",
+    "encoding",
+    "entropy",
+    "evaluation",
+    "evidence",
+    "evolution",
+    "expansion",
+    "extraction",
+    "feedback",
+    "filter",
+    "flow",
+    "focus",
+    "frequency",
+    "function",
+    "gradient",
+    "graph",
+    "heuristic",
+    "hierarchy",
+    "hypothesis",
+    "inference",
+    "integration",
+    "interaction",
+    "invariance",
+    "iteration",
+    "kernel",
+    "knowledge",
+    "label",
+    "latent",
+    "layer",
+    "learning",
+    "likelihood",
+    "loss",
+    "manifold",
+    "mapping",
+    "memory",
+    "metric",
+    "mixture",
+    "model",
+    "momentum",
+    "network",
+    "noise",
+    "normalization",
+    "objective",
+    "optimization",
+    "output",
+    "parameter",
+    "pattern",
+    "penalty",
+    "perception",
 ];
 
 /// Produce a deterministic text string of approximately `words` words.
@@ -133,24 +207,36 @@ fn create_bench_schema(conn: &Connection) {
          );
          INSERT OR IGNORE INTO meta (key, value) VALUES ('model_id', 'bench-model');
          INSERT OR IGNORE INTO meta (key, value) VALUES ('schema_version', '5');",
-    ).expect("bench schema creation failed");
+    )
+    .expect("bench schema creation failed");
 }
 
-fn insert_note(conn: &Connection, id: i64, path: &str, title: &str, tags: &str, body: &str, emb: &[f32]) {
+fn insert_note(
+    conn: &Connection,
+    id: i64,
+    path: &str,
+    title: &str,
+    tags: &str,
+    body: &str,
+    emb: &[f32],
+) {
     conn.execute(
         "INSERT OR IGNORE INTO notes (id, path, content_hash, mtime, title, tags)
          VALUES (?1, ?2, 'bench', ?3, ?4, ?5)",
         params![id, path, id as f64 * 1000.0, title, tags],
-    ).unwrap();
+    )
+    .unwrap();
     conn.execute(
         "INSERT OR IGNORE INTO notes_content (id, title, tags, body) VALUES (?1, ?2, ?3, ?4)",
         params![id, title, tags, body],
-    ).unwrap();
+    )
+    .unwrap();
     let blob: Vec<u8> = emb.iter().flat_map(|f| f.to_le_bytes()).collect();
     conn.execute(
         "INSERT OR IGNORE INTO embeddings (id, data) VALUES (?1, ?2)",
         params![id, blob],
-    ).unwrap();
+    )
+    .unwrap();
 }
 
 /// Build an in-memory SQLite DB with `n` synthetic notes of `dim`-dimensional embeddings.
@@ -158,7 +244,8 @@ pub fn build_synthetic_db_in_memory(n: usize, dim: usize, seed: u64) -> Connecti
     let conn = Connection::open_in_memory().expect("in-memory db failed");
     create_bench_schema(&conn);
     populate_db(&conn, n, dim, seed);
-    conn.execute_batch("INSERT INTO notes_fts(notes_fts) VALUES('rebuild')").unwrap();
+    conn.execute_batch("INSERT INTO notes_fts(notes_fts) VALUES('rebuild')")
+        .unwrap();
     conn
 }
 
@@ -178,8 +265,10 @@ pub fn build_synthetic_vault_on_disk(n: usize, seed: u64) -> SyntheticVault {
         let title = format!("Note {i}");
         let tags = CORPUS[rng.next_usize(CORPUS.len())];
         let body = deterministic_text(seed ^ i as u64, 50);
-        let content = format!("---\ntitle: \"{title}\"\ntags: [\"{tags}\"]\nmtime: {}\n---\n\n# {title}\n\n{body}\n",
-            1640000000u64 + i as u64 * 3600);
+        let content = format!(
+            "---\ntitle: \"{title}\"\ntags: [\"{tags}\"]\nmtime: {}\n---\n\n# {title}\n\n{body}\n",
+            1640000000u64 + i as u64 * 3600
+        );
         let path = dir.path().join(format!("{i:05}.md"));
         std::fs::write(&path, content).unwrap();
         note_paths.push(path);
@@ -207,7 +296,10 @@ pub fn dot_product(a: &[f32], b: &[f32]) -> f32 {
 }
 
 /// RRF scoring accumulation (mirrors ll-core behaviour).
-pub fn add_ranked_rrf(scores: &mut std::collections::HashMap<String, f64>, ranked: impl Iterator<Item = String>) {
+pub fn add_ranked_rrf(
+    scores: &mut std::collections::HashMap<String, f64>,
+    ranked: impl Iterator<Item = String>,
+) {
     const K: f64 = 60.0;
     for (rank, path) in ranked.enumerate() {
         *scores.entry(path).or_insert(0.0) += 1.0 / (K + (rank + 1) as f64);
