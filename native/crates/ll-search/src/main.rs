@@ -344,13 +344,6 @@ fn out<T: serde::Serialize>(data: &T) -> anyhow::Result<()> {
     ll_search::app::emit(data, true)
 }
 
-/// The read side opens an existing index only. Its error already says which
-/// file is missing and how to build it.
-fn open_db(db_path: &str) -> anyhow::Result<rusqlite::Connection> {
-    use anyhow::Context as _;
-    ll_search::db::open_db(db_path).context("failed to open database")
-}
-
 /// What the joining machine puts on its screen. The six words go to stderr
 /// beside the code because they are read aloud, not piped anywhere.
 fn show_pending(pending: &ll_search::sync::link::PendingLink) {
@@ -647,7 +640,7 @@ impl std::fmt::Display for PhraseUnreadable {
 
 impl std::error::Error for PhraseUnreadable {}
 
-/// Every failure reaches the user as one line on stderr and a nonzero exit,
+/// An error reaches the user as its diagnostic on stderr and a nonzero exit,
 /// never a panic banner: a mistyped path is not a crash.
 #[tokio::main(flavor = "multi_thread")]
 async fn main() -> std::process::ExitCode {
@@ -689,7 +682,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             }
         }
         Commands::Query { db_path, text, top, config_dir, vault_path, all, recency, after, before, session, project, threshold } => {
-            let conn = open_db(&db_path)?;
+            let conn = ll_search::db::open_db(&db_path)?;
             init_embedding()?;
             let app = build_app_state(&db_path, config_dir.clone())?;
             let ctx = app.ensure_search_context(&conn);
@@ -710,28 +703,28 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             out(&response)?;
         }
         Commands::Similar { db_path, note_path, top } => {
-            let conn = open_db(&db_path)?;
+            let conn = ll_search::db::open_db(&db_path)?;
             init_embedding()?;
             let store = ll_search::search::store::load_store(&conn);
             let results = ll_search::search::similar_notes(&conn, &note_path, top, &store);
             out(&results)?;
         }
         Commands::Cluster { db_path, threshold } => {
-            let conn = open_db(&db_path)?;
+            let conn = ll_search::db::open_db(&db_path)?;
             init_embedding()?;
             let store = ll_search::search::store::load_store(&conn);
             let results = ll_search::search::cluster_notes(&conn, threshold, &store);
             out(&results)?;
         }
         Commands::Discriminate { db_path, threshold, paths } => {
-            let conn = open_db(&db_path)?;
+            let conn = ll_search::db::open_db(&db_path)?;
             init_embedding()?;
             let store = ll_search::search::store::load_store(&conn);
             let results = ll_search::search::discriminate_pairs(&conn, &paths, threshold, &store);
             out(&results)?;
         }
         Commands::ReflectScan { db_path, queries, top, candidates, threshold, config_dir } => {
-            let conn = open_db(&db_path)?;
+            let conn = ll_search::db::open_db(&db_path)?;
             init_embedding()?;
             let store = ll_search::search::store::load_store(&conn);
             let peers = resolve_peers(&conn, config_dir, None, false)?;
@@ -754,29 +747,29 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             print!("{text}");
         }
         Commands::IndexStatus { db_path, vault_path } => {
-            let conn = open_db(&db_path)?;
+            let conn = ll_search::db::open_db(&db_path)?;
             let status = ll_search::db::get_status(&conn, &vault_path);
             out(&status)?;
         }
         Commands::Tags { db_path, min_count } => {
-            let conn = open_db(&db_path)?;
+            let conn = ll_search::db::open_db(&db_path)?;
             let tags = ll_search::db::list_tags(&conn, min_count);
             out(&tags)?;
         }
         Commands::Intentions { db_path, context } => {
-            let conn = open_db(&db_path)?;
+            let conn = ll_search::db::open_db(&db_path)?;
             match context {
                 Some(ctx) => out(&ll_search::db::list_intentions_for_context(&conn, &ctx))?,
                 None => out(&ll_search::db::list_intentions_summary(&conn))?,
             }
         }
         Commands::Sessions { db_path, min_notes } => {
-            let conn = open_db(&db_path)?;
+            let conn = ll_search::db::open_db(&db_path)?;
             let sessions = ll_search::db::list_sessions(&conn, min_notes);
             out(&sessions)?;
         }
         Commands::LinkStats { db_path, folder, orphans } => {
-            let conn = open_db(&db_path)?;
+            let conn = ll_search::db::open_db(&db_path)?;
             let result = ll_search::db::link_stats(&conn, folder.as_deref(), orphans);
             out(&result)?;
         }
@@ -902,7 +895,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             }))?;
         }
         Commands::Rerank { db_path, query, top, candidates, config_dir } => {
-            let conn = open_db(&db_path)?;
+            let conn = ll_search::db::open_db(&db_path)?;
             init_embedding()?;
             let store = ll_search::search::store::load_store(&conn);
             let peers = resolve_peers(&conn, config_dir, None, false)?;
@@ -931,7 +924,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             ll_search::sync::watch::run_watch_async(cfg).await.context("watch failed")?;
         }
         Commands::Migrate { db_path, model, drop_old } => {
-            let conn = open_db(&db_path)?;
+            let conn = ll_search::db::open_db(&db_path)?;
             if drop_old {
                 ll_search::db::drop_old_embeddings(&conn);
                 eprintln!("Dropped old embeddings table.");
@@ -944,21 +937,21 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             }
         }
         Commands::EvalPrf { db_path, min_links } => {
-            let conn = open_db(&db_path)?;
+            let conn = ll_search::db::open_db(&db_path)?;
             init_embedding()?;
             let store = ll_search::search::store::load_store(&conn);
             let result = ll_search::search::eval_prf(&conn, &store, min_links)?;
             out(&result)?;
         }
         Commands::EvalFunnel { db_path, min_links, limit } => {
-            let conn = open_db(&db_path)?;
+            let conn = ll_search::db::open_db(&db_path)?;
             init_embedding()?;
             let store = ll_search::search::store::load_store(&conn);
             let result = ll_search::search::eval_funnel(&conn, &store, min_links, limit)?;
             out(&result)?;
         }
         Commands::LaneDiag { db_path, probes } => {
-            let conn = open_db(&db_path)?;
+            let conn = ll_search::db::open_db(&db_path)?;
             init_embedding()?;
             let raw = std::fs::read_to_string(&probes)
                 .with_context(|| format!("failed to read probes from {probes}"))?;
@@ -967,7 +960,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             out(&ll_search::search::lane_diagnostics(&conn, &triples)?)?;
         }
         Commands::TuneWeights { db_path, min_links, limit } => {
-            let conn = open_db(&db_path)?;
+            let conn = ll_search::db::open_db(&db_path)?;
             init_embedding()?;
             let store = ll_search::search::store::load_store(&conn);
             let results = ll_search::search::tune_weights(&conn, &store, min_links, limit)?;
@@ -989,7 +982,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             );
         }
         Commands::TunePrf { db_path, queries } => {
-            let conn = open_db(&db_path)?;
+            let conn = ll_search::db::open_db(&db_path)?;
             init_embedding()?;
             let store = ll_search::search::store::load_store(&conn);
             let result = ll_search::search::tune_prf(&conn, &queries, &store)?;
