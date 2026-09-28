@@ -144,9 +144,12 @@ pub(crate) fn run_migrations(conn: &Connection) -> Result<()> {
         .ok();
     }
 
-    // Final pass: ensure meta.schema_version matches SCHEMA_VERSION after all migrations.
+    // Final pass: ensure meta.schema_version matches SCHEMA_VERSION after all
+    // migrations. Only when it differs: see `opening_a_current_index_writes_nothing`.
     conn.execute(
-        "INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', ?1)",
+        "INSERT INTO meta (key, value) VALUES ('schema_version', ?1)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value
+         WHERE meta.value IS NOT excluded.value",
         params![SCHEMA_VERSION.to_string()],
     )
     .ok();
@@ -403,6 +406,27 @@ pub fn drop_old_embeddings(conn: &Connection) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Opening a current index is a read. `PRAGMA data_version` moves on every
+    /// other connection when one commits a write, even a write of the value
+    /// already there, and the watch daemon's search cache rebuilds on that
+    /// signal. So a write here would invalidate it on every hook's query.
+    #[test]
+    fn opening_a_current_index_writes_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("index.db");
+        let path = path.to_string_lossy();
+        let watcher = open_or_create_db(&path).unwrap();
+        let version = |c: &Connection| {
+            c.query_row("PRAGMA data_version", [], |r| r.get::<_, i64>(0))
+                .unwrap()
+        };
+        let before = version(&watcher);
+
+        drop(open_db(&path).unwrap());
+
+        assert_eq!(version(&watcher), before);
+    }
 
     #[test]
     fn migrations_add_note_uuid_to_a_pre_existing_index() {

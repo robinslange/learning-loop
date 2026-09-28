@@ -375,6 +375,8 @@ mod tests {
         let index = ScanIndex::new(db_path);
         let first = index.search_context().unwrap();
         assert_eq!(first.store.len(), 1);
+        // Each scan opens its own connection, and that must not count as a change.
+        drop(index.open().unwrap());
         assert!(
             Arc::ptr_eq(&first, &index.search_context().unwrap()),
             "unchanged, so cached"
