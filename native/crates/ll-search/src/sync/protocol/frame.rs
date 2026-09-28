@@ -1,69 +1,10 @@
-//! Binary data-plane frames: single-frame `Envelope` (v2) and per-chunk
-//! `ChunkedFrame` (v3), plus the `manifest_root` over chunked frame hashes.
+//! Binary data-plane frames: per-chunk `ChunkedFrame` (v3), plus the
+//! `manifest_root` over chunked frame hashes.
 
 use sha2::{Digest, Sha256};
 
 use crate::sync::error::SyncError;
-use super::{
-    CHUNKED_HEADER_LEN, CHUNK_MAX_BODY_SIZE, ENVELOPE_HEADER_LEN, MAX_ENVELOPE_SIZE,
-};
-
-/// Wire frame for an index transfer. Control plane (JSON `PeerEnvelope`) carries
-/// the meta; data plane (this struct) carries the bytes. SHA256 is computed before
-/// transmission and verified after receipt. Mirrors sync-hub `frame::Envelope`.
-#[derive(Debug)]
-pub struct Envelope {
-    pub size: u32,
-    pub hash: [u8; 32],
-    pub body: Vec<u8>,
-}
-
-impl Envelope {
-    pub fn from_body(body: Vec<u8>) -> std::result::Result<Self, SyncError> {
-        if body.len() > MAX_ENVELOPE_SIZE {
-            return Err(SyncError::EnvelopeOversize { cap: MAX_ENVELOPE_SIZE });
-        }
-        let hash: [u8; 32] = Sha256::digest(&body).into();
-        let size = body.len() as u32;
-        Ok(Self { size, hash, body })
-    }
-
-    pub fn encode(&self) -> Vec<u8> {
-        let mut out = Vec::with_capacity(ENVELOPE_HEADER_LEN + self.body.len());
-        out.extend_from_slice(&self.size.to_be_bytes());
-        out.extend_from_slice(&self.hash);
-        out.extend_from_slice(&self.body);
-        out
-    }
-
-    pub fn decode(buf: &[u8]) -> std::result::Result<Self, SyncError> {
-        if buf.len() < ENVELOPE_HEADER_LEN {
-            return Err(SyncError::SizeMismatch {
-                expected: ENVELOPE_HEADER_LEN,
-                actual: buf.len(),
-            });
-        }
-        let size = u32::from_be_bytes([buf[0], buf[1], buf[2], buf[3]]);
-        if size as usize > MAX_ENVELOPE_SIZE {
-            return Err(SyncError::EnvelopeOversize { cap: MAX_ENVELOPE_SIZE });
-        }
-        let expected = ENVELOPE_HEADER_LEN + size as usize;
-        if buf.len() != expected {
-            return Err(SyncError::SizeMismatch {
-                expected,
-                actual: buf.len(),
-            });
-        }
-        let mut hash = [0u8; 32];
-        hash.copy_from_slice(&buf[4..ENVELOPE_HEADER_LEN]);
-        let body = buf[ENVELOPE_HEADER_LEN..].to_vec();
-        let computed: [u8; 32] = Sha256::digest(&body).into();
-        if computed != hash {
-            return Err(SyncError::HashMismatch);
-        }
-        Ok(Self { size, hash, body })
-    }
-}
+use super::{CHUNKED_HEADER_LEN, CHUNK_MAX_BODY_SIZE};
 
 /// Per-chunk frame for v3 chunked uploads. Mirrors sync-hub `frame::ChunkedFrame`.
 ///
@@ -164,8 +105,7 @@ impl ChunkedFrame {
 ///
 /// Not a merkle tree; we ship all chunk hashes alongside the upload, so a flat
 /// concatenation suffices for tamper-detection. Matches BitTorrent v1
-/// piece-hash-list. The envelope JSON field is still called `merkle_root` for
-/// downstream tooling compatibility.
+/// piece-hash-list. v5 carries it as `manifest_root`.
 pub fn manifest_root(chunk_hashes: &[[u8; 32]]) -> [u8; 32] {
     let mut hasher = Sha256::new();
     for h in chunk_hashes {

@@ -9,10 +9,9 @@ use sha2::{Sha256, Digest};
 use tokio_tungstenite::tungstenite::http::Uri;
 use tokio_tungstenite::tungstenite::Message;
 
-use super::auth;
 use super::config::{
     export_db_path, export_shape_fingerprint, last_export_mtime_path, last_export_shape_path,
-    seed_path, vault_mtime_and_path_digest, FederationConfig,
+    vault_mtime_and_path_digest, FederationConfig,
 };
 use super::error::SyncError;
 use super::export::{export_index, ExportResult};
@@ -396,7 +395,14 @@ async fn run_cycle(
     // whole question before chunking existed and is the wrong one now.
     // `upload_plan` decides, once, with the hub's limits in hand.
 
-    let seed = auth::load_seed(&seed_path(config_dir))?;
+    let seed = super::seed_store::load_only(config_dir)?
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "no federation seed found at {}; run `/learning-loop:federation` to set up an identity",
+                config_dir.display()
+            )
+        })?
+        .signing_key;
     let peer_id = config.identity.display_name.clone();
 
     let (mut ws, ready) =

@@ -490,7 +490,7 @@ fn config_for(config_dir: &Path, addr: SocketAddr) -> FederationConfig {
     FederationConfig {
         identity: Identity {
             display_name: "test-peer".into(),
-            pubkey: format!("ed25519:{}", ll_search::sync::auth::pubkey_b64(&seed.signing_key)),
+            pubkey: format!("ed25519:{}", ll_search::sync::key_id::pubkey_b64(&seed.signing_key)),
         },
         visibility: VisibilityConfig { default: "private".into(), rules: vec![] },
         hub: HubEndpoint { endpoint: format!("ws://{addr}"), key_id: Some(hub_key_id()) },
@@ -580,6 +580,36 @@ async fn a_cycle_that_dies_before_the_hub_still_writes_state() {
         "the recorded detail is the cycle's own error, not a placeholder");
     assert_eq!(state.hub_holds, None, "the cycle never got far enough to ask the hub");
     assert!(state.last_attempt_at > 0);
+}
+
+/// Sync never mints an identity: that would hand the hub a key no peer has
+/// allowlisted. A config dir whose seed has gone is refused, with the command
+/// that sets one up, before any hub is contacted.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_cycle_without_a_seed_names_the_command_that_makes_one() {
+    test_env();
+    let dir = tempfile::tempdir().unwrap();
+    let vault = tempfile::tempdir().unwrap();
+    let config = config_for(dir.path(), "127.0.0.1:1".parse().unwrap());
+    place_export(dir.path(), vault.path());
+    std::fs::remove_file(ll_search::sync::config::encrypted_seed_path(dir.path())).unwrap();
+
+    let err = sync_all_async(
+        &dir.path().join("no-such-source.db"),
+        vault.path(),
+        dir.path(),
+        &config,
+    )
+    .await
+    .expect_err("a cycle with no seed cannot succeed");
+
+    let msg = err.to_string();
+    assert!(msg.contains("no federation seed found"), "{msg}");
+    assert!(msg.contains("/learning-loop:federation"), "{msg}");
+    assert!(
+        ll_search::sync::seed_store::load_only(dir.path()).unwrap().is_none(),
+        "the cycle must not have minted a replacement"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1018,7 +1048,7 @@ async fn a_cycle_answers_an_inbound_link_with_its_own_half() {
     // because a signature proves someone signed a statement and not that
     // anyone here agreed to it. Calling the real door rather than fabricating
     // the state keeps this fixture a description of the flow it is named for.
-    ll_search::sync::link::request_offline(dir.path()).unwrap();
+    ll_search::sync::link::pending_offline(dir.path()).unwrap();
     let (approver, inbound) = link_grant(&me);
     let held = HeldIndex {
         sha256: export_sha(dir.path()),
@@ -1095,7 +1125,7 @@ async fn a_refused_grant_does_not_stop_the_upload_or_the_read_half() {
     // because a signature proves someone signed a statement and not that
     // anyone here agreed to it. Calling the real door rather than fabricating
     // the state keeps this fixture a description of the flow it is named for.
-    ll_search::sync::link::request_offline(dir.path()).unwrap();
+    ll_search::sync::link::pending_offline(dir.path()).unwrap();
     let (_approver, inbound) = link_grant(&me);
     let (addr, seen) = spawn_hub_with(
         stale(),

@@ -319,13 +319,6 @@ pub(crate) fn drop_all(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-pub fn check_model_mismatch(conn: &Connection, active_model_id: &str) -> bool {
-    let stored: String = conn
-        .query_row("SELECT value FROM meta WHERE key = 'model_id'", [], |r| r.get(0))
-        .unwrap_or_else(|_| "unknown".to_string());
-    stored != active_model_id
-}
-
 pub fn migrate_embeddings(
     conn: &Connection,
     provider: &dyn crate::model::EmbeddingProvider,

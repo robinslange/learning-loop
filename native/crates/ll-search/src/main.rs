@@ -853,7 +853,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             let result = ll_search::sync::seed_store::load_or_create(&config_dir)
                 .context("failed to load or create seed")?;
             out(&serde_json::json!({
-                "pubkey_b64": ll_search::sync::auth::pubkey_b64(&result.signing_key),
+                "pubkey_b64": ll_search::sync::key_id::pubkey_b64(&result.signing_key),
                 "backend": result.backend.to_string(),
                 "created": result.created,
             }))?;

@@ -343,18 +343,16 @@ async fn fetch_one(
 /// frame, which tungstenite refuses with `Capacity` -- and that error poisons
 /// the socket, so the remaining vaults on the connection failed with it.
 ///
-/// Two checks here, and deliberately not three. Seq and total must match what
-/// the header described, and the hashes must reassemble to the announced
-/// manifest root -- that one catches a hub whose framing contradicts its own
-/// descriptor, which nothing downstream can see, because correct frames
-/// described wrongly still hash to the right body.
+/// Two checks here. Seq and total must match what the header described, and
+/// the hashes must reassemble to the announced manifest root -- that one
+/// catches a hub whose framing contradicts its own descriptor, which nothing
+/// downstream can see, because correct frames described wrongly still hash to
+/// the right body.
 ///
-/// Comparing each frame's body against the hash it carries was written here and
-/// then removed: `fetch_one` hashes the whole reassembled body against
-/// `holds.sha256`, so altered bytes are already refused, and deleting the
-/// per-frame check reddened no test even against a deliberately corrupted
-/// frame. A guard whose removal nothing notices is not defence, and the cost of
-/// keeping it is a reader who thinks the end-to-end check is optional.
+/// `ChunkedFrame::decode` also refuses a frame whose body does not match the
+/// hash it carries. That is a property of the frame format, not the defence:
+/// `fetch_one` hashes the whole reassembled body against `holds.sha256`, and
+/// that end-to-end check is the one that keeps altered bytes out.
 async fn recv_chunked(ws: &mut WsStream, desc: &ChunkedBody) -> anyhow::Result<Vec<u8>> {
     if desc.chunks == 0 {
         anyhow::bail!("the hub described a chunked body of zero frames");

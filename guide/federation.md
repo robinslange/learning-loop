@@ -177,15 +177,15 @@ Federation sync runs over WebSocket, and the endpoint must be `wss://`: confiden
 
 **There is no protocol negotiation and no downgrade.** `PROTOCOL_VERSION` is `5`, both ends declare it, and a mismatch is an error that names both versions and tells you to upgrade one side. The v1/v2 negotiation an earlier version of this page described is gone: a version two peers have to agree on at runtime is a version one of them can be talked down to.
 
-Bodies travel as length-prefixed envelopes -- `u32 size (big-endian) + sha256 (32 bytes) + body` -- and the receiver validates the declared length and the hash before allocating, so a hostile size cannot trigger a huge `Vec::with_capacity`.
+A body that fits in one frame travels as the raw bytes, with its sha256 in the `upload-index` message beside it. A larger one is split into chunked frames -- `u32 seq + u32 total + u32 size (big-endian) + sha256 (32 bytes) + body` -- when the hub offers chunked upload. The receiver checks each frame's declared size and hash, bounds the frame count before allocating, and hashes the reassembled body end to end.
 
 | Cap | Default | Where |
 |---|---|---|
-| `MAX_ENVELOPE_SIZE` | 200 MB | Policy ceiling for envelope decode |
-| `HUB_INBOUND_CAP` | 50 MB | Ceiling on uploads (the smaller of the two wins) |
+| `HUB_INBOUND_CAP` | 16 MiB | Largest single-frame upload |
+| `CHUNK_MAX_BODY_SIZE` | 8 MiB | Largest chunk body |
 | Recv / send timeouts | 30 s / 60 s | `LL_SYNC_RECV_TIMEOUT_MS` / `LL_SYNC_SEND_TIMEOUT_MS` override per process |
 
-An upload over the inbound cap returns `SyncError::EnvelopeOversize { cap }` pre-flight, without opening the WebSocket.
+An upload over the single-frame cap, to a hub that does not offer chunked upload or whose total limit it exceeds, returns `SyncError::EnvelopeOversize { cap }` after the handshake and before any of the export is sent.
 
 ## Visibility rules
 
