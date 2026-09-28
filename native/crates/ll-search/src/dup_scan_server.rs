@@ -20,11 +20,16 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
+use parking_lot::Mutex;
+use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::watch as watch_chan;
 use tokio::task::JoinSet;
+
+use crate::app::AppState;
+use crate::search::SearchContext;
 
 /// Default discriminate threshold for daemon-served duplicate scans. Matches
 /// the `reflect-scan` CLI default (`main.rs` ReflectScan `threshold`) so the
@@ -77,16 +82,16 @@ struct ProtocolError {
 /// flips to true. Cleans up the socket file on shutdown and drains in-flight
 /// handlers within `SHUTDOWN_DRAIN`.
 ///
-/// `db_path` is the search index the daemon already maintains; duplicate-scan
-/// requests open a fresh read connection against it per request (SQLite is
-/// thread-safe in this mode and the embedding model is shared via the global
-/// provider).
+/// `db_path` is the search index the daemon already maintains. Each
+/// duplicate-scan request opens its own read connection for the scan; the
+/// `SearchContext` over the index is built once and kept until a reindex
+/// makes it stale (see [`ScanIndex`]).
 pub async fn run_dup_scan_server(
     socket_path: PathBuf,
     db_path: PathBuf,
     mut shutdown_rx: watch_chan::Receiver<bool>,
 ) -> anyhow::Result<()> {
-    let db_path = Arc::new(db_path);
+    let index = Arc::new(ScanIndex::new(db_path));
     if socket_path.exists() {
         // Probe with a timeout — a wedged daemon could otherwise let bare
         // connect() succeed instantly via the OS backlog.
@@ -144,9 +149,9 @@ pub async fn run_dup_scan_server(
             accept = listener.accept() => {
                 match accept {
                     Ok((stream, _addr)) => {
-                        let db_path = Arc::clone(&db_path);
+                        let index = Arc::clone(&index);
                         handlers.spawn(async move {
-                            if let Err(e) = handle_connection(stream, db_path).await {
+                            if let Err(e) = handle_connection(stream, index).await {
                                 eprintln!("UDS server connection error: {e}");
                             }
                         });
@@ -184,7 +189,7 @@ pub async fn run_dup_scan_server(
     result
 }
 
-async fn handle_connection(stream: UnixStream, db_path: Arc<PathBuf>) -> anyhow::Result<()> {
+async fn handle_connection(stream: UnixStream, index: Arc<ScanIndex>) -> anyhow::Result<()> {
     let (read_half, mut write_half) = stream.into_split();
     let mut reader = BufReader::new(read_half).take(MAX_REQUEST_BYTES);
     let mut line = String::new();
@@ -215,7 +220,7 @@ async fn handle_connection(stream: UnixStream, db_path: Arc<PathBuf>) -> anyhow:
                 // the daemon's index, run the scan with the warm embedding +
                 // rerank models, and return the reflect envelope. spawn_blocking
                 // keeps the SQLite + ONNX work off the tokio worker.
-                let result = tokio::task::spawn_blocking(move || run_duplicate_scan(&db_path, &req))
+                let result = tokio::task::spawn_blocking(move || run_duplicate_scan(&index, &req))
                     .await;
                 match result {
                     Ok(Ok(scan)) => serde_json::to_string(&scan)
@@ -234,12 +239,46 @@ async fn handle_connection(stream: UnixStream, db_path: Arc<PathBuf>) -> anyhow:
     Ok(())
 }
 
+/// The daemon's index, and the `SearchContext` cached over it.
+///
+/// The connection the cache is checked through stays open for the daemon's
+/// lifetime. Staleness is read from `PRAGMA data_version`, which moves only
+/// for a connection that was already open when another one wrote: a fresh
+/// connection reads the same value every time, so a cache checked through one
+/// would never see a reindex. Both are opened on the first scan rather than at
+/// startup, so a daemon whose index is not there yet still starts, and serves
+/// once it is.
+struct ScanIndex {
+    db_path: PathBuf,
+    warm: Mutex<Option<(Connection, AppState)>>,
+}
+
+impl ScanIndex {
+    fn new(db_path: PathBuf) -> Self {
+        Self { db_path, warm: Mutex::new(None) }
+    }
+
+    fn search_context(&self) -> anyhow::Result<Arc<SearchContext>> {
+        let mut warm = self.warm.lock();
+        let (conn, app) = match &mut *warm {
+            Some(open) => open,
+            empty => empty.insert((self.open()?, AppState::from_db(&self.db_path.to_string_lossy(), None)?)),
+        };
+        Ok(app.ensure_search_context(conn))
+    }
+
+    fn open(&self) -> anyhow::Result<Connection> {
+        crate::db::open_db(&self.db_path.to_string_lossy())
+            .map_err(|e| anyhow::anyhow!("open index {}: {e:#}", self.db_path.display()))
+    }
+}
+
 /// Run a reflect-style duplicate scan against the daemon's index, reusing the
 /// same `reflect_scan` pipeline the `reflect-scan` CLI command calls. The
 /// embedding provider is lazily initialised on first use and reused for the
 /// daemon's lifetime, so a duplicate-scan request never re-loads the model.
 fn run_duplicate_scan(
-    db_path: &Path,
+    index: &ScanIndex,
     req: &DuplicateScanRequest,
 ) -> anyhow::Result<crate::search::ReflectScanResult> {
     // Lazy, idempotent: the embedding provider is a global OnceLock, so the
@@ -247,17 +286,16 @@ fn run_duplicate_scan(
     // no-op when already initialised with the same model.
     crate::embed::init_provider(&crate::model::KnownModel::BgeSmallEnV15)?;
 
-    let db_str = db_path.to_string_lossy();
-    let conn = crate::db::open_db(&db_str)
-        .map_err(|e| anyhow::anyhow!("open index {}: {e:#}", db_path.display()))?;
-    let store = crate::search::load_store(&conn);
+    let ctx = index.search_context()?;
+    let conn = index.open()?;
     crate::search::reflect_scan(
+        &ctx,
         &conn,
+        &[],
         &req.queries,
         req.top,
         req.candidates,
         DUPLICATE_SCAN_DISCRIMINATE_THRESHOLD,
-        &store,
     )
 }
 
@@ -299,6 +337,40 @@ mod tests {
         let req: DuplicateScanRequest = serde_json::from_str(line).expect("dup-scan request parses");
         assert_eq!(req.top, 3);
         assert_eq!(req.candidates, 9);
+    }
+
+    /// A scan after a reindex must see the reindex. The cache is rebuilt only
+    /// when `data_version` moves, and it moves only for a connection that
+    /// stayed open across the write.
+    #[test]
+    fn the_cached_context_picks_up_a_note_written_after_it_was_built() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("index.db");
+        let writer = crate::db::open_or_create_db(&db_path.to_string_lossy()).unwrap();
+        let add_note = |path: &str| {
+            writer
+                .execute(
+                    "INSERT INTO notes (path, title, content_hash, mtime) VALUES (?1, ?1, 'hash', 0.0)",
+                    [path],
+                )
+                .unwrap();
+            let blob: Vec<u8> = [1.0f32, 0.0, 0.0].iter().flat_map(|f| f.to_le_bytes()).collect();
+            writer
+                .execute(
+                    "INSERT INTO embeddings (id, data) SELECT id, ?2 FROM notes WHERE path = ?1",
+                    rusqlite::params![path, blob],
+                )
+                .unwrap();
+        };
+        add_note("a.md");
+
+        let index = ScanIndex::new(db_path);
+        let first = index.search_context().unwrap();
+        assert_eq!(first.store.len(), 1);
+        assert!(Arc::ptr_eq(&first, &index.search_context().unwrap()), "unchanged, so cached");
+
+        add_note("b.md");
+        assert_eq!(index.search_context().unwrap().store.len(), 2);
     }
 
     #[test]

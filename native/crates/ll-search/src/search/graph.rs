@@ -2,8 +2,6 @@ use std::collections::{HashMap, HashSet};
 
 use rusqlite::Connection;
 
-#[cfg(test)]
-use crate::config::{TAG_FREQ_BAND_MAX, TAG_FREQ_BAND_MIN, TOP_K_GRAPH};
 pub(crate) use ll_core::graph::{personalized_pagerank, personalized_pagerank_holdout};
 
 pub(crate) fn load_link_graph(conn: &Connection) -> HashMap<String, Vec<String>> {
@@ -45,77 +43,6 @@ pub(crate) fn load_link_graph(conn: &Connection) -> HashMap<String, Vec<String>>
     edges.into_iter().map(|(k, v)| (k, v.into_iter().collect())).collect()
 }
 
-// Legacy standalone implementation kept for the legacy local_rrf_scores
-// regression path and graph.rs's own tag-IDF tests. Production callers use
-// SearchContext::tag_expand_from_map (in-memory cached tags).
-#[cfg(test)]
-pub(crate) fn tag_expand(conn: &Connection, seed_paths: &[String]) -> Vec<(String, f64)> {
-    let tags_map = load_tags_map(conn);
-    let total_notes = tags_map.len() as f64;
-    if total_notes == 0.0 {
-        return Vec::new();
-    }
-    let seed_set: HashSet<&str> = seed_paths.iter().map(|s| s.as_str()).collect();
-
-    let mut seed_tags: HashSet<String> = HashSet::new();
-    for path in seed_paths {
-        if let Some(tags) = tags_map.get(path) {
-            for tag in tags {
-                seed_tags.insert(tag.clone());
-            }
-        }
-    }
-
-    let mut tag_freq: HashMap<&str, usize> = HashMap::new();
-    for tags in tags_map.values() {
-        for tag in tags {
-            *tag_freq.entry(tag.as_str()).or_default() += 1;
-        }
-    }
-
-    let qualifying: HashSet<&str> = seed_tags
-        .iter()
-        .filter_map(|t| {
-            let freq = *tag_freq.get(t.as_str()).unwrap_or(&0);
-            if (TAG_FREQ_BAND_MIN..=TAG_FREQ_BAND_MAX).contains(&freq) {
-                Some(t.as_str())
-            } else {
-                None
-            }
-        })
-        .collect();
-
-    if qualifying.is_empty() {
-        return Vec::new();
-    }
-
-    let mut candidate_scores: HashMap<&str, f64> = HashMap::new();
-    for (path, tags) in &tags_map {
-        if seed_set.contains(path.as_str()) {
-            continue;
-        }
-        let score: f64 = tags
-            .iter()
-            .filter(|t| qualifying.contains(t.as_str()))
-            .map(|t| {
-                let freq = *tag_freq.get(t.as_str()).unwrap_or(&1) as f64;
-                (total_notes / freq).ln()
-            })
-            .sum();
-        if score > 0.0 {
-            candidate_scores.insert(path.as_str(), score);
-        }
-    }
-
-    let mut results: Vec<(String, f64)> = candidate_scores
-        .into_iter()
-        .map(|(path, score)| (path.to_string(), score))
-        .collect();
-    results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-    results.truncate(TOP_K_GRAPH);
-    results
-}
-
 pub(crate) fn load_tags_map(conn: &Connection) -> HashMap<String, Vec<String>> {
     let mut map: HashMap<String, Vec<String>> = HashMap::new();
     if let Ok(mut stmt) = conn.prepare("SELECT path, tags FROM notes") {
@@ -140,7 +67,6 @@ pub(crate) fn load_tags_map(conn: &Connection) -> HashMap<String, Vec<String>> {
 mod tests {
     use super::*;
     use super::super::test_helpers::helpers::*;
-    use rusqlite::params;
 
     #[test]
     fn test_ppr_single_seed_chain() {
@@ -200,46 +126,6 @@ mod tests {
     fn test_ppr_empty_graph() {
         let graph: HashMap<String, Vec<String>> = HashMap::new();
         let results = personalized_pagerank(&graph, &["a.md".to_string()], 0.5, 20);
-        assert!(results.is_empty());
-    }
-
-    #[test]
-    fn test_tag_expand_idf_filtering() {
-        let emb = norm(&[1.0, 0.0, 0.0]);
-        let conn = create_test_db(&[
-            ("a.md", "a", "content", &emb),
-            ("b.md", "b", "content", &emb),
-            ("c.md", "c", "content", &emb),
-        ]);
-        conn.execute("UPDATE notes SET tags = 'rare' WHERE path = 'a.md'", []).unwrap();
-        conn.execute("UPDATE notes SET tags = 'rare' WHERE path = 'b.md'", []).unwrap();
-        conn.execute("UPDATE notes SET tags = 'common' WHERE path = 'c.md'", []).unwrap();
-
-        let results = tag_expand(&conn, &["a.md".to_string()]);
-        let paths: Vec<&str> = results.iter().map(|r| r.0.as_str()).collect();
-        assert!(paths.contains(&"b.md"));
-        assert!(!paths.contains(&"c.md"));
-        assert!(!paths.contains(&"a.md"));
-    }
-
-    #[test]
-    fn test_tag_expand_excludes_high_freq() {
-        let emb = norm(&[1.0, 0.0, 0.0]);
-        let mut notes: Vec<(&str, &str, &str, &[f32])> = Vec::new();
-        let paths: Vec<String> = (0..25).map(|i| format!("note{i}.md")).collect();
-        let titles: Vec<String> = (0..25).map(|i| format!("note{i}")).collect();
-        for i in 0..25 {
-            notes.push((&paths[i], &titles[i], "content", &emb));
-        }
-        let conn = create_test_db(&notes);
-        for path in &paths {
-            conn.execute(
-                "UPDATE notes SET tags = 'popular' WHERE path = ?1",
-                params![path],
-            ).unwrap();
-        }
-
-        let results = tag_expand(&conn, &["note0.md".to_string()]);
         assert!(results.is_empty());
     }
 

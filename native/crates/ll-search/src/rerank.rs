@@ -2,35 +2,22 @@ use rusqlite::Connection;
 
 pub use ll_core::rerank::{rerank, rerank_with_report, RerankFailure, RerankReport, RerankResult};
 
-use crate::search::{
-    batch_load_bodies_federated, hybrid_query, hybrid_query_federated, EmbeddingStore,
-    TemporalParams,
-};
+use crate::search::{batch_load_bodies_federated, hybrid_query_with_ctx, SearchContext, TemporalParams};
 
 /// Run the rerank pipeline: hybrid query for `candidates`, batch-load bodies
 /// across peers, score with the cross-encoder, return the top `top` scored
 /// results. A document that fails to score is logged to stderr and skipped; a
 /// query that cannot be embedded is an error.
 pub fn run(
+    ctx: &SearchContext,
     conn: &Connection,
     peers: &[(String, Connection)],
     query: &str,
     top: usize,
     candidates: usize,
-    store: &EmbeddingStore,
 ) -> anyhow::Result<Vec<RerankResult>> {
-    let candidate_results = if peers.is_empty() {
-        hybrid_query(conn, query, candidates, &TemporalParams::default(), store)?
-    } else {
-        hybrid_query_federated(
-            conn,
-            query,
-            candidates,
-            peers,
-            &TemporalParams::default(),
-            store,
-        )?
-    };
+    let candidate_results =
+        hybrid_query_with_ctx(ctx, conn, query, candidates, peers, &TemporalParams::default())?;
     if candidate_results.is_empty() {
         return Ok(Vec::new());
     }
