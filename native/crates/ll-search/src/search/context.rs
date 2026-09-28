@@ -116,6 +116,11 @@ impl Default for StageFlags {
 impl SearchContext {
     /// Build a fresh `SearchContext` from the given connection.
     pub fn build(conn: &Connection) -> Self {
+        // Before the loads, not after. A write that commits between two of
+        // them would otherwise be recorded as seen while its rows are missing,
+        // and `is_stale` would keep that context until some unrelated write.
+        // Read first, the worst case is one extra rebuild.
+        let data_version = read_data_version(conn);
         let store = load_store(conn);
 
         // Intern paths matching store.all() order — one Arc<str> per path.
@@ -136,7 +141,6 @@ impl SearchContext {
         let mtimes = Arc::new(intern_mtimes(load_mtime_map(conn), &by_path));
         let tags = Arc::new(intern_tags(load_tags_map(conn), &by_path));
         let decay_lut = Arc::new(DecayLut::new());
-        let data_version = read_data_version(conn);
 
         Self {
             store,
