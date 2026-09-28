@@ -16,8 +16,8 @@
 //! the secure-backend copy. This preserves the signing key bytes so federation
 //! peers continue to trust the identity.
 
-use std::path::Path;
 use anyhow::Context as _;
+use std::path::Path;
 
 use super::config::{encrypted_seed_path, seed_meta_path, seed_path};
 use super::seed_store::{
@@ -61,8 +61,12 @@ pub fn migrate(config_dir: &Path) -> anyhow::Result<MigrateResult> {
     }
 
     // Read the plaintext seed
-    let seed = read_plaintext_legacy(config_dir)?
-        .ok_or_else(|| anyhow::anyhow!("expected plaintext seed at {} but file is absent", plaintext.display()))?;
+    let seed = read_plaintext_legacy(config_dir)?.ok_or_else(|| {
+        anyhow::anyhow!(
+            "expected plaintext seed at {} but file is absent",
+            plaintext.display()
+        )
+    })?;
 
     // Determine target backend via env override or probe
     let force = std::env::var("LL_SEED_BACKEND").ok();
@@ -174,7 +178,11 @@ fn write_to_encrypted(config_dir: &Path, seed: &[u8; 32]) -> anyhow::Result<()> 
     write_encrypted(config_dir, seed)
 }
 
-fn verify_roundtrip(config_dir: &Path, original: &[u8; 32], backend: SeedBackend) -> anyhow::Result<()> {
+fn verify_roundtrip(
+    config_dir: &Path,
+    original: &[u8; 32],
+    backend: SeedBackend,
+) -> anyhow::Result<()> {
     let read_back = match backend {
         SeedBackend::Keyring => read_keyring(config_dir)?
             .ok_or_else(|| anyhow::anyhow!("keyring read-back returned None"))?,
@@ -242,7 +250,10 @@ mod tests {
         assert_eq!(result.to, SeedBackend::Encrypted);
 
         let plaintext = seed_path(tmp.path());
-        assert!(!plaintext.exists(), "plaintext must be gone after migration");
+        assert!(
+            !plaintext.exists(),
+            "plaintext must be gone after migration"
+        );
 
         let enc = encrypted_seed_path(tmp.path());
         assert!(enc.exists(), "encrypted file must exist after migration");
@@ -273,7 +284,10 @@ mod tests {
         let txt = std::fs::read_to_string(&meta_path).unwrap();
         let v: serde_json::Value = serde_json::from_str(&txt).unwrap();
         assert_eq!(v["backend"].as_str(), Some("encrypted"));
-        assert!(v["migrated_at"].as_str().is_some(), "migrated_at must be present");
+        assert!(
+            v["migrated_at"].as_str().is_some(),
+            "migrated_at must be present"
+        );
     }
 
     #[test]
@@ -293,8 +307,11 @@ mod tests {
         let result = super::super::seed_store::load_or_create(tmp.path()).unwrap();
 
         let migrated_sig = result.signing_key.sign(message);
-        assert_eq!(original_sig.to_bytes(), migrated_sig.to_bytes(),
-            "signing key must produce identical signatures before and after migration");
+        assert_eq!(
+            original_sig.to_bytes(),
+            migrated_sig.to_bytes(),
+            "signing key must produce identical signatures before and after migration"
+        );
     }
 
     #[test]
@@ -308,7 +325,10 @@ mod tests {
 
         migrate_rollback(tmp.path()).unwrap();
 
-        assert!(seed_path(tmp.path()).exists(), "plaintext must be restored after rollback");
+        assert!(
+            seed_path(tmp.path()).exists(),
+            "plaintext must be restored after rollback"
+        );
         let bytes = std::fs::read(seed_path(tmp.path())).unwrap();
         assert_eq!(bytes, [8u8; 32]);
     }

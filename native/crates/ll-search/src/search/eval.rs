@@ -7,11 +7,11 @@ use crate::config::{PRF_ALPHA, PRF_BETA, PRF_K};
 use crate::embed::embed_query;
 use crate::rerank::rerank_with_report;
 
-use super::scoring::{finalize_rrf, PrfParams};
-#[cfg(feature = "research")]
-use super::scoring::FusionWeights;
 use super::context::{SearchContext, StageFlags};
 use super::federation::batch_load_bodies_federated;
+#[cfg(feature = "research")]
+use super::scoring::FusionWeights;
+use super::scoring::{finalize_rrf, PrfParams};
 
 #[derive(Debug, Serialize)]
 pub struct EvalResult {
@@ -66,7 +66,10 @@ fn strip_wikilinks(body: &str) -> String {
 
 fn derive_long_query(body: &str) -> Option<String> {
     let stripped = strip_wikilinks(body);
-    let tokens: Vec<&str> = stripped.split_whitespace().take(LONG_QUERY_TOKENS).collect();
+    let tokens: Vec<&str> = stripped
+        .split_whitespace()
+        .take(LONG_QUERY_TOKENS)
+        .collect();
     if tokens.len() < LONG_QUERY_MIN_TOKENS {
         return None;
     }
@@ -79,23 +82,28 @@ fn resolve_target(conn: &Connection, basename: &str) -> Option<String> {
         "SELECT path FROM notes WHERE path LIKE ?1 LIMIT 1",
         rusqlite::params![pattern],
         |row| row.get::<_, String>(0),
-    ).ok().or_else(|| {
+    )
+    .ok()
+    .or_else(|| {
         let pattern2 = format!("{}.md", basename);
         conn.query_row(
             "SELECT path FROM notes WHERE path LIKE ?1 LIMIT 1",
             rusqlite::params![pattern2],
             |row| row.get::<_, String>(0),
-        ).ok()
+        )
+        .ok()
     })
 }
 
 fn build_eval_set(conn: &Connection, min_links: usize) -> Vec<EvalQuery> {
-    let mut stmt = conn.prepare(
-        "SELECT l.source_id, n.path, n.title, l.target_path
+    let mut stmt = conn
+        .prepare(
+            "SELECT l.source_id, n.path, n.title, l.target_path
          FROM links l
          JOIN notes n ON n.id = l.source_id
-         ORDER BY l.source_id"
-    ).expect("failed to prepare eval query");
+         ORDER BY l.source_id",
+        )
+        .expect("failed to prepare eval query");
 
     let rows: Vec<(i64, String, String, String)> = stmt
         .query_map([], |row| {
@@ -112,9 +120,11 @@ fn build_eval_set(conn: &Connection, min_links: usize) -> Vec<EvalQuery> {
 
     let mut grouped: HashMap<i64, (String, String, Vec<String>)> = HashMap::new();
     for (id, path, title, target) in rows {
-        grouped.entry(id)
+        grouped
+            .entry(id)
             .or_insert_with(|| (path, title, Vec::new()))
-            .2.push(target);
+            .2
+            .push(target);
     }
 
     let mut queries: Vec<EvalQuery> = Vec::new();
@@ -137,7 +147,12 @@ fn build_eval_set(conn: &Connection, min_links: usize) -> Vec<EvalQuery> {
                 .ok()
                 .flatten();
             let long_query = body.as_deref().and_then(derive_long_query);
-            queries.push(EvalQuery { title, path, relevant, long_query });
+            queries.push(EvalQuery {
+                title,
+                path,
+                relevant,
+                long_query,
+            });
         }
     }
 
@@ -165,19 +180,36 @@ fn eval_ranking(
     finalize_rrf(rrf, 10).into_iter().map(|(p, _)| p).collect()
 }
 
-fn score_ranking(results: &[String], relevant: &HashSet<String>, source_path: &str) -> (f64, f64, f64, f64, f64) {
+fn score_ranking(
+    results: &[String],
+    relevant: &HashSet<String>,
+    source_path: &str,
+) -> (f64, f64, f64, f64, f64) {
     let filtered: Vec<&String> = results.iter().filter(|p| *p != source_path).collect();
 
-    let recall_5 = filtered.iter().take(5).filter(|p| relevant.contains(p.as_str())).count() as f64
+    let recall_5 = filtered
+        .iter()
+        .take(5)
+        .filter(|p| relevant.contains(p.as_str()))
+        .count() as f64
         / relevant.len().max(1) as f64;
-    let recall_10 = filtered.iter().take(10).filter(|p| relevant.contains(p.as_str())).count() as f64
+    let recall_10 = filtered
+        .iter()
+        .take(10)
+        .filter(|p| relevant.contains(p.as_str()))
+        .count() as f64
         / relevant.len().max(1) as f64;
 
-    let dcg_10: f64 = filtered.iter().take(10).enumerate()
-        .map(|(i, p)| if relevant.contains(p.as_str()) {
-            1.0 / ((i + 2) as f64).log2()
-        } else {
-            0.0
+    let dcg_10: f64 = filtered
+        .iter()
+        .take(10)
+        .enumerate()
+        .map(|(i, p)| {
+            if relevant.contains(p.as_str()) {
+                1.0 / ((i + 2) as f64).log2()
+            } else {
+                0.0
+            }
         })
         .sum();
     let idcg_10: f64 = (0..relevant.len().min(10))
@@ -185,12 +217,22 @@ fn score_ranking(results: &[String], relevant: &HashSet<String>, source_path: &s
         .sum();
     let ndcg_10 = if idcg_10 > 0.0 { dcg_10 / idcg_10 } else { 0.0 };
 
-    let mrr = filtered.iter().enumerate()
+    let mrr = filtered
+        .iter()
+        .enumerate()
         .find(|(_, p)| relevant.contains(p.as_str()))
         .map(|(i, _)| 1.0 / (i as f64 + 1.0))
         .unwrap_or(0.0);
 
-    let hit_1 = if filtered.first().map(|p| relevant.contains(p.as_str())).unwrap_or(false) { 1.0 } else { 0.0 };
+    let hit_1 = if filtered
+        .first()
+        .map(|p| relevant.contains(p.as_str()))
+        .unwrap_or(false)
+    {
+        1.0
+    } else {
+        0.0
+    };
 
     (recall_5, recall_10, ndcg_10, mrr, hit_1)
 }
@@ -200,19 +242,86 @@ pub fn eval_prf(conn: &Connection, min_links: usize) -> anyhow::Result<EvalResul
     let queries = build_eval_set(conn, min_links);
     let ctx = SearchContext::build(conn);
 
-    eprintln!("Eval set: {} queries with {}+ resolved links", queries.len(), min_links);
+    eprintln!(
+        "Eval set: {} queries with {}+ resolved links",
+        queries.len(),
+        min_links
+    );
 
     let param_grid = vec![
         ("no-prf", None),
-        ("a=0.5 k=1", Some(PrfParams { alpha: 0.5, beta: 0.5, k: 1 })),
-        ("a=0.5 k=3", Some(PrfParams { alpha: 0.5, beta: 0.5, k: 3 })),
-        ("a=0.7 k=1", Some(PrfParams { alpha: 0.7, beta: 0.3, k: 1 })),
-        ("a=0.7 k=3", Some(PrfParams { alpha: 0.7, beta: 0.3, k: 3 })),
-        ("a=0.8 k=1", Some(PrfParams { alpha: 0.8, beta: 0.2, k: 1 })),
-        ("a=0.8 k=3", Some(PrfParams { alpha: 0.8, beta: 0.2, k: 3 })),
-        ("a=0.9 k=1", Some(PrfParams { alpha: 0.9, beta: 0.1, k: 1 })),
-        ("a=0.9 k=3", Some(PrfParams { alpha: 0.9, beta: 0.1, k: 3 })),
-        ("a=0.9 k=5", Some(PrfParams { alpha: 0.9, beta: 0.1, k: 5 })),
+        (
+            "a=0.5 k=1",
+            Some(PrfParams {
+                alpha: 0.5,
+                beta: 0.5,
+                k: 1,
+            }),
+        ),
+        (
+            "a=0.5 k=3",
+            Some(PrfParams {
+                alpha: 0.5,
+                beta: 0.5,
+                k: 3,
+            }),
+        ),
+        (
+            "a=0.7 k=1",
+            Some(PrfParams {
+                alpha: 0.7,
+                beta: 0.3,
+                k: 1,
+            }),
+        ),
+        (
+            "a=0.7 k=3",
+            Some(PrfParams {
+                alpha: 0.7,
+                beta: 0.3,
+                k: 3,
+            }),
+        ),
+        (
+            "a=0.8 k=1",
+            Some(PrfParams {
+                alpha: 0.8,
+                beta: 0.2,
+                k: 1,
+            }),
+        ),
+        (
+            "a=0.8 k=3",
+            Some(PrfParams {
+                alpha: 0.8,
+                beta: 0.2,
+                k: 3,
+            }),
+        ),
+        (
+            "a=0.9 k=1",
+            Some(PrfParams {
+                alpha: 0.9,
+                beta: 0.1,
+                k: 1,
+            }),
+        ),
+        (
+            "a=0.9 k=3",
+            Some(PrfParams {
+                alpha: 0.9,
+                beta: 0.1,
+                k: 3,
+            }),
+        ),
+        (
+            "a=0.9 k=5",
+            Some(PrfParams {
+                alpha: 0.9,
+                beta: 0.1,
+                k: 5,
+            }),
+        ),
     ];
 
     let mut configs = Vec::new();
@@ -275,20 +384,88 @@ pub fn eval_funnel(
     if let Some(cap) = limit {
         if queries.len() > cap {
             let stride = queries.len() / cap;
-            queries = queries.into_iter().step_by(stride.max(1)).take(cap).collect();
+            queries = queries
+                .into_iter()
+                .step_by(stride.max(1))
+                .take(cap)
+                .collect();
         }
     }
     let ctx = SearchContext::build(conn);
 
-    eprintln!("Funnel eval: {} queries with {}+ resolved links", queries.len(), min_links);
+    eprintln!(
+        "Funnel eval: {} queries with {}+ resolved links",
+        queries.len(),
+        min_links
+    );
 
     let cascade: Vec<(&str, StageFlags)> = vec![
-        ("vec",                  StageFlags { vec_search: true, bm25: false, ppr: false, tag_expand: false, prf: false, rerank: false }),
-        ("vec+bm25",             StageFlags { vec_search: true, bm25: true,  ppr: false, tag_expand: false, prf: false, rerank: false }),
-        ("vec+bm25+ppr",         StageFlags { vec_search: true, bm25: true,  ppr: true,  tag_expand: false, prf: false, rerank: false }),
-        ("vec+bm25+ppr+tag",     StageFlags { vec_search: true, bm25: true,  ppr: true,  tag_expand: true,  prf: false, rerank: false }),
-        ("+prf",                 StageFlags { vec_search: true, bm25: true,  ppr: true,  tag_expand: true,  prf: true,  rerank: false }),
-        ("+rerank",              StageFlags { vec_search: true, bm25: true,  ppr: true,  tag_expand: true,  prf: true,  rerank: true  }),
+        (
+            "vec",
+            StageFlags {
+                vec_search: true,
+                bm25: false,
+                ppr: false,
+                tag_expand: false,
+                prf: false,
+                rerank: false,
+            },
+        ),
+        (
+            "vec+bm25",
+            StageFlags {
+                vec_search: true,
+                bm25: true,
+                ppr: false,
+                tag_expand: false,
+                prf: false,
+                rerank: false,
+            },
+        ),
+        (
+            "vec+bm25+ppr",
+            StageFlags {
+                vec_search: true,
+                bm25: true,
+                ppr: true,
+                tag_expand: false,
+                prf: false,
+                rerank: false,
+            },
+        ),
+        (
+            "vec+bm25+ppr+tag",
+            StageFlags {
+                vec_search: true,
+                bm25: true,
+                ppr: true,
+                tag_expand: true,
+                prf: false,
+                rerank: false,
+            },
+        ),
+        (
+            "+prf",
+            StageFlags {
+                vec_search: true,
+                bm25: true,
+                ppr: true,
+                tag_expand: true,
+                prf: true,
+                rerank: false,
+            },
+        ),
+        (
+            "+rerank",
+            StageFlags {
+                vec_search: true,
+                bm25: true,
+                ppr: true,
+                tag_expand: true,
+                prf: true,
+                rerank: true,
+            },
+        ),
     ];
 
     let n = queries.len() as f64;
@@ -302,10 +479,15 @@ pub fn eval_funnel(
         let signals = ctx.compute_signals_holdout(conn, &qvec, &q.title, &q.path);
 
         for (ci, (_, flags)) in cascade.iter().enumerate() {
-            let results = funnel_with_signals(&ctx, conn, &no_peers, &signals, &qvec, &q.title, flags);
+            let results =
+                funnel_with_signals(&ctx, conn, &no_peers, &signals, &qvec, &q.title, flags);
             let (r5, r10, ndcg, mrr, h1) = score_ranking(&results, &q.relevant, &q.path);
             let t = &mut totals_title[ci];
-            t[0] += r5; t[1] += r10; t[2] += ndcg; t[3] += mrr; t[4] += h1;
+            t[0] += r5;
+            t[1] += r10;
+            t[2] += ndcg;
+            t[3] += mrr;
+            t[4] += h1;
         }
 
         if let Some(long_query) = &q.long_query {
@@ -314,10 +496,22 @@ pub fn eval_funnel(
             let long_signals = ctx.compute_signals_holdout(conn, &long_vec, long_query, &q.path);
 
             for (ci, (_, flags)) in cascade.iter().enumerate() {
-                let results = funnel_with_signals(&ctx, conn, &no_peers, &long_signals, &long_vec, long_query, flags);
+                let results = funnel_with_signals(
+                    &ctx,
+                    conn,
+                    &no_peers,
+                    &long_signals,
+                    &long_vec,
+                    long_query,
+                    flags,
+                );
                 let (r5, r10, ndcg, mrr, h1) = score_ranking(&results, &q.relevant, &q.path);
                 let t = &mut totals_long[ci];
-                t[0] += r5; t[1] += r10; t[2] += ndcg; t[3] += mrr; t[4] += h1;
+                t[0] += r5;
+                t[1] += r10;
+                t[2] += ndcg;
+                t[3] += mrr;
+                t[4] += h1;
             }
         }
 
@@ -326,19 +520,27 @@ pub fn eval_funnel(
         }
     }
 
-    eprintln!("  {} of {} queries had a body-derived long query", n_long, queries.len());
+    eprintln!(
+        "  {} of {} queries had a body-derived long query",
+        n_long,
+        queries.len()
+    );
 
-    let mut configs: Vec<EvalConfig> = cascade.iter().enumerate().map(|(i, (label, _))| {
-        let t = &totals_title[i];
-        EvalConfig {
-            label: format!("{label} [title]"),
-            recall_at_5: t[0] / n,
-            recall_at_10: t[1] / n,
-            ndcg_at_10: t[2] / n,
-            mrr: t[3] / n,
-            hits_at_1: t[4] / n,
-        }
-    }).collect();
+    let mut configs: Vec<EvalConfig> = cascade
+        .iter()
+        .enumerate()
+        .map(|(i, (label, _))| {
+            let t = &totals_title[i];
+            EvalConfig {
+                label: format!("{label} [title]"),
+                recall_at_5: t[0] / n,
+                recall_at_10: t[1] / n,
+                ndcg_at_10: t[2] / n,
+                mrr: t[3] / n,
+                hits_at_1: t[4] / n,
+            }
+        })
+        .collect();
 
     if n_long > 0 {
         let nl = n_long as f64;
@@ -374,7 +576,11 @@ fn funnel_with_signals(
     let mut rrf = ctx.rrf_from_signals_gated(signals, flags, None);
 
     if flags.prf {
-        let prf_params = PrfParams { alpha: PRF_ALPHA, beta: PRF_BETA, k: PRF_K };
+        let prf_params = PrfParams {
+            alpha: PRF_ALPHA,
+            beta: PRF_BETA,
+            k: PRF_K,
+        };
         ctx.apply_prf(&mut rrf, query_vec, &prf_params);
     }
 
@@ -417,7 +623,11 @@ mod tests {
                 ("notes/b.md", "beta", "body b", &emb),
                 ("notes/c.md", "gamma", "body c", &emb),
             ],
-            &[("notes/a.md", "b"), ("notes/a.md", "c"), ("notes/b.md", "a")],
+            &[
+                ("notes/a.md", "b"),
+                ("notes/a.md", "c"),
+                ("notes/b.md", "a"),
+            ],
         );
 
         let mut relevant = HashSet::new();
@@ -450,13 +660,20 @@ mod tests {
 
     #[test]
     fn test_derive_long_query_caps_tokens_and_excludes_link_titles() {
-        let body = (0..100).map(|i| format!("word{i}")).collect::<Vec<_>>().join(" ");
+        let body = (0..100)
+            .map(|i| format!("word{i}"))
+            .collect::<Vec<_>>()
+            .join(" ");
         let q = derive_long_query(&body).expect("long body yields a query");
         assert_eq!(q.split_whitespace().count(), LONG_QUERY_TOKENS);
 
-        let linked = "intro text mentioning [[secret gold note]] then more body words follow here today";
+        let linked =
+            "intro text mentioning [[secret gold note]] then more body words follow here today";
         let q = derive_long_query(linked).expect("enough tokens");
-        assert!(!q.contains("secret"), "gold link titles must not leak into the query");
+        assert!(
+            !q.contains("secret"),
+            "gold link titles must not leak into the query"
+        );
     }
 
     #[test]
@@ -510,7 +727,10 @@ fn reciprocal_label_rate(conn: &Connection, queries: &[EvalQuery]) -> (usize, us
             .trim_end_matches(".md");
         for target in &q.relevant {
             total += 1;
-            if stmt.exists(rusqlite::params![target, stem]).unwrap_or(false) {
+            if stmt
+                .exists(rusqlite::params![target, stem])
+                .unwrap_or(false)
+            {
                 reciprocal += 1;
             }
         }
@@ -528,7 +748,11 @@ pub fn tune_weights(
     if let Some(cap) = limit {
         if queries.len() > cap {
             let stride = queries.len() / cap;
-            queries = queries.into_iter().step_by(stride.max(1)).take(cap).collect();
+            queries = queries
+                .into_iter()
+                .step_by(stride.max(1))
+                .take(cap)
+                .collect();
         }
     }
     let ctx = SearchContext::build(conn);
@@ -538,7 +762,9 @@ pub fn tune_weights(
     let (recip, pairs) = reciprocal_label_rate(conn, &queries);
     if pairs > 0 {
         let pct = 100.0 * recip as f64 / pairs as f64;
-        eprintln!("LABEL LEAK: {recip}/{pairs} ({pct:.1}%) of (query, target) pairs are reciprocal.");
+        eprintln!(
+            "LABEL LEAK: {recip}/{pairs} ({pct:.1}%) of (query, target) pairs are reciprocal."
+        );
         eprintln!("  A reciprocal target carries the query note's title as wikilink text, so BM25");
         eprintln!("  matches it lexically while the PPR holdout denies the graph lane those same");
         eprintln!("  edges. This sweep ranks weightings by how well they exploit that asymmetry.");
@@ -591,8 +817,7 @@ pub fn tune_weights(
         for &i in idxs {
             let c = &cached[i];
             let rrf = ctx.rrf_from_signals_weighted(&c.signals, &flags, w, None);
-            let ranked: Vec<String> =
-                finalize_rrf(rrf, 10).into_iter().map(|(p, _)| p).collect();
+            let ranked: Vec<String> = finalize_rrf(rrf, 10).into_iter().map(|(p, _)| p).collect();
             let (_, _, ndcg, _, _) = score_ranking(&ranked, &c.relevant, &c.path);
             total += ndcg;
         }
@@ -650,13 +875,20 @@ fn top_gap_spread(scores: &[f64]) -> (f64, f64, f64) {
         return (0.0, 0.0, 0.0);
     }
     let top = scores[0].abs();
-    let gap = if scores.len() > 1 { (scores[0] - scores[1]).abs() } else { 0.0 };
+    let gap = if scores.len() > 1 {
+        (scores[0] - scores[1]).abs()
+    } else {
+        0.0
+    };
     let last = scores[scores.len() - 1].abs();
     (top, gap, (top - last).abs())
 }
 
 #[cfg(feature = "research")]
-pub fn lane_diagnostics(conn: &Connection, probes: &[(String, String, String)]) -> anyhow::Result<Vec<LaneStat>> {
+pub fn lane_diagnostics(
+    conn: &Connection,
+    probes: &[(String, String, String)],
+) -> anyhow::Result<Vec<LaneStat>> {
     let ctx = SearchContext::build(conn);
     let mut out = Vec::new();
     for (set, gold_path, text) in probes {
@@ -667,7 +899,12 @@ pub fn lane_diagnostics(conn: &Connection, probes: &[(String, String, String)]) 
         let sig = ctx.compute_signals(conn, &qvec, text);
 
         let vec_scores: Vec<f64> = sig.vec_scored.iter().map(|(_, s)| *s).take(10).collect();
-        let bm_scores: Vec<f64> = sig.fts_results.iter().map(|(_, _, s)| *s).take(10).collect();
+        let bm_scores: Vec<f64> = sig
+            .fts_results
+            .iter()
+            .map(|(_, _, s)| *s)
+            .take(10)
+            .collect();
         let (vt, vg, vsp) = top_gap_spread(&vec_scores);
         let (bt, bg, _) = top_gap_spread(&bm_scores);
 

@@ -16,22 +16,22 @@ use std::sync::{Arc, Mutex};
 use ed25519_dalek::{Signer, SigningKey};
 use futures_util::{SinkExt, StreamExt};
 use ll_search::sync::client::sync_all_async;
-use ll_search::sync::error::SyncError;
-use ll_search::sync::protocol::{manifest_root, ChunkedFrame};
 use ll_search::sync::config::{
-    export_db_path, export_shape_fingerprint, last_export_shape_path,
-    vault_mtime_and_path_digest, FederationConfig,
-    HubEndpoint, Identity, VisibilityConfig,
+    export_db_path, export_shape_fingerprint, last_export_shape_path, vault_mtime_and_path_digest,
+    FederationConfig, HubEndpoint, Identity, VisibilityConfig,
 };
+use ll_search::sync::error::SyncError;
+use ll_search::sync::grant::RevocationStatement;
 use ll_search::sync::grant::{canonical_bytes, GrantKind, GrantStatement};
 use ll_search::sync::key_id::KeyId;
-use ll_search::sync::grant::RevocationStatement;
+use ll_search::sync::protocol::{manifest_root, ChunkedFrame};
 use ll_search::sync::protocol_v5::{
-    hub_challenge_message, ClientMsg, GrantWire, HeldIndex, HubMsg, RevocationWire, VaultState,
-    PROTOCOL_VERSION,
-    ChunkedUploadLimits,
+    hub_challenge_message, ChunkedUploadLimits, ClientMsg, GrantWire, HeldIndex, HubMsg,
+    RevocationWire, VaultState, PROTOCOL_VERSION,
 };
-use ll_search::sync::state::{read_readable_vaults, read_state, HubHolds, OUTCOME_ERROR, OUTCOME_OK};
+use ll_search::sync::state::{
+    read_readable_vaults, read_state, HubHolds, OUTCOME_ERROR, OUTCOME_OK,
+};
 use tokio::net::TcpListener;
 use tokio_tungstenite::tungstenite::Message;
 
@@ -62,7 +62,9 @@ fn hub_key() -> SigningKey {
 }
 
 fn hub_key_id() -> String {
-    KeyId::from_pubkey(&hub_key().verifying_key()).as_str().to_string()
+    KeyId::from_pubkey(&hub_key().verifying_key())
+        .as_str()
+        .to_string()
 }
 
 fn b64(bytes: &[u8]) -> String {
@@ -144,7 +146,9 @@ enum OnGrant {
 /// its read list from `SyncReady.vault_state`, a hub that lists only the
 /// client's own vault is asked for nothing whatever grants it carries.
 async fn spawn_hub(holds: Option<HeldIndex>, on_upload: OnUpload) -> SocketAddr {
-    spawn_hub_with(holds, on_upload, OnGrant::Ack, vec![], vec![]).await.0
+    spawn_hub_with(holds, on_upload, OnGrant::Ack, vec![], vec![])
+        .await
+        .0
 }
 
 /// The same, plus the revocations the handshake serves.
@@ -158,7 +162,15 @@ async fn spawn_hub_revoking(
     grants: Vec<GrantWire>,
     revocations: Vec<RevocationWire>,
 ) -> (SocketAddr, Arc<Mutex<Vec<String>>>) {
-    spawn_hub_full(holds, OnUpload::Ack, OnGrant::Ack, grants, revocations, vec![]).await
+    spawn_hub_full(
+        holds,
+        OnUpload::Ack,
+        OnGrant::Ack,
+        grants,
+        revocations,
+        vec![],
+    )
+    .await
 }
 
 /// The same, with `grants` in the `SyncReady`, a scripted answer for each
@@ -229,11 +241,14 @@ async fn spawn_hub_full(
             return note("client-hello carried an undecodable nonce_c".into());
         };
         let sig_h = hub_key().sign(&hub_challenge_message(&nonce_h, &nonce_c_raw, &[0u8; 32]));
-        if !send_hub(&mut ws, &HubMsg::HubChallenge {
-            nonce_h: b64(&nonce_h),
-            hub_key_id: hub_key_id(),
-            sig_h: b64(&sig_h.to_bytes()),
-        })
+        if !send_hub(
+            &mut ws,
+            &HubMsg::HubChallenge {
+                nonce_h: b64(&nonce_h),
+                hub_key_id: hub_key_id(),
+                sig_h: b64(&sig_h.to_bytes()),
+            },
+        )
         .await
         {
             return;
@@ -242,20 +257,25 @@ async fn spawn_hub_full(
         if recv_json(&mut ws).await.is_none() {
             return note("no client-auth".into());
         }
-        let vault_state = std::iter::once(VaultState { vault_id: "v1".into(), holds })
-            .chain(
-                fetches
-                    .iter()
-                    .map(|(id, _)| VaultState { vault_id: id.clone(), holds: None }),
-            )
-            .collect();
-        if !send_hub(&mut ws, &HubMsg::SyncReady {
-            chunked_upload: None,
-            protocol_version: PROTOCOL_VERSION,
-            vault_state,
-            grants,
-            revocations,
+        let vault_state = std::iter::once(VaultState {
+            vault_id: "v1".into(),
+            holds,
         })
+        .chain(fetches.iter().map(|(id, _)| VaultState {
+            vault_id: id.clone(),
+            holds: None,
+        }))
+        .collect();
+        if !send_hub(
+            &mut ws,
+            &HubMsg::SyncReady {
+                chunked_upload: None,
+                protocol_version: PROTOCOL_VERSION,
+                vault_state,
+                grants,
+                revocations,
+            },
+        )
         .await
         {
             return;
@@ -268,10 +288,12 @@ async fn spawn_hub_full(
         // a mock ends up deciding the outcome it is measuring.
         loop {
             let msg = match ws.next().await {
-                Some(Ok(Message::Text(t))) => match serde_json::from_str::<serde_json::Value>(t.as_str()) {
-                    Ok(v) => v,
-                    Err(e) => return note(format!("unparseable:{e}")),
-                },
+                Some(Ok(Message::Text(t))) => {
+                    match serde_json::from_str::<serde_json::Value>(t.as_str()) {
+                        Ok(v) => v,
+                        Err(e) => return note(format!("unparseable:{e}")),
+                    }
+                }
                 Some(Ok(Message::Ping(d))) => {
                     if ws.send(Message::Pong(d)).await.is_err() {
                         return;
@@ -298,31 +320,43 @@ async fn spawn_hub_full(
                         OnGrant::Ack => HubMsg::GrantAck {
                             grant_id: hex::encode(sha2::Sha256::digest(&statement)),
                         },
-                        OnGrant::Reject(reason) => HubMsg::Reject { reason: reason.into() },
+                        OnGrant::Reject(reason) => HubMsg::Reject {
+                            reason: reason.into(),
+                        },
                     };
                     if !send_hub(&mut ws, &reply).await {
                         return;
                     }
                 }
                 ClientMsg::UploadIndex {
-            chunked: None, vault_id, sha256, .. } => {
+                    chunked: None,
+                    vault_id,
+                    sha256,
+                    ..
+                } => {
                     if ws.next().await.is_none() {
                         return note("upload-index with no frame behind it".into());
                     }
                     let ack = match on_upload {
                         OnUpload::Reject => {
-                            let _ = send_hub(&mut ws, &HubMsg::Reject {
-                                reason: "not authorized to write this vault".into(),
-                            })
+                            let _ = send_hub(
+                                &mut ws,
+                                &HubMsg::Reject {
+                                    reason: "not authorized to write this vault".into(),
+                                },
+                            )
                             .await;
                             return;
                         }
                         OnUpload::Ack => HubMsg::UploadAck { vault_id, sha256 },
                         OnUpload::AckWrongSha => {
-                            let _ = send_hub(&mut ws, &HubMsg::UploadAck {
-                                vault_id,
-                                sha256: WRONG_SHA.into(),
-                            })
+                            let _ = send_hub(
+                                &mut ws,
+                                &HubMsg::UploadAck {
+                                    vault_id,
+                                    sha256: WRONG_SHA.into(),
+                                },
+                            )
                             .await;
                             return;
                         }
@@ -357,7 +391,9 @@ async fn spawn_hub_full(
                             (header, Some(bytes.clone()))
                         }
                         Fetch::Refuse => (
-                            HubMsg::Reject { reason: "not authorized to read this vault".into() },
+                            HubMsg::Reject {
+                                reason: "not authorized to read this vault".into(),
+                            },
                             None,
                         ),
                     };
@@ -475,7 +511,10 @@ fn revocation_of(issuer: &SigningKey, grant_id: &str, scope: Option<&str>) -> Re
         at: 2,
     });
     let sig = issuer.sign(&statement);
-    RevocationWire { statement_b64: b64(&statement), signature_b64: b64(&sig.to_bytes()) }
+    RevocationWire {
+        statement_b64: b64(&statement),
+        signature_b64: b64(&sig.to_bytes()),
+    }
 }
 
 /// This client's own key id, from the seed `config_for` generated.
@@ -490,10 +529,19 @@ fn config_for(config_dir: &Path, addr: SocketAddr) -> FederationConfig {
     FederationConfig {
         identity: Identity {
             display_name: "test-peer".into(),
-            pubkey: format!("ed25519:{}", ll_search::sync::key_id::pubkey_b64(&seed.signing_key)),
+            pubkey: format!(
+                "ed25519:{}",
+                ll_search::sync::key_id::pubkey_b64(&seed.signing_key)
+            ),
         },
-        visibility: VisibilityConfig { default: "private".into(), rules: vec![] },
-        hub: HubEndpoint { endpoint: format!("ws://{addr}"), key_id: Some(hub_key_id()) },
+        visibility: VisibilityConfig {
+            default: "private".into(),
+            rules: vec![],
+        },
+        hub: HubEndpoint {
+            endpoint: format!("ws://{addr}"),
+            key_id: Some(hub_key_id()),
+        },
         vault_id: Some("v1".into()),
         vault_path: None,
         recovery_key_id: None,
@@ -535,17 +583,26 @@ fn assert_peer_index_from(config_dir: &Path, vault_id: &str, bytes: &[u8]) {
     let path = config_dir.join(format!("federation/data/peers/{vault_id}/index.db"));
     let conn = rusqlite::Connection::open(&path).unwrap();
     let recorded: String = conn
-        .query_row("SELECT value FROM meta WHERE key = 'source_sha256'", [], |r| r.get(0))
+        .query_row(
+            "SELECT value FROM meta WHERE key = 'source_sha256'",
+            [],
+            |r| r.get(0),
+        )
         .unwrap_or_else(|e| panic!("{vault_id} records no source sha: {e}"));
-    assert_eq!(recorded, hex::encode(sha2::Sha256::digest(bytes)),
-        "{vault_id} was installed from bytes other than the ones the hub served");
+    assert_eq!(
+        recorded,
+        hex::encode(sha2::Sha256::digest(bytes)),
+        "{vault_id} was installed from bytes other than the ones the hub served"
+    );
 }
 
 /// The sha the client will declare for the export just placed: the hub acks
 /// exactly this, and on the skip path it is what the hub must already hold.
 fn export_sha(config_dir: &Path) -> String {
     use sha2::Digest;
-    hex::encode(sha2::Sha256::digest(std::fs::read(export_db_path(config_dir)).unwrap()))
+    hex::encode(sha2::Sha256::digest(
+        std::fs::read(export_db_path(config_dir)).unwrap(),
+    ))
 }
 
 fn stale() -> Option<HeldIndex> {
@@ -574,11 +631,19 @@ async fn a_cycle_that_dies_before_the_hub_still_writes_state() {
     .await
     .expect_err("precondition: this cycle cannot succeed");
 
-    let state = read_state(dir.path()).unwrap().expect("a failed cycle still records");
+    let state = read_state(dir.path())
+        .unwrap()
+        .expect("a failed cycle still records");
     assert_eq!(state.outcome, OUTCOME_ERROR);
-    assert_eq!(state.detail.as_deref(), Some(err.to_string().as_str()),
-        "the recorded detail is the cycle's own error, not a placeholder");
-    assert_eq!(state.hub_holds, None, "the cycle never got far enough to ask the hub");
+    assert_eq!(
+        state.detail.as_deref(),
+        Some(err.to_string().as_str()),
+        "the recorded detail is the cycle's own error, not a placeholder"
+    );
+    assert_eq!(
+        state.hub_holds, None,
+        "the cycle never got far enough to ask the hub"
+    );
     assert!(state.last_attempt_at > 0);
 }
 
@@ -607,7 +672,9 @@ async fn a_cycle_without_a_seed_names_the_command_that_makes_one() {
     assert!(msg.contains("no federation seed found"), "{msg}");
     assert!(msg.contains("/learning-loop:federation"), "{msg}");
     assert!(
-        ll_search::sync::seed_store::load_only(dir.path()).unwrap().is_none(),
+        ll_search::sync::seed_store::load_only(dir.path())
+            .unwrap()
+            .is_none(),
         "the cycle must not have minted a replacement"
     );
 }
@@ -631,7 +698,9 @@ async fn a_successful_cycle_writes_a_different_state() {
     .expect("the cycle completes against the mock hub");
     assert_eq!(result.uploaded_notes, LOCAL_NOTE_COUNT);
 
-    let state = read_state(dir.path()).unwrap().expect("a successful cycle records too");
+    let state = read_state(dir.path())
+        .unwrap()
+        .expect("a successful cycle records too");
     assert_eq!(state.outcome, OUTCOME_OK);
     assert_eq!(state.detail, None);
     assert_eq!(state.last_success_at, Some(state.last_attempt_at));
@@ -660,16 +729,27 @@ async fn a_cold_hub_that_accepted_the_upload_is_not_recorded_as_holding_nothing(
     let config = config_for(dir.path(), addr);
     place_export(dir.path(), vault.path());
 
-    sync_all_async(&dir.path().join("no-such-source.db"), vault.path(), dir.path(), &config)
-        .await
-        .expect("the cycle completes");
+    sync_all_async(
+        &dir.path().join("no-such-source.db"),
+        vault.path(),
+        dir.path(),
+        &config,
+    )
+    .await
+    .expect("the cycle completes");
 
     let holds = read_state(dir.path()).unwrap().unwrap().hub_holds;
-    assert_ne!(holds, Some(HubHolds::Nothing),
-        "the hub acked the upload in this very cycle");
+    assert_ne!(
+        holds,
+        Some(HubHolds::Nothing),
+        "the hub acked the upload in this very cycle"
+    );
     assert_eq!(
         holds,
-        Some(HubHolds::Index { sha256: export_sha(dir.path()), note_count: LOCAL_NOTE_COUNT }),
+        Some(HubHolds::Index {
+            sha256: export_sha(dir.path()),
+            note_count: LOCAL_NOTE_COUNT
+        }),
     );
 }
 
@@ -688,15 +768,25 @@ async fn a_skipped_upload_records_what_the_hub_reported() {
     let addr = spawn_hub(Some(held.clone()), OnUpload::Ack).await;
     let config = config_for(dir.path(), addr);
 
-    let result =
-        sync_all_async(&dir.path().join("no-such-source.db"), vault.path(), dir.path(), &config)
-            .await
-            .expect("the cycle completes");
-    assert!(result.skipped_upload, "precondition: the hub holds this exact index");
+    let result = sync_all_async(
+        &dir.path().join("no-such-source.db"),
+        vault.path(),
+        dir.path(),
+        &config,
+    )
+    .await
+    .expect("the cycle completes");
+    assert!(
+        result.skipped_upload,
+        "precondition: the hub holds this exact index"
+    );
 
     assert_eq!(
         read_state(dir.path()).unwrap().unwrap().hub_holds,
-        Some(HubHolds::Index { sha256: held.sha256, note_count: HUB_NOTE_COUNT }),
+        Some(HubHolds::Index {
+            sha256: held.sha256,
+            note_count: HUB_NOTE_COUNT
+        }),
         "nothing was uploaded, so the record is the hub's own report — including \
          its count, which is not this client's {LOCAL_NOTE_COUNT}",
     );
@@ -712,10 +802,14 @@ async fn a_cycle_that_fails_after_the_handshake_records_what_the_hub_reported() 
     let config = config_for(dir.path(), addr);
     place_export(dir.path(), vault.path());
 
-    let err =
-        sync_all_async(&dir.path().join("no-such-source.db"), vault.path(), dir.path(), &config)
-            .await
-            .expect_err("the hub rejects the upload");
+    let err = sync_all_async(
+        &dir.path().join("no-such-source.db"),
+        vault.path(),
+        dir.path(),
+        &config,
+    )
+    .await
+    .expect_err("the hub rejects the upload");
     assert!(err.to_string().contains("not authorized"), "{err}");
 
     let state = read_state(dir.path()).unwrap().unwrap();
@@ -743,13 +837,20 @@ async fn a_failure_after_a_success_keeps_the_last_success_time() {
     place_export(dir.path(), vault.path());
 
     let source = dir.path().join("no-such-source.db");
-    sync_all_async(&source, vault.path(), dir.path(), &config).await.expect("first cycle");
+    sync_all_async(&source, vault.path(), dir.path(), &config)
+        .await
+        .expect("first cycle");
     let succeeded_at = read_state(dir.path()).unwrap().unwrap().last_success_at;
-    assert!(succeeded_at.is_some(), "precondition: the first cycle succeeded");
+    assert!(
+        succeeded_at.is_some(),
+        "precondition: the first cycle succeeded"
+    );
 
     // Take the export away; the next cycle dies in `prepare_export`.
     std::fs::remove_file(export_db_path(dir.path())).unwrap();
-    sync_all_async(&source, vault.path(), dir.path(), &config).await.unwrap_err();
+    sync_all_async(&source, vault.path(), dir.path(), &config)
+        .await
+        .unwrap_err();
 
     let state = read_state(dir.path()).unwrap().unwrap();
     assert_eq!(state.outcome, OUTCOME_ERROR);
@@ -768,17 +869,30 @@ async fn an_index_the_hub_acked_but_we_never_sent_is_not_recorded() {
     let config = config_for(dir.path(), addr);
     place_export(dir.path(), vault.path());
 
-    let err =
-        sync_all_async(&dir.path().join("no-such-source.db"), vault.path(), dir.path(), &config)
-            .await
-            .expect_err("an unaccountable ack fails the cycle");
-    assert!(err.to_string().contains(&export_sha(dir.path())), "names what we sent: {err}");
-    assert!(err.to_string().contains(WRONG_SHA), "names what the hub acked: {err}");
+    let err = sync_all_async(
+        &dir.path().join("no-such-source.db"),
+        vault.path(),
+        dir.path(),
+        &config,
+    )
+    .await
+    .expect_err("an unaccountable ack fails the cycle");
+    assert!(
+        err.to_string().contains(&export_sha(dir.path())),
+        "names what we sent: {err}"
+    );
+    assert!(
+        err.to_string().contains(WRONG_SHA),
+        "names what the hub acked: {err}"
+    );
 
     let holds = read_state(dir.path()).unwrap().unwrap().hub_holds;
     assert_ne!(
         holds,
-        Some(HubHolds::Index { sha256: WRONG_SHA.into(), note_count: LOCAL_NOTE_COUNT }),
+        Some(HubHolds::Index {
+            sha256: WRONG_SHA.into(),
+            note_count: LOCAL_NOTE_COUNT
+        }),
         "the hub's claim must not become our record of what it holds",
     );
     assert_eq!(
@@ -805,8 +919,12 @@ async fn a_cycle_that_could_not_read_a_followed_vault_records_how_many() {
     let served = peer_index_bytes();
     let (addr, asked) = spawn_hub_with(
         stale(),
-        OnUpload::Ack, OnGrant::Ack,
-        vec![follow_grant(&me, "v-refused"), follow_grant(&me, "v-served")],
+        OnUpload::Ack,
+        OnGrant::Ack,
+        vec![
+            follow_grant(&me, "v-refused"),
+            follow_grant(&me, "v-served"),
+        ],
         vec![
             ("v-refused".to_string(), Fetch::Refuse),
             ("v-served".to_string(), Fetch::Serve(served.clone())),
@@ -815,22 +933,36 @@ async fn a_cycle_that_could_not_read_a_followed_vault_records_how_many() {
     .await;
     let config = config_for(dir.path(), addr);
 
-    let result =
-        sync_all_async(&dir.path().join("no-such-source.db"), vault.path(), dir.path(), &config)
-            .await
-            .expect("one refused read does not fail the cycle");
+    let result = sync_all_async(
+        &dir.path().join("no-such-source.db"),
+        vault.path(),
+        dir.path(),
+        &config,
+    )
+    .await
+    .expect("one refused read does not fail the cycle");
 
     assert_eq!(result.skipped_fetches, vec!["v-refused".to_string()]);
-    assert_eq!(result.fetched.len(), 1, "the second vault was still fetched");
+    assert_eq!(
+        result.fetched.len(),
+        1,
+        "the second vault was still fetched"
+    );
     assert_peer_index_from(dir.path(), "v-served", &served);
 
-    assert_eq!(*asked.lock().unwrap(), vec!["v-refused".to_string(), "v-served".to_string()],
-        "the refusal did not stop the client asking for the next one");
+    assert_eq!(
+        *asked.lock().unwrap(),
+        vec!["v-refused".to_string(), "v-served".to_string()],
+        "the refusal did not stop the client asking for the next one"
+    );
 
     let state = read_state(dir.path()).unwrap().unwrap();
     assert_eq!(state.outcome, OUTCOME_OK);
-    assert_eq!(state.skipped_fetches, Some(1),
-        "a partial read failure is recorded, not swallowed");
+    assert_eq!(
+        state.skipped_fetches,
+        Some(1),
+        "a partial read failure is recorded, not swallowed"
+    );
 }
 
 /// The other side of it. `Some(1)` above only means something if a cycle that
@@ -844,19 +976,28 @@ async fn a_cycle_that_read_everything_records_no_skips() {
     let me = client_key_id(dir.path());
     let (addr, asked) = spawn_hub_with(
         stale(),
-        OnUpload::Ack, OnGrant::Ack,
+        OnUpload::Ack,
+        OnGrant::Ack,
         vec![follow_grant(&me, "v-served")],
         vec![("v-served".to_string(), Fetch::Serve(peer_index_bytes()))],
     )
     .await;
     let config = config_for(dir.path(), addr);
 
-    sync_all_async(&dir.path().join("no-such-source.db"), vault.path(), dir.path(), &config)
-        .await
-        .expect("the cycle completes");
+    sync_all_async(
+        &dir.path().join("no-such-source.db"),
+        vault.path(),
+        dir.path(),
+        &config,
+    )
+    .await
+    .expect("the cycle completes");
 
     assert_eq!(*asked.lock().unwrap(), vec!["v-served".to_string()]);
-    assert_eq!(read_state(dir.path()).unwrap().unwrap().skipped_fetches, Some(0));
+    assert_eq!(
+        read_state(dir.path()).unwrap().unwrap().skipped_fetches,
+        Some(0)
+    );
 }
 
 /// Plan 7 end to end: link a second machine and see the first one's notes.
@@ -878,17 +1019,22 @@ async fn a_linked_machine_reads_the_vault_the_hub_listed_for_it() {
     let served = peer_index_bytes();
     let (addr, seen) = spawn_hub_with(
         stale(),
-        OnUpload::Ack, OnGrant::Ack,
+        OnUpload::Ack,
+        OnGrant::Ack,
         vec![inbound],
         vec![("v-other-machine".to_string(), Fetch::Serve(served.clone()))],
     )
     .await;
     let config = config_for(dir.path(), addr);
 
-    let result =
-        sync_all_async(&dir.path().join("no-such-source.db"), vault.path(), dir.path(), &config)
-            .await
-            .expect("the cycle completes");
+    let result = sync_all_async(
+        &dir.path().join("no-such-source.db"),
+        vault.path(),
+        dir.path(),
+        &config,
+    )
+    .await
+    .expect("the cycle completes");
 
     assert_eq!(result.fetched.len(), 1, "the vault the hub listed was read");
     assert_peer_index_from(dir.path(), "v-other-machine", &served);
@@ -899,8 +1045,11 @@ async fn a_linked_machine_reads_the_vault_the_hub_listed_for_it() {
         .filter(|line| !line.starts_with("put-grant:"))
         .cloned()
         .collect();
-    assert_eq!(fetched, vec!["v-other-machine".to_string()],
-        "exactly the listing, less this machine's own vault");
+    assert_eq!(
+        fetched,
+        vec!["v-other-machine".to_string()],
+        "exactly the listing, less this machine's own vault"
+    );
 }
 
 /// A real peer index, as bytes a hub can serve. `model_id` matches what
@@ -950,20 +1099,30 @@ async fn a_cycle_records_the_hubs_listing_and_the_reader_serves_only_what_is_on_
 
     let (addr, _seen) = spawn_hub_with(
         stale(),
-        OnUpload::Ack, OnGrant::Ack,
+        OnUpload::Ack,
+        OnGrant::Ack,
         vec![inbound],
-        vec![("v-other-machine".to_string(), Fetch::Serve(peer_index_bytes()))],
+        vec![(
+            "v-other-machine".to_string(),
+            Fetch::Serve(peer_index_bytes()),
+        )],
     )
     .await;
     let config = config_for(dir.path(), addr);
 
     let before = unix_seconds();
-    sync_all_async(&dir.path().join("no-such-source.db"), vault.path(), dir.path(), &config)
-        .await
-        .expect("the cycle completes");
+    sync_all_async(
+        &dir.path().join("no-such-source.db"),
+        vault.path(),
+        dir.path(),
+        &config,
+    )
+    .await
+    .expect("the cycle completes");
     let after = unix_seconds();
 
-    let listed = read_readable_vaults(dir.path()).unwrap()
+    let listed = read_readable_vaults(dir.path())
+        .unwrap()
         .expect("the cycle records what the hub listed");
     assert!(listed.contains("v-other-machine"));
     // `at` is the whole of the staleness answer `ll status` renders and the
@@ -972,22 +1131,34 @@ async fn a_cycle_records_the_hubs_listing_and_the_reader_serves_only_what_is_on_
     // permanent "read authority 20335 days old" on a machine that just
     // synced, and a false alarm on that warning is most of how the original
     // outage stayed invisible for two months.
-    assert!((before..=after).contains(&listed.at),
-        "the cycle stamped {} and it ran between {before} and {after}", listed.at);
-    assert!(!listed.contains("v-thomas-kirk"),
-        "the hub did not list it, so nothing may put it on the record");
-    assert!(!listed.contains("v1"),
-        "this machine's own vault is not a peer cache and never was");
+    assert!(
+        (before..=after).contains(&listed.at),
+        "the cycle stamped {} and it ran between {before} and {after}",
+        listed.at
+    );
+    assert!(
+        !listed.contains("v-thomas-kirk"),
+        "the hub did not list it, so nothing may put it on the record"
+    );
+    assert!(
+        !listed.contains("v1"),
+        "this machine's own vault is not a peer cache and never was"
+    );
 
     let served: Vec<String> =
         ll_search::search::discover_peer_dbs(dir.path(), "test-model", listed.at)
             .into_iter()
             .map(|(id, _)| id)
             .collect();
-    assert_eq!(served, vec!["v-other-machine".to_string()],
-        "the unscoped link covers both caches; only one of them is a vault the hub listed");
-    assert!(orphan.join("index.db").exists(),
-        "and the orphan is hidden without being deleted — deletion is disk hygiene now");
+    assert_eq!(
+        served,
+        vec!["v-other-machine".to_string()],
+        "the unscoped link covers both caches; only one of them is a vault the hub listed"
+    );
+    assert!(
+        orphan.join("index.db").exists(),
+        "and the orphan is hidden without being deleted — deletion is disk hygiene now"
+    );
 }
 
 /// The v4 download half opened with `list-peers` on every cycle, listing or
@@ -1003,13 +1174,24 @@ async fn a_cycle_whose_hub_lists_only_this_vault_asks_for_nothing() {
     let (addr, asked) = spawn_hub_with(stale(), OnUpload::Ack, OnGrant::Ack, vec![], vec![]).await;
     let config = config_for(dir.path(), addr);
 
-    sync_all_async(&dir.path().join("no-such-source.db"), vault.path(), dir.path(), &config)
-        .await
-        .expect("the cycle completes");
+    sync_all_async(
+        &dir.path().join("no-such-source.db"),
+        vault.path(),
+        dir.path(),
+        &config,
+    )
+    .await
+    .expect("the cycle completes");
 
-    assert!(asked.lock().unwrap().is_empty(),
-        "nothing was said after the upload: {:?}", asked.lock().unwrap());
-    assert_eq!(read_state(dir.path()).unwrap().unwrap().skipped_fetches, Some(0));
+    assert!(
+        asked.lock().unwrap().is_empty(),
+        "nothing was said after the upload: {:?}",
+        asked.lock().unwrap()
+    );
+    assert_eq!(
+        read_state(dir.path()).unwrap().unwrap().skipped_fetches,
+        Some(0)
+    );
 }
 
 /// A cycle that never reached the read half must not report "none failed".
@@ -1020,12 +1202,20 @@ async fn a_cycle_that_died_before_the_read_half_records_nothing_about_it() {
     let vault = tempfile::tempdir().unwrap();
     let config = config_for(dir.path(), "127.0.0.1:1".parse().unwrap());
 
-    sync_all_async(&dir.path().join("no-such-source.db"), vault.path(), dir.path(), &config)
-        .await
-        .expect_err("precondition: this cycle cannot succeed");
+    sync_all_async(
+        &dir.path().join("no-such-source.db"),
+        vault.path(),
+        dir.path(),
+        &config,
+    )
+    .await
+    .expect_err("precondition: this cycle cannot succeed");
 
-    assert_eq!(read_state(dir.path()).unwrap().unwrap().skipped_fetches, None,
-        "unknown is a different report from zero and must not be rendered as one");
+    assert_eq!(
+        read_state(dir.path()).unwrap().unwrap().skipped_fetches,
+        None,
+        "unknown is a different report from zero and must not be rendered as one"
+    );
 }
 
 /// The `link` half of a cycle, at the wire.
@@ -1055,12 +1245,24 @@ async fn a_cycle_answers_an_inbound_link_with_its_own_half() {
         note_count: HUB_NOTE_COUNT,
         uploaded_at: 1,
     };
-    let (addr, seen) = spawn_hub_with(Some(held), OnUpload::Ack, OnGrant::Ack, vec![inbound], vec![]).await;
+    let (addr, seen) = spawn_hub_with(
+        Some(held),
+        OnUpload::Ack,
+        OnGrant::Ack,
+        vec![inbound],
+        vec![],
+    )
+    .await;
     let config = config_for(dir.path(), addr);
 
-    sync_all_async(&dir.path().join("no-such-source.db"), vault.path(), dir.path(), &config)
-        .await
-        .expect("the cycle completes");
+    sync_all_async(
+        &dir.path().join("no-such-source.db"),
+        vault.path(),
+        dir.path(),
+        &config,
+    )
+    .await
+    .expect("the cycle completes");
 
     let lodged: Vec<GrantStatement> = seen
         .lock()
@@ -1069,7 +1271,12 @@ async fn a_cycle_answers_an_inbound_link_with_its_own_half() {
         .filter_map(|line| line.strip_prefix("put-grant:"))
         .map(|b| serde_json::from_slice(&unb64(b).expect("base64")).expect("a grant statement"))
         .collect();
-    assert_eq!(lodged.len(), 1, "the cycle owed exactly one grant: {:?}", seen.lock().unwrap());
+    assert_eq!(
+        lodged.len(),
+        1,
+        "the cycle owed exactly one grant: {:?}",
+        seen.lock().unwrap()
+    );
     assert_eq!(lodged[0].kind, GrantKind::Link);
     assert_eq!(lodged[0].from, me, "each key signs only its own sentence");
     assert_eq!(lodged[0].to, KeyId::from_pubkey(&approver.verifying_key()));
@@ -1090,15 +1297,24 @@ async fn a_cycle_with_nothing_owed_lodges_nothing() {
         note_count: HUB_NOTE_COUNT,
         uploaded_at: 1,
     };
-    let (addr, seen) = spawn_hub_with(Some(held), OnUpload::Ack, OnGrant::Ack, vec![], vec![]).await;
+    let (addr, seen) =
+        spawn_hub_with(Some(held), OnUpload::Ack, OnGrant::Ack, vec![], vec![]).await;
     let config = config_for(dir.path(), addr);
 
-    sync_all_async(&dir.path().join("no-such-source.db"), vault.path(), dir.path(), &config)
-        .await
-        .expect("the cycle completes");
+    sync_all_async(
+        &dir.path().join("no-such-source.db"),
+        vault.path(),
+        dir.path(),
+        &config,
+    )
+    .await
+    .expect("the cycle completes");
 
     assert!(
-        seen.lock().unwrap().iter().all(|line| !line.starts_with("put-grant:")),
+        seen.lock()
+            .unwrap()
+            .iter()
+            .all(|line| !line.starts_with("put-grant:")),
         "{:?}",
         seen.lock().unwrap()
     );
@@ -1137,24 +1353,39 @@ async fn a_refused_grant_does_not_stop_the_upload_or_the_read_half() {
     .await;
     let config = config_for(dir.path(), addr);
 
-    let result =
-        sync_all_async(&dir.path().join("no-such-source.db"), vault.path(), dir.path(), &config)
-            .await
-            .expect("a hub that answers is a hub the rest of the cycle can still use");
+    let result = sync_all_async(
+        &dir.path().join("no-such-source.db"),
+        vault.path(),
+        dir.path(),
+        &config,
+    )
+    .await
+    .expect("a hub that answers is a hub the rest of the cycle can still use");
 
-    assert!(!result.skipped_upload,
+    assert!(
+        !result.skipped_upload,
         "the hub holds a stale index, so the upload had to happen — and it comes AFTER \
-         the grant half, which is the whole point");
+         the grant half, which is the whole point"
+    );
     assert_eq!(result.refused_grants.len(), 1);
 
     let record = seen.lock().unwrap().clone();
-    assert!(record.iter().any(|l| l.starts_with("put-grant:")), "{record:?}");
+    assert!(
+        record.iter().any(|l| l.starts_with("put-grant:")),
+        "{record:?}"
+    );
 
     let state = read_state(dir.path()).unwrap().unwrap();
-    assert_eq!(state.outcome, OUTCOME_OK, "the cycle succeeded; one grant did not");
-    assert_eq!(state.refused_grants, Some(1),
+    assert_eq!(
+        state.outcome, OUTCOME_OK,
+        "the cycle succeeded; one grant did not"
+    );
+    assert_eq!(
+        state.refused_grants,
+        Some(1),
         "and `ll status` can say so, rather than the user meeting it as a machine that \
-         never finishes linking");
+         never finishes linking"
+    );
     assert_eq!(state.skipped_fetches, Some(0), "the read half ran");
 }
 
@@ -1173,13 +1404,20 @@ async fn a_cycle_whose_grants_were_accepted_records_no_refusals() {
         spawn_hub_with(stale(), OnUpload::Ack, OnGrant::Ack, vec![inbound], vec![]).await;
     let config = config_for(dir.path(), addr);
 
-    let result =
-        sync_all_async(&dir.path().join("no-such-source.db"), vault.path(), dir.path(), &config)
-            .await
-            .unwrap();
+    let result = sync_all_async(
+        &dir.path().join("no-such-source.db"),
+        vault.path(),
+        dir.path(),
+        &config,
+    )
+    .await
+    .unwrap();
 
     assert!(result.refused_grants.is_empty());
-    assert_eq!(read_state(dir.path()).unwrap().unwrap().refused_grants, Some(0));
+    assert_eq!(
+        read_state(dir.path()).unwrap().unwrap().refused_grants,
+        Some(0)
+    );
 }
 
 /// **D-8's call site.** The two boundary tests in `sync::client` pin
@@ -1218,7 +1456,10 @@ async fn an_oversize_export_to_a_hub_without_chunking_is_refused() {
     .expect_err("an export this size cannot be sent to this hub");
 
     assert!(
-        matches!(err.downcast_ref::<SyncError>(), Some(SyncError::EnvelopeOversize { .. })),
+        matches!(
+            err.downcast_ref::<SyncError>(),
+            Some(SyncError::EnvelopeOversize { .. })
+        ),
         "the size rule is what refused it, not a failed connection: {err:#}",
     );
     assert!(
@@ -1273,47 +1514,82 @@ async fn spawn_chunking_hub(seen: Arc<Mutex<Vec<String>>>, expected_len: usize) 
     let addr = listener.local_addr().unwrap();
     tokio::spawn(async move {
         let note = |what: String| seen.lock().unwrap().push(what);
-        let Ok((stream, _)) = listener.accept().await else { return };
-        let Ok(mut ws) = tokio_tungstenite::accept_async(stream).await else { return };
+        let Ok((stream, _)) = listener.accept().await else {
+            return;
+        };
+        let Ok(mut ws) = tokio_tungstenite::accept_async(stream).await else {
+            return;
+        };
 
-        let Some(hello) = recv_json(&mut ws).await else { return note("no hello".into()) };
+        let Some(hello) = recv_json(&mut ws).await else {
+            return note("no hello".into());
+        };
         let Ok(ClientMsg::ClientHello { nonce_c, .. }) = serde_json::from_value(hello) else {
             return note("not a hello".into());
         };
         let nonce_h: [u8; 32] = rand::random();
-        let Some(nonce_c_raw) = unb64(&nonce_c) else { return note("bad nonce".into()) };
+        let Some(nonce_c_raw) = unb64(&nonce_c) else {
+            return note("bad nonce".into());
+        };
         let sig_h = hub_key().sign(&hub_challenge_message(&nonce_h, &nonce_c_raw, &[0u8; 32]));
-        if !send_hub(&mut ws, &HubMsg::HubChallenge {
-            nonce_h: b64(&nonce_h),
-            hub_key_id: hub_key_id(),
-            sig_h: b64(&sig_h.to_bytes()),
-        }).await { return }
-        if recv_json(&mut ws).await.is_none() { return note("no client-auth".into()) }
+        if !send_hub(
+            &mut ws,
+            &HubMsg::HubChallenge {
+                nonce_h: b64(&nonce_h),
+                hub_key_id: hub_key_id(),
+                sig_h: b64(&sig_h.to_bytes()),
+            },
+        )
+        .await
+        {
+            return;
+        }
+        if recv_json(&mut ws).await.is_none() {
+            return note("no client-auth".into());
+        }
 
         // The capability. Deliberately smaller than the client's own ceiling,
         // so the smaller of the two is what the frames must respect.
         let chunk_bytes: u32 = 4 * 1024 * 1024;
-        if !send_hub(&mut ws, &HubMsg::SyncReady {
-            chunked_upload: Some(ChunkedUploadLimits {
-                max_chunk_bytes: chunk_bytes,
-                max_total_bytes: 200 * 1024 * 1024,
-            }),
-            protocol_version: PROTOCOL_VERSION,
-            vault_state: vec![],
-            grants: vec![],
-            revocations: vec![],
-        }).await { return }
+        if !send_hub(
+            &mut ws,
+            &HubMsg::SyncReady {
+                chunked_upload: Some(ChunkedUploadLimits {
+                    max_chunk_bytes: chunk_bytes,
+                    max_total_bytes: 200 * 1024 * 1024,
+                }),
+                protocol_version: PROTOCOL_VERSION,
+                vault_state: vec![],
+                grants: vec![],
+                revocations: vec![],
+            },
+        )
+        .await
+        {
+            return;
+        }
 
-        let Some(msg) = recv_json(&mut ws).await else { return note("no upload".into()) };
-        let Ok(ClientMsg::UploadIndex { vault_id, sha256, chunked, .. }) =
-            serde_json::from_value(msg)
+        let Some(msg) = recv_json(&mut ws).await else {
+            return note("no upload".into());
+        };
+        let Ok(ClientMsg::UploadIndex {
+            vault_id,
+            sha256,
+            chunked,
+            ..
+        }) = serde_json::from_value(msg)
         else {
             return note("not an upload-index".into());
         };
-        let Some(d) = chunked else { return note("upload was not declared chunked".into()) };
+        let Some(d) = chunked else {
+            return note("upload was not declared chunked".into());
+        };
         note(format!("chunks={}", d.chunks));
         if d.chunk_size_max > chunk_bytes {
-            return note(format!("chunk_size_max {} exceeds what was offered", d.chunk_size_max));
+            return note(format!(
+                "chunk_size_max {} exceeds what was offered",
+                d.chunk_size_max
+            ));
         }
 
         // Read exactly what was declared and rebuild it.
@@ -1340,7 +1616,10 @@ async fn spawn_chunking_hub(seen: Arc<Mutex<Vec<String>>>, expected_len: usize) 
         }
         let body: Vec<u8> = parts.into_iter().flat_map(|p| p.2).collect();
         if body.len() != expected_len {
-            return note(format!("reassembled {} bytes, expected {expected_len}", body.len()));
+            return note(format!(
+                "reassembled {} bytes, expected {expected_len}",
+                body.len()
+            ));
         }
         note("reassembled-ok".into());
 
@@ -1375,8 +1654,10 @@ fn place_oversize_export(config_dir: &Path, vault_dir: &Path) {
     ))
     .unwrap();
     drop(conn);
-    assert!(std::fs::metadata(&path).unwrap().len() as usize > CAP,
-        "precondition: the export has to actually exceed the cap");
+    assert!(
+        std::fs::metadata(&path).unwrap().len() as usize > CAP,
+        "precondition: the export has to actually exceed the cap"
+    );
 }
 
 /// **Before the upload, not after.** `run_cycle` writes the hub's listing
@@ -1401,43 +1682,72 @@ async fn a_cycle_that_dies_uploading_has_already_stopped_serving_what_the_hub_dr
 
     let (addr, _seen) = spawn_hub_with(
         stale(),
-        OnUpload::Ack, OnGrant::Ack,
+        OnUpload::Ack,
+        OnGrant::Ack,
         vec![inbound],
-        vec![("v-other-machine".to_string(), Fetch::Serve(peer_index_bytes()))],
+        vec![(
+            "v-other-machine".to_string(),
+            Fetch::Serve(peer_index_bytes()),
+        )],
     )
     .await;
     let config = config_for(dir.path(), addr);
-    sync_all_async(&dir.path().join("no-such-source.db"), vault.path(), dir.path(), &config)
-        .await
-        .expect("the first cycle completes");
+    sync_all_async(
+        &dir.path().join("no-such-source.db"),
+        vault.path(),
+        dir.path(),
+        &config,
+    )
+    .await
+    .expect("the first cycle completes");
 
-    let listed = read_readable_vaults(dir.path()).unwrap().expect("the first cycle recorded");
-    assert!(listed.contains("v-other-machine"),
-        "precondition: there is something on the list for the second cycle to remove");
-    assert!(served_vaults(dir.path()).contains(&"v-other-machine".to_string()),
-        "precondition: and the reader is serving it");
+    let listed = read_readable_vaults(dir.path())
+        .unwrap()
+        .expect("the first cycle recorded");
+    assert!(
+        listed.contains("v-other-machine"),
+        "precondition: there is something on the list for the second cycle to remove"
+    );
+    assert!(
+        served_vaults(dir.path()).contains(&"v-other-machine".to_string()),
+        "precondition: and the reader is serving it"
+    );
 
     // The same hub, listing nothing but this client's own vault, refusing the
     // upload it is offered.
-    let (addr, _seen) = spawn_hub_with(stale(), OnUpload::Reject, OnGrant::Ack, vec![], vec![]).await;
+    let (addr, _seen) =
+        spawn_hub_with(stale(), OnUpload::Reject, OnGrant::Ack, vec![], vec![]).await;
     let config = config_for(dir.path(), addr);
-    sync_all_async(&dir.path().join("no-such-source.db"), vault.path(), dir.path(), &config)
-        .await
-        .expect_err("precondition: the second cycle dies on the rejected upload");
+    sync_all_async(
+        &dir.path().join("no-such-source.db"),
+        vault.path(),
+        dir.path(),
+        &config,
+    )
+    .await
+    .expect_err("precondition: the second cycle dies on the rejected upload");
 
-    let listed = read_readable_vaults(dir.path()).unwrap()
+    let listed = read_readable_vaults(dir.path())
+        .unwrap()
         .expect("a cycle that reached the hub still wrote the list");
-    assert!(!listed.contains("v-other-machine"),
+    assert!(
+        !listed.contains("v-other-machine"),
         "the hub stopped listing it, so this machine stopped serving it — a failed \
-         upload is not a reason to go on serving what the hub dropped");
-    assert_eq!(served_vaults(dir.path()), Vec::<String>::new(),
-        "and the reader agrees, which is where it would have been noticed");
+         upload is not a reason to go on serving what the hub dropped"
+    );
+    assert_eq!(
+        served_vaults(dir.path()),
+        Vec::<String>::new(),
+        "and the reader agrees, which is where it would have been noticed"
+    );
 }
 
 /// What `ll search` would serve out of the peer caches right now, judged
 /// against the recorded list.
 fn served_vaults(config_dir: &Path) -> Vec<String> {
-    let Some(listed) = read_readable_vaults(config_dir).unwrap() else { return Vec::new() };
+    let Some(listed) = read_readable_vaults(config_dir).unwrap() else {
+        return Vec::new();
+    };
     ll_search::search::discover_peer_dbs(config_dir, "test-model", listed.at)
         .into_iter()
         .map(|(id, _)| id)
@@ -1497,25 +1807,45 @@ async fn a_cycle_deletes_the_peer_cache_a_revocation_withdraws() {
     )
     .await;
     let config = config_for(dir.path(), addr);
-    sync_all_async(&dir.path().join("no-such-source.db"), vault.path(), dir.path(), &config)
-        .await
-        .expect("the first cycle completes");
-    assert!(cache.join("index.db").exists(), "precondition: an active grant keeps its cache");
+    sync_all_async(
+        &dir.path().join("no-such-source.db"),
+        vault.path(),
+        dir.path(),
+        &config,
+    )
+    .await
+    .expect("the first cycle completes");
+    assert!(
+        cache.join("index.db").exists(),
+        "precondition: an active grant keeps its cache"
+    );
 
     // Second cycle: the grant is gone from `grants` and present only as a
     // signed revocation, which is how a real hub serves one.
-    let (addr, _) =
-        spawn_hub_revoking(Some(held), vec![], vec![revocation_of(&issuer, &grant_id, Some("v-other"))])
-            .await;
+    let (addr, _) = spawn_hub_revoking(
+        Some(held),
+        vec![],
+        vec![revocation_of(&issuer, &grant_id, Some("v-other"))],
+    )
+    .await;
     let config = config_for(dir.path(), addr);
-    sync_all_async(&dir.path().join("no-such-source.db"), vault.path(), dir.path(), &config)
-        .await
-        .expect("the second cycle completes");
+    sync_all_async(
+        &dir.path().join("no-such-source.db"),
+        vault.path(),
+        dir.path(),
+        &config,
+    )
+    .await
+    .expect("the second cycle completes");
 
-    assert!(!cache.exists(),
-        "data already read cannot be recalled, but continuing to serve it is not revocation");
-    assert!(untouched.join("index.db").exists(),
-        "no grant named it, so no revocation may remove it");
+    assert!(
+        !cache.exists(),
+        "data already read cannot be recalled, but continuing to serve it is not revocation"
+    );
+    assert!(
+        untouched.join("index.db").exists(),
+        "no grant named it, so no revocation may remove it"
+    );
 }
 
 /// The sibling rule, and the one the listing test above was written beside.
@@ -1549,11 +1879,18 @@ async fn a_cycle_that_dies_uploading_has_already_dropped_what_a_revocation_withd
     )
     .await;
     let config = config_for(dir.path(), addr);
-    sync_all_async(&dir.path().join("no-such-source.db"), vault.path(), dir.path(), &config)
-        .await
-        .expect("the first cycle completes");
-    assert!(cache.join("index.db").exists(),
-        "precondition: the hub listed it, served it, and the grant justifies keeping it");
+    sync_all_async(
+        &dir.path().join("no-such-source.db"),
+        vault.path(),
+        dir.path(),
+        &config,
+    )
+    .await
+    .expect("the first cycle completes");
+    assert!(
+        cache.join("index.db").exists(),
+        "precondition: the hub listed it, served it, and the grant justifies keeping it"
+    );
 
     let (addr, _) = spawn_hub_full(
         stale(),
@@ -1565,13 +1902,20 @@ async fn a_cycle_that_dies_uploading_has_already_dropped_what_a_revocation_withd
     )
     .await;
     let config = config_for(dir.path(), addr);
-    sync_all_async(&dir.path().join("no-such-source.db"), vault.path(), dir.path(), &config)
-        .await
-        .expect_err("precondition: the second cycle dies on the rejected upload");
+    sync_all_async(
+        &dir.path().join("no-such-source.db"),
+        vault.path(),
+        dir.path(),
+        &config,
+    )
+    .await
+    .expect_err("precondition: the second cycle dies on the rejected upload");
 
-    assert!(!cache.exists(),
+    assert!(
+        !cache.exists(),
         "the revocation arrived and was acted on before the upload was offered; a \
-         failed upload is not a reason to go on serving a withdrawn grant");
+         failed upload is not a reason to go on serving a withdrawn grant"
+    );
 }
 
 /// The same cycle, with the revocation signed by someone who never issued the
@@ -1599,9 +1943,14 @@ async fn a_cycle_ignores_a_revocation_the_grants_issuer_did_not_sign() {
     };
     let (addr, _) = spawn_hub_revoking(Some(held.clone()), vec![granted], vec![]).await;
     let config = config_for(dir.path(), addr);
-    sync_all_async(&dir.path().join("no-such-source.db"), vault.path(), dir.path(), &config)
-        .await
-        .expect("the first cycle completes");
+    sync_all_async(
+        &dir.path().join("no-such-source.db"),
+        vault.path(),
+        dir.path(),
+        &config,
+    )
+    .await
+    .expect("the first cycle completes");
 
     let (addr, _) = spawn_hub_revoking(
         Some(held),
@@ -1610,10 +1959,17 @@ async fn a_cycle_ignores_a_revocation_the_grants_issuer_did_not_sign() {
     )
     .await;
     let config = config_for(dir.path(), addr);
-    sync_all_async(&dir.path().join("no-such-source.db"), vault.path(), dir.path(), &config)
-        .await
-        .expect("the cycle completes: a revocation it will not act on is not an error");
+    sync_all_async(
+        &dir.path().join("no-such-source.db"),
+        vault.path(),
+        dir.path(),
+        &config,
+    )
+    .await
+    .expect("the cycle completes: a revocation it will not act on is not an error");
 
-    assert!(cache.join("index.db").exists(),
-        "a signature proves someone signed those bytes, not that the right someone did");
+    assert!(
+        cache.join("index.db").exists(),
+        "a signature proves someone signed those bytes, not that the right someone did"
+    );
 }

@@ -112,7 +112,9 @@ pub trait EmbeddingProvider: Send + Sync {
         anyhow::ensure!(
             vec.len() == expected,
             "embedding dim mismatch: model {} produced {} dims, expected {}",
-            self.config().model_id, vec.len(), expected
+            self.config().model_id,
+            vec.len(),
+            expected
         );
         Ok(vec)
     }
@@ -138,7 +140,9 @@ pub trait EmbeddingProvider: Send + Sync {
             anyhow::ensure!(
                 vec.len() == expected,
                 "embedding dim mismatch: model {} produced {} dims, expected {}",
-                self.config().model_id, vec.len(), expected
+                self.config().model_id,
+                vec.len(),
+                expected
             );
         }
         Ok(results)

@@ -2,7 +2,9 @@ use rusqlite::Connection;
 
 pub use ll_core::rerank::{rerank, rerank_with_report, RerankFailure, RerankReport, RerankResult};
 
-use crate::search::{batch_load_bodies_federated, hybrid_query_with_ctx, SearchContext, TemporalParams};
+use crate::search::{
+    batch_load_bodies_federated, hybrid_query_with_ctx, SearchContext, TemporalParams,
+};
 
 /// Run the rerank pipeline: hybrid query for `candidates`, batch-load bodies
 /// across peers, score with the cross-encoder, return the top `top` scored
@@ -16,8 +18,14 @@ pub fn run(
     top: usize,
     candidates: usize,
 ) -> anyhow::Result<Vec<RerankResult>> {
-    let candidate_results =
-        hybrid_query_with_ctx(ctx, conn, query, candidates, peers, &TemporalParams::default())?;
+    let candidate_results = hybrid_query_with_ctx(
+        ctx,
+        conn,
+        query,
+        candidates,
+        peers,
+        &TemporalParams::default(),
+    )?;
     if candidate_results.is_empty() {
         return Ok(Vec::new());
     }

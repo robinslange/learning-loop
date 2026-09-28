@@ -34,7 +34,11 @@ pub struct PrfParams {
 
 impl Default for PrfParams {
     fn default() -> Self {
-        Self { alpha: PRF_ALPHA, beta: 1.0 - PRF_ALPHA, k: PRF_K }
+        Self {
+            alpha: PRF_ALPHA,
+            beta: 1.0 - PRF_ALPHA,
+            k: PRF_K,
+        }
     }
 }
 
@@ -107,13 +111,12 @@ pub const FTS_OR_TOKEN_CAP: usize = 32;
 /// ranking. Under implicit AND (the first-pass query) stopwords are harmless
 /// — they only tighten the match — so they are kept there.
 const FTS_OR_STOPWORDS: &[&str] = &[
-    "a", "about", "after", "all", "an", "and", "any", "are", "as", "at", "be",
-    "been", "but", "by", "can", "could", "did", "do", "does", "for", "from",
-    "had", "has", "have", "how", "i", "if", "in", "into", "is", "it", "its",
-    "just", "me", "my", "no", "not", "of", "on", "or", "our", "should", "so",
-    "some", "than", "that", "the", "their", "them", "then", "there", "these",
-    "they", "this", "to", "up", "was", "we", "were", "what", "when", "where",
-    "which", "who", "why", "will", "with", "would", "you", "your",
+    "a", "about", "after", "all", "an", "and", "any", "are", "as", "at", "be", "been", "but", "by",
+    "can", "could", "did", "do", "does", "for", "from", "had", "has", "have", "how", "i", "if",
+    "in", "into", "is", "it", "its", "just", "me", "my", "no", "not", "of", "on", "or", "our",
+    "should", "so", "some", "than", "that", "the", "their", "them", "then", "there", "these",
+    "they", "this", "to", "up", "was", "we", "were", "what", "when", "where", "which", "who",
+    "why", "will", "with", "would", "you", "your",
 ];
 
 fn quote_token(t: &str) -> String {
@@ -287,7 +290,13 @@ pub struct FusionWeights {
 
 impl Default for FusionWeights {
     fn default() -> Self {
-        Self { vec: VEC_WEIGHT, bm25: BM25_WEIGHT, ppr: PPR_WEIGHT, tag: TAG_WEIGHT, prf: PRF_WEIGHT }
+        Self {
+            vec: VEC_WEIGHT,
+            bm25: BM25_WEIGHT,
+            ppr: PPR_WEIGHT,
+            tag: TAG_WEIGHT,
+            prf: PRF_WEIGHT,
+        }
     }
 }
 
@@ -311,8 +320,7 @@ pub fn add_weighted_rrf<'a>(
     items: impl Iterator<Item = &'a str>,
 ) {
     for (rank, path) in items.enumerate() {
-        *rrf_scores.entry(path.to_string()).or_default() +=
-            weight / (RRF_K + rank as f64 + 1.0);
+        *rrf_scores.entry(path.to_string()).or_default() += weight / (RRF_K + rank as f64 + 1.0);
     }
 }
 
@@ -320,7 +328,10 @@ pub fn add_weighted_rrf<'a>(
 ///
 /// Call once per retrieval system (e.g. vector, FTS, graph). Documents that
 /// appear in multiple lists accumulate scores from each.
-pub fn add_ranked_rrf<'a>(rrf_scores: &mut HashMap<String, f64>, items: impl Iterator<Item = &'a str>) {
+pub fn add_ranked_rrf<'a>(
+    rrf_scores: &mut HashMap<String, f64>,
+    items: impl Iterator<Item = &'a str>,
+) {
     add_weighted_rrf(rrf_scores, 1.0, items);
 }
 
@@ -394,7 +405,8 @@ pub fn rocchio_prf_with(
 
     let mut expanded = vec![0.0f32; dim];
     for d in 0..dim {
-        let fb_mean: f32 = feedback_vecs.iter().map(|v| v[d]).sum::<f32>() / feedback_vecs.len() as f32;
+        let fb_mean: f32 =
+            feedback_vecs.iter().map(|v| v[d]).sum::<f32>() / feedback_vecs.len() as f32;
         expanded[d] = params.alpha * query_vec[d] + params.beta * fb_mean;
     }
 
@@ -508,29 +520,46 @@ mod tests {
             )
             .unwrap();
         }
-        conn.execute_batch("INSERT INTO notes_fts(notes_fts) VALUES('rebuild')").unwrap();
+        conn.execute_batch("INSERT INTO notes_fts(notes_fts) VALUES('rebuild')")
+            .unwrap();
         conn
     }
 
     #[test]
     fn test_long_nl_query_matches_subset_of_tokens() {
         let conn = fts_fixture(&[
-            ("sticky.md", "overflow hidden on the scroll root kills position sticky"),
-            ("cache.md", "a recurring entity cache needs a hard ttl ceiling"),
+            (
+                "sticky.md",
+                "overflow hidden on the scroll root kills position sticky",
+            ),
+            (
+                "cache.md",
+                "a recurring entity cache needs a hard ttl ceiling",
+            ),
         ]);
         // 12-token natural-language query; neither note contains every token.
         let query = "why does my position sticky header stop working when overflow is hidden";
         let results = fts_bm25_query(&conn, query, 10, &VAULT_FTS);
-        assert_eq!(results.len(), 1, "OR semantics should match the subset-overlap note");
+        assert_eq!(
+            results.len(),
+            1,
+            "OR semantics should match the subset-overlap note"
+        );
         assert_eq!(results[0].1, "sticky.md");
-        assert!(results[0].2 < 0.0, "bm25 scores stay negative (more negative = better)");
+        assert!(
+            results[0].2 < 0.0,
+            "bm25 scores stay negative (more negative = better)"
+        );
     }
 
     #[test]
     fn test_long_query_ranks_higher_overlap_first() {
         let conn = fts_fixture(&[
             ("partial.md", "the scroll root and nothing else"),
-            ("full.md", "overflow hidden on the scroll root kills position sticky"),
+            (
+                "full.md",
+                "overflow hidden on the scroll root kills position sticky",
+            ),
             // Pure-stopword note: without stopword filtering, the OR fallback
             // would match this on "by"/"on"/"the" and pollute the ranking.
             ("stopwords.md", "the and of to is on that by with this"),
@@ -543,8 +572,14 @@ mod tests {
             "stopword-only notes must not enter the OR fallback results: {paths:?}"
         );
         assert_eq!(results.len(), 2);
-        assert_eq!(results[0].1, "full.md", "note matching more query tokens ranks first");
-        assert!(results[0].2 < results[1].2, "better match has more-negative bm25 score");
+        assert_eq!(
+            results[0].1, "full.md",
+            "note matching more query tokens ranks first"
+        );
+        assert!(
+            results[0].2 < results[1].2,
+            "better match has more-negative bm25 score"
+        );
     }
 
     #[test]
@@ -567,7 +602,11 @@ mod tests {
             ("one.md", "token budget exceeded"),
         ]);
         let results = fts_bm25_query(&conn, "token cache", 10, &VAULT_FTS);
-        assert_eq!(results.len(), 1, "short queries keep implicit-AND precision");
+        assert_eq!(
+            results.len(),
+            1,
+            "short queries keep implicit-AND precision"
+        );
         assert_eq!(results[0].1, "both.md");
     }
 
@@ -575,7 +614,11 @@ mod tests {
     fn test_short_query_zero_rows_falls_back_to_or() {
         let conn = fts_fixture(&[("one.md", "token budget exceeded")]);
         let results = fts_bm25_query(&conn, "token cache", 10, &VAULT_FTS);
-        assert_eq!(results.len(), 1, "zero AND rows rerun as OR at any token count");
+        assert_eq!(
+            results.len(),
+            1,
+            "zero AND rows rerun as OR at any token count"
+        );
         assert_eq!(results[0].1, "one.md");
     }
 
@@ -671,7 +714,10 @@ mod tests {
         // shows the reranker recovering real gains from exactly those. They
         // must vote weakly, not be deleted.
         let w = FusionWeights::default();
-        assert!(w.ppr > 0.0 && w.tag > 0.0, "graph lanes must still surface candidates");
+        assert!(
+            w.ppr > 0.0 && w.tag > 0.0,
+            "graph lanes must still surface candidates"
+        );
     }
 
     #[test]

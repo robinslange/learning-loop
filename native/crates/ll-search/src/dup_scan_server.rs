@@ -178,9 +178,7 @@ pub async fn run_dup_scan_server(
     .await;
     let leftover = handlers.len();
     if leftover > 0 {
-        eprintln!(
-            "UDS server: {leftover} handler(s) still running after drain — aborting",
-        );
+        eprintln!("UDS server: {leftover} handler(s) still running after drain — aborting",);
         handlers.abort_all();
     }
 
@@ -220,8 +218,8 @@ async fn handle_connection(stream: UnixStream, index: Arc<ScanIndex>) -> anyhow:
                 // the daemon's index, run the scan with the warm embedding +
                 // rerank models, and return the reflect envelope. spawn_blocking
                 // keeps the SQLite + ONNX work off the tokio worker.
-                let result = tokio::task::spawn_blocking(move || run_duplicate_scan(&index, &req))
-                    .await;
+                let result =
+                    tokio::task::spawn_blocking(move || run_duplicate_scan(&index, &req)).await;
                 match result {
                     Ok(Ok(scan)) => serde_json::to_string(&scan)
                         .unwrap_or_else(|e| protocol_error(format!("serialize response: {e}"))),
@@ -255,14 +253,20 @@ struct ScanIndex {
 
 impl ScanIndex {
     fn new(db_path: PathBuf) -> Self {
-        Self { db_path, warm: Mutex::new(None) }
+        Self {
+            db_path,
+            warm: Mutex::new(None),
+        }
     }
 
     fn search_context(&self) -> anyhow::Result<Arc<SearchContext>> {
         let mut warm = self.warm.lock();
         let (conn, app) = match &mut *warm {
             Some(open) => open,
-            empty => empty.insert((self.open()?, AppState::from_db(&self.db_path.to_string_lossy(), None)?)),
+            empty => empty.insert((
+                self.open()?,
+                AppState::from_db(&self.db_path.to_string_lossy(), None)?,
+            )),
         };
         Ok(app.ensure_search_context(conn))
     }
@@ -323,7 +327,8 @@ mod tests {
     #[test]
     fn duplicate_scan_request_parses_with_defaults() {
         let line = r#"{"kind":"duplicate-scan","queries":["sleep memory"]}"#;
-        let req: DuplicateScanRequest = serde_json::from_str(line).expect("dup-scan request parses");
+        let req: DuplicateScanRequest =
+            serde_json::from_str(line).expect("dup-scan request parses");
         assert_eq!(req.kind, "duplicate-scan");
         assert_eq!(req.queries, vec!["sleep memory".to_string()]);
         assert_eq!(req.top, default_dup_top());
@@ -332,9 +337,9 @@ mod tests {
 
     #[test]
     fn duplicate_scan_request_honours_explicit_top_and_candidates() {
-        let line =
-            r#"{"kind":"duplicate-scan","queries":["q"],"top":3,"candidates":9,"schema_version":1}"#;
-        let req: DuplicateScanRequest = serde_json::from_str(line).expect("dup-scan request parses");
+        let line = r#"{"kind":"duplicate-scan","queries":["q"],"top":3,"candidates":9,"schema_version":1}"#;
+        let req: DuplicateScanRequest =
+            serde_json::from_str(line).expect("dup-scan request parses");
         assert_eq!(req.top, 3);
         assert_eq!(req.candidates, 9);
     }
@@ -354,7 +359,10 @@ mod tests {
                     [path],
                 )
                 .unwrap();
-            let blob: Vec<u8> = [1.0f32, 0.0, 0.0].iter().flat_map(|f| f.to_le_bytes()).collect();
+            let blob: Vec<u8> = [1.0f32, 0.0, 0.0]
+                .iter()
+                .flat_map(|f| f.to_le_bytes())
+                .collect();
             writer
                 .execute(
                     "INSERT INTO embeddings (id, data) SELECT id, ?2 FROM notes WHERE path = ?1",
@@ -367,7 +375,10 @@ mod tests {
         let index = ScanIndex::new(db_path);
         let first = index.search_context().unwrap();
         assert_eq!(first.store.len(), 1);
-        assert!(Arc::ptr_eq(&first, &index.search_context().unwrap()), "unchanged, so cached");
+        assert!(
+            Arc::ptr_eq(&first, &index.search_context().unwrap()),
+            "unchanged, so cached"
+        );
 
         add_note("b.md");
         assert_eq!(index.search_context().unwrap().store.len(), 2);

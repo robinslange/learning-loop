@@ -313,10 +313,7 @@ mod tests {
     fn test_wikilink_cleaning() {
         let raw = "---\ntags: []\n---\n\nSee [[some-note]] and [[other|display text]] for details.";
         let result = preprocess_note(raw, "links.md").unwrap();
-        assert_eq!(
-            result.body,
-            "See some-note and display text for details."
-        );
+        assert_eq!(result.body, "See some-note and display text for details.");
     }
 
     #[test]
@@ -394,7 +391,10 @@ excalidraw-plugin: parsed
         let result = preprocess_note(&raw, "long.md").unwrap();
         // Tags were appended after the body, so on exactly the notes long
         // enough to need them they were the first thing cut.
-        assert!(result.text.contains("#distributed"), "tags must reach the encoder");
+        assert!(
+            result.text.contains("#distributed"),
+            "tags must reach the encoder"
+        );
         assert!(result.text.contains("#raft"));
     }
 

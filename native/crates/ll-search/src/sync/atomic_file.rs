@@ -77,12 +77,15 @@ where
     F: FnOnce(&Path) -> anyhow::Result<()>,
 {
     let parent = parent_of(path)?;
-    std::fs::create_dir_all(parent)
-        .with_context(|| format!("creating {}", parent.display()))?;
+    std::fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
 
     let tmp = sibling(
         path,
-        &format!("{}.{}.tmp", std::process::id(), WRITE_SEQ.fetch_add(1, Ordering::Relaxed)),
+        &format!(
+            "{}.{}.tmp",
+            std::process::id(),
+            WRITE_SEQ.fetch_add(1, Ordering::Relaxed)
+        ),
     );
     let staged = (|| {
         std::fs::write(&tmp, bytes).with_context(|| format!("writing {}", tmp.display()))?;
@@ -152,7 +155,11 @@ impl FileLock {
 
         let deadline = Instant::now() + WAIT;
         loop {
-            match std::fs::OpenOptions::new().write(true).create_new(true).open(&path) {
+            match std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&path)
+            {
                 Ok(mut f) => {
                     // Who to name if this one is ever found abandoned.
                     let _ = writeln!(f, "{}", std::process::id());
@@ -173,9 +180,7 @@ impl FileLock {
                     }
                     std::thread::sleep(POLL);
                 }
-                Err(e) => {
-                    return Err(e).with_context(|| format!("taking {}", path.display()))
-                }
+                Err(e) => return Err(e).with_context(|| format!("taking {}", path.display())),
             }
         }
     }
@@ -233,13 +238,21 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("nested").join("thing.json");
         write_json(&path, &vec![1, 2, 3]).unwrap();
-        assert_eq!(std::fs::read_to_string(&path).unwrap().replace([' ', '\n'], ""), "[1,2,3]");
+        assert_eq!(
+            std::fs::read_to_string(&path)
+                .unwrap()
+                .replace([' ', '\n'], ""),
+            "[1,2,3]"
+        );
         let leftovers: Vec<_> = std::fs::read_dir(path.parent().unwrap())
             .unwrap()
             .map(|e| e.unwrap().file_name())
             .filter(|n| n.to_string_lossy().ends_with(".tmp"))
             .collect();
-        assert!(leftovers.is_empty(), "a finished write left {leftovers:?} behind");
+        assert!(
+            leftovers.is_empty(),
+            "a finished write left {leftovers:?} behind"
+        );
     }
 
     /// The property the fixed `.json.tmp` did not have: two writes in flight
@@ -278,7 +291,10 @@ mod tests {
         let b = sibling(&path, &format!("{}.{}.tmp", std::process::id(), 1));
         assert_ne!(a, b);
         assert!(
-            a.file_name().unwrap().to_string_lossy().starts_with("thing.json."),
+            a.file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with("thing.json."),
             "the temp name must sit beside the target, not replace its extension"
         );
     }
@@ -304,8 +320,14 @@ mod tests {
 
         drop(lock);
         waiter.join().unwrap();
-        assert!(taken.load(Ordering::SeqCst), "the lock was not released on drop");
-        assert!(!sibling(&path, "lock").exists(), "a released lock left its file behind");
+        assert!(
+            taken.load(Ordering::SeqCst),
+            "the lock was not released on drop"
+        );
+        assert!(
+            !sibling(&path, "lock").exists(),
+            "a released lock left its file behind"
+        );
     }
 
     /// A process killed while holding the lock must not lock the store for
@@ -315,7 +337,10 @@ mod tests {
     fn a_lock_older_than_any_critical_section_is_abandoned() {
         let now = SystemTime::now();
         assert!(abandoned(now - STALE - Duration::from_secs(1), now));
-        assert!(!abandoned(now - Duration::from_secs(1), now), "a live holder is not abandoned");
+        assert!(
+            !abandoned(now - Duration::from_secs(1), now),
+            "a live holder is not abandoned"
+        );
         // A lock file whose mtime is in the future — a clock step, or a
         // filesystem with a coarser clock than ours — is a lock we know
         // nothing about, and guessing "abandoned" would break a live one.

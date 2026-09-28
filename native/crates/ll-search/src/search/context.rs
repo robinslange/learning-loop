@@ -4,16 +4,19 @@ use std::sync::Arc;
 use rayon::prelude::*;
 use rusqlite::Connection;
 
-use crate::config::{
-    PAGERANK_DAMPING, PAGERANK_ITERS, PRF_ALPHA, PRF_BETA, PRF_K,
-    TAG_FREQ_BAND_MAX, TAG_FREQ_BAND_MIN,
-    TOP_K_FTS, TOP_K_GRAPH, TOP_K_INITIAL, TOP_K_VEC,
+use super::graph::{
+    load_link_graph, load_tags_map, personalized_pagerank, personalized_pagerank_holdout,
 };
-use super::scoring::{add_weighted_rrf, dot_product, fts_bm25_query, collect_seeds, rocchio_prf_with, PrfParams,
-    FusionWeights};
-use super::graph::{load_link_graph, load_tags_map, personalized_pagerank, personalized_pagerank_holdout};
-use super::store::{EmbeddingStore, load_store};
-use super::query::{load_titles_map, load_mtime_map};
+use super::query::{load_mtime_map, load_titles_map};
+use super::scoring::{
+    add_weighted_rrf, collect_seeds, dot_product, fts_bm25_query, rocchio_prf_with, FusionWeights,
+    PrfParams,
+};
+use super::store::{load_store, EmbeddingStore};
+use crate::config::{
+    PAGERANK_DAMPING, PAGERANK_ITERS, PRF_ALPHA, PRF_BETA, PRF_K, TAG_FREQ_BAND_MAX,
+    TAG_FREQ_BAND_MIN, TOP_K_FTS, TOP_K_GRAPH, TOP_K_INITIAL, TOP_K_VEC,
+};
 
 // ---------------------------------------------------------------------------
 // Decay LUT — normalised exponential, built once per SearchContext
@@ -123,8 +126,7 @@ impl SearchContext {
             .collect();
 
         // Build a path -> interned Arc lookup for re-interning secondary maps.
-        let mut by_path: HashMap<&str, Arc<str>> =
-            HashMap::with_capacity(paths_interned.len());
+        let mut by_path: HashMap<&str, Arc<str>> = HashMap::with_capacity(paths_interned.len());
         for arc in &paths_interned {
             by_path.insert(arc.as_ref(), Arc::clone(arc));
         }
@@ -221,13 +223,22 @@ impl SearchContext {
                 // the source from the output — remaining inbound edges feed
                 // score into a sink that is never returned.
                 personalized_pagerank_holdout(
-                    &self.graph, &seeds, PAGERANK_DAMPING, PAGERANK_ITERS, Some(src),
+                    &self.graph,
+                    &seeds,
+                    PAGERANK_DAMPING,
+                    PAGERANK_ITERS,
+                    Some(src),
                 )
             }
         };
         let tag_results = tag_expand_from_map(&self.tags, &seeds);
 
-        Signals { vec_scored, fts_results, ppr_results, tag_results }
+        Signals {
+            vec_scored,
+            fts_results,
+            ppr_results,
+            tag_results,
+        }
     }
 
     pub(crate) fn rrf_from_signals(
@@ -235,7 +246,12 @@ impl SearchContext {
         signals: &Signals,
         extra: Option<&[(String, f64)]>,
     ) -> HashMap<String, f64> {
-        self.rrf_from_signals_weighted(signals, &StageFlags::default(), &FusionWeights::default(), extra)
+        self.rrf_from_signals_weighted(
+            signals,
+            &StageFlags::default(),
+            &FusionWeights::default(),
+            extra,
+        )
     }
 
     /// RRF fusion that skips disabled stages. Used by eval harnesses.
@@ -310,7 +326,11 @@ impl SearchContext {
         initial.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         initial.truncate(TOP_K_INITIAL);
         let prf_results = rocchio_prf_with(query_vec, &initial, self.store.all(), params);
-        add_weighted_rrf(rrf, FusionWeights::default().prf, prf_results.iter().map(|(p, _)| p.as_str()));
+        add_weighted_rrf(
+            rrf,
+            FusionWeights::default().prf,
+            prf_results.iter().map(|(p, _)| p.as_str()),
+        );
     }
 
     pub(crate) fn local_rrf_scores(
@@ -322,7 +342,11 @@ impl SearchContext {
         let signals = self.compute_signals(conn, query_vec, query_text);
 
         let mut rrf = self.rrf_from_signals(&signals, None);
-        let prf_params = PrfParams { alpha: PRF_ALPHA, beta: PRF_BETA, k: PRF_K };
+        let prf_params = PrfParams {
+            alpha: PRF_ALPHA,
+            beta: PRF_BETA,
+            k: PRF_K,
+        };
         self.apply_prf(&mut rrf, query_vec, &prf_params);
 
         rrf
@@ -462,8 +486,8 @@ fn read_data_version(conn: &Connection) -> i64 {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::test_helpers::helpers::*;
+    use super::*;
 
     #[test]
     fn fusion_lets_bm25_outrank_agreeing_graph_lanes() {
@@ -543,7 +567,8 @@ mod tests {
         conn.execute(
             "INSERT INTO embeddings (id, data) SELECT id, ?1 FROM notes WHERE path = 'b.md'",
             rusqlite::params![emb_bytes],
-        ).unwrap();
+        )
+        .unwrap();
 
         ctx.refresh(&conn);
         assert_eq!(ctx.store.len(), 2);
@@ -568,9 +593,12 @@ mod tests {
             ("b.md", "b", "content", &emb),
             ("c.md", "c", "content", &emb),
         ]);
-        conn.execute("UPDATE notes SET tags = 'rare' WHERE path = 'a.md'", []).unwrap();
-        conn.execute("UPDATE notes SET tags = 'rare' WHERE path = 'b.md'", []).unwrap();
-        conn.execute("UPDATE notes SET tags = 'common' WHERE path = 'c.md'", []).unwrap();
+        conn.execute("UPDATE notes SET tags = 'rare' WHERE path = 'a.md'", [])
+            .unwrap();
+        conn.execute("UPDATE notes SET tags = 'rare' WHERE path = 'b.md'", [])
+            .unwrap();
+        conn.execute("UPDATE notes SET tags = 'common' WHERE path = 'c.md'", [])
+            .unwrap();
 
         let ctx = SearchContext::build(&conn);
         let results = tag_expand_from_map(&ctx.tags, &["a.md".to_string()]);
@@ -594,7 +622,8 @@ mod tests {
             conn.execute(
                 "UPDATE notes SET tags = 'popular' WHERE path = ?1",
                 rusqlite::params![path],
-            ).unwrap();
+            )
+            .unwrap();
         }
 
         let ctx = SearchContext::build(&conn);
@@ -623,7 +652,12 @@ mod tests {
             .collect();
 
         let mut notes: Vec<(String, String, String, Vec<f32>)> = vec![
-            ("source.md".into(), "source note".into(), "links to a and b".into(), emb_src),
+            (
+                "source.md".into(),
+                "source note".into(),
+                "links to a and b".into(),
+                emb_src,
+            ),
             ("a.md".into(), "note a".into(), "body a".into(), emb_a),
             ("b.md".into(), "note b".into(), "body b".into(), emb_b),
         ];
@@ -635,7 +669,12 @@ mod tests {
                 emb,
             ));
         }
-        notes.push(("second.md".into(), "second order".into(), "off-query body".into(), emb_second));
+        notes.push((
+            "second.md".into(),
+            "second order".into(),
+            "off-query body".into(),
+            emb_second,
+        ));
         let notes_ref: Vec<(&str, &str, &str, &[f32])> = notes
             .iter()
             .map(|(p, t, b, e)| (p.as_str(), t.as_str(), b.as_str(), e.as_slice()))
@@ -680,14 +719,17 @@ mod tests {
         let lut = DecayLut::new();
         let ln2 = std::f64::consts::LN_2;
         let half_life = 30.0 * 86_400.0; // 30 days in seconds
-        // Test within domain: DECAY_LUT_NORM_MAX = 8 half-lives = 240 days.
-        // Practical relevance beyond ~6 half-lives is near-zero anyway.
+                                         // Test within domain: DECAY_LUT_NORM_MAX = 8 half-lives = 240 days.
+                                         // Practical relevance beyond ~6 half-lives is near-zero anyway.
         for age_days in [0.0f64, 1.0, 7.0, 30.0, 90.0, 180.0] {
             let age_secs = age_days * 86_400.0;
             let direct = (-ln2 * age_secs / half_life).exp();
             let lut_val = lut.decay(age_secs, half_life);
             let rel_err = (direct - lut_val).abs() / direct.max(1e-15);
-            assert!(rel_err < 0.01, "LUT relative error {rel_err:.4} at age {age_days} days");
+            assert!(
+                rel_err < 0.01,
+                "LUT relative error {rel_err:.4} at age {age_days} days"
+            );
         }
         // Ages beyond the domain return the near-zero floor; verify no panic.
         let _ = lut.decay(500.0 * 86_400.0, half_life);

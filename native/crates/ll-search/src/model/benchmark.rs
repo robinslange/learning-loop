@@ -108,11 +108,9 @@ pub fn run_benchmark(
     let provider_a = loader::load_provider(model_a).context("loading model A")?;
     let provider_b = loader::load_provider(model_b).context("loading model B")?;
 
-    let conn = rusqlite::Connection::open_with_flags(
-        db_path,
-        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
-    )
-    .context("opening database read-only")?;
+    let conn =
+        rusqlite::Connection::open_with_flags(db_path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .context("opening database read-only")?;
 
     let mut stmt = conn.prepare(
         "SELECT n.path, nc.body FROM notes n JOIN notes_content nc ON n.id = nc.id WHERE nc.body IS NOT NULL AND nc.body != ''",
@@ -172,9 +170,21 @@ pub fn run_benchmark(
     }
 
     let n = queries.len().max(1) as f64;
-    let avg_overlap_5 = query_comparisons.iter().map(|q| q.overlap_at_5 as f64).sum::<f64>() / n;
-    let avg_overlap_10 = query_comparisons.iter().map(|q| q.overlap_at_10 as f64).sum::<f64>() / n;
-    let avg_rho = query_comparisons.iter().map(|q| q.rank_correlation).sum::<f64>() / n;
+    let avg_overlap_5 = query_comparisons
+        .iter()
+        .map(|q| q.overlap_at_5 as f64)
+        .sum::<f64>()
+        / n;
+    let avg_overlap_10 = query_comparisons
+        .iter()
+        .map(|q| q.overlap_at_10 as f64)
+        .sum::<f64>()
+        / n;
+    let avg_rho = query_comparisons
+        .iter()
+        .map(|q| q.rank_correlation)
+        .sum::<f64>()
+        / n;
     let avg_query_time_a = total_query_time_a / queries.len().max(1) as u64;
     let avg_query_time_b = total_query_time_b / queries.len().max(1) as u64;
 
@@ -238,11 +248,7 @@ mod tests {
 
     #[test]
     fn test_spearman_identical_ranking() {
-        let a: Vec<(String, f64)> = vec![
-            ("x".into(), 0.9),
-            ("y".into(), 0.8),
-            ("z".into(), 0.7),
-        ];
+        let a: Vec<(String, f64)> = vec![("x".into(), 0.9), ("y".into(), 0.8), ("z".into(), 0.7)];
         let b = a.clone();
         let rho = spearman_rho(&a, &b, 3);
         assert!((rho - 1.0).abs() < 1e-6);
@@ -250,16 +256,8 @@ mod tests {
 
     #[test]
     fn test_spearman_reversed_ranking() {
-        let a: Vec<(String, f64)> = vec![
-            ("x".into(), 0.9),
-            ("y".into(), 0.8),
-            ("z".into(), 0.7),
-        ];
-        let b: Vec<(String, f64)> = vec![
-            ("z".into(), 0.9),
-            ("y".into(), 0.8),
-            ("x".into(), 0.7),
-        ];
+        let a: Vec<(String, f64)> = vec![("x".into(), 0.9), ("y".into(), 0.8), ("z".into(), 0.7)];
+        let b: Vec<(String, f64)> = vec![("z".into(), 0.9), ("y".into(), 0.8), ("x".into(), 0.7)];
         let rho = spearman_rho(&a, &b, 3);
         assert!((rho - (-1.0)).abs() < 1e-6);
     }

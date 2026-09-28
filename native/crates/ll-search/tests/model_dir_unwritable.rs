@@ -28,5 +28,8 @@ fn embed_reports_an_uncreatable_models_dir_and_exits_1() {
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert_eq!(out.status.code(), Some(1), "stderr: {stderr}");
     assert!(!stderr.contains("panicked at"), "stderr: {stderr}");
-    assert!(stderr.contains("failed to create model directory"), "stderr: {stderr}");
+    assert!(
+        stderr.contains("failed to create model directory"),
+        "stderr: {stderr}"
+    );
 }

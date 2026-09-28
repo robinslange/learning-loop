@@ -40,7 +40,11 @@ impl EmbeddingStore {
             .enumerate()
             .map(|(i, (id, _, _))| (*id, i))
             .collect();
-        Arc::new(Self { data, path_index, id_index })
+        Arc::new(Self {
+            data,
+            path_index,
+            id_index,
+        })
     }
 
     /// Return a slice of all stored `(id, path, embedding)` triples.
@@ -86,9 +90,9 @@ impl EmbeddingStore {
     /// when you need the raw slice and won't be sharing the vectors across
     /// thread boundaries.
     pub fn iter_arc(&self) -> impl Iterator<Item = (i64, &str, Arc<[f32]>)> + '_ {
-        self.data.iter().map(|(id, path, emb)| {
-            (*id, path.as_str(), Arc::from(emb.as_slice()))
-        })
+        self.data
+            .iter()
+            .map(|(id, path, emb)| (*id, path.as_str(), Arc::from(emb.as_slice())))
     }
 
     /// Return the number of entries in the store.

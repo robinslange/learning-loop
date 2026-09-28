@@ -123,19 +123,19 @@ impl VisibilityEngine {
             let glob = GlobBuilder::new(pattern)
                 .case_insensitive(true)
                 .build()
-                .map_err(|e| anyhow::anyhow!("visibility rule {pattern:?} is not a valid glob: {e}"))?;
+                .map_err(|e| {
+                    anyhow::anyhow!("visibility rule {pattern:?} is not a valid glob: {e}")
+                })?;
             let mut builder = GlobSetBuilder::new();
             builder.add(glob);
-            let set = builder
-                .build()
-                .map_err(|e| anyhow::anyhow!("visibility rule {pattern:?} could not compile: {e}"))?;
+            let set = builder.build().map_err(|e| {
+                anyhow::anyhow!("visibility rule {pattern:?} could not compile: {e}")
+            })?;
             compiled.push((set, tier.trim().to_string()));
         }
         let default_tier = default_tier.trim();
         if !TIERS.contains(&default_tier) {
-            anyhow::bail!(
-                "visibility default is {default_tier:?}, which is not one of {TIERS:?}"
-            );
+            anyhow::bail!("visibility default is {default_tier:?}, which is not one of {TIERS:?}");
         }
         Ok(VisibilityEngine {
             default_tier: default_tier.to_string(),
@@ -157,7 +157,11 @@ impl VisibilityEngine {
             Declared::Absent => {
                 let tier = self.evaluate_globs(path);
                 // Path-derived tiers are capped: a glob may restrict, never publish.
-                if tier == "public" { "listed" } else { tier }
+                if tier == "public" {
+                    "listed"
+                } else {
+                    tier
+                }
             }
         }
     }
@@ -184,7 +188,6 @@ impl VisibilityEngine {
         }
         tier
     }
-
 }
 
 #[cfg(test)]
@@ -195,14 +198,20 @@ mod tests {
     fn glob_rule_cannot_grant_public() {
         let rules = [("3-permanent/**".to_string(), "public".to_string())];
         let engine = VisibilityEngine::new("private", &rules).unwrap();
-        assert_eq!(engine.evaluate("3-permanent/note.md", &Declared::Absent), "listed");
+        assert_eq!(
+            engine.evaluate("3-permanent/note.md", &Declared::Absent),
+            "listed"
+        );
     }
 
     #[test]
     fn frontmatter_can_still_grant_public() {
         let rules = [("3-permanent/**".to_string(), "public".to_string())];
         let engine = VisibilityEngine::new("private", &rules).unwrap();
-        assert_eq!(engine.evaluate("3-permanent/note.md", &Declared::from_value("public")), "public");
+        assert_eq!(
+            engine.evaluate("3-permanent/note.md", &Declared::from_value("public")),
+            "public"
+        );
     }
 
     #[test]
@@ -212,7 +221,10 @@ mod tests {
             ("**/kinso-*".to_string(), "private".to_string()),
         ];
         let engine = VisibilityEngine::new("private", &rules).unwrap();
-        assert_eq!(engine.evaluate("3-permanent/kinso-thing.md", &Declared::Absent), "private");
+        assert_eq!(
+            engine.evaluate("3-permanent/kinso-thing.md", &Declared::Absent),
+            "private"
+        );
     }
 
     #[test]
@@ -247,7 +259,13 @@ mod tests {
         // `visibility: "private"` on a 3-permanent note published it.
         let rules = [("3-permanent/**".to_string(), "public".to_string())];
         let engine = VisibilityEngine::new("private", &rules).unwrap();
-        for value in ["\"private\"", "'private'", "Private", "PRIVATE", "private # off the hub"] {
+        for value in [
+            "\"private\"",
+            "'private'",
+            "Private",
+            "PRIVATE",
+            "private # off the hub",
+        ] {
             assert_eq!(
                 engine.evaluate("3-permanent/note.md", &Declared::from_value(value)),
                 "private",
@@ -277,7 +295,10 @@ mod tests {
         // Stripping `#` before unquoting would truncate a quoted value that
         // legitimately contains one, turning it into a different string.
         assert_eq!(Declared::from_value("\"private#1\""), Declared::Unknown);
-        assert_eq!(Declared::from_value("\"private\""), Declared::Tier("private".into()));
+        assert_eq!(
+            Declared::from_value("\"private\""),
+            Declared::Tier("private".into())
+        );
     }
 
     #[test]
@@ -286,8 +307,14 @@ mod tests {
         // resolve alike: `Absent` consults the globs, `Unknown` never does.
         let rules = [("3-permanent/**".to_string(), "listed".to_string())];
         let engine = VisibilityEngine::new("private", &rules).unwrap();
-        assert_eq!(engine.evaluate("3-permanent/note.md", &Declared::Absent), "listed");
-        assert_eq!(engine.evaluate("3-permanent/note.md", &Declared::Unknown), "private");
+        assert_eq!(
+            engine.evaluate("3-permanent/note.md", &Declared::Absent),
+            "listed"
+        );
+        assert_eq!(
+            engine.evaluate("3-permanent/note.md", &Declared::Unknown),
+            "private"
+        );
     }
 
     #[test]
@@ -296,8 +323,14 @@ mod tests {
         // not allowed to hold on one of them and not the other.
         let rules = [("3-permanent/**".to_string(), "public".to_string())];
         let engine = VisibilityEngine::new("private", &rules).unwrap();
-        assert_eq!(engine.evaluate_uncapped("3-permanent/n.md", &Declared::Absent), "public");
-        assert_eq!(engine.evaluate_uncapped("3-permanent/n.md", &Declared::Unknown), "private");
+        assert_eq!(
+            engine.evaluate_uncapped("3-permanent/n.md", &Declared::Absent),
+            "public"
+        );
+        assert_eq!(
+            engine.evaluate_uncapped("3-permanent/n.md", &Declared::Unknown),
+            "private"
+        );
     }
 
     #[test]
@@ -326,7 +359,9 @@ mod tests {
 
     #[test]
     fn an_unknown_default_is_refused_and_names_itself() {
-        let err = VisibilityEngine::new("bogus-tier", &[]).unwrap_err().to_string();
+        let err = VisibilityEngine::new("bogus-tier", &[])
+            .unwrap_err()
+            .to_string();
         assert!(
             err.contains("bogus-tier"),
             "the refusal must name the value so it can be found in the file: {err}"
@@ -346,7 +381,9 @@ mod tests {
             ("3-permanent/**".to_string(), "listed".to_string()),
             ("**/*separation[*".to_string(), "private".to_string()),
         ];
-        let err = VisibilityEngine::new("private", &rules).unwrap_err().to_string();
+        let err = VisibilityEngine::new("private", &rules)
+            .unwrap_err()
+            .to_string();
         assert!(
             err.contains("separation["),
             "the refusal must name the pattern, not just the count: {err}"
@@ -358,7 +395,9 @@ mod tests {
     #[test]
     fn a_rule_naming_an_unknown_tier_is_refused() {
         let rules = vec![("3-permanent/**".to_string(), "listd".to_string())];
-        let err = VisibilityEngine::new("private", &rules).unwrap_err().to_string();
+        let err = VisibilityEngine::new("private", &rules)
+            .unwrap_err()
+            .to_string();
         assert!(err.contains("listd"), "got {err}");
     }
 
@@ -390,16 +429,23 @@ mod tests {
         ];
         let engine = VisibilityEngine::new("private", &rules).unwrap();
         // A `public` glob is capped to `listed`: only frontmatter publishes.
-        assert_eq!(engine.evaluate("3-permanent/note.md", &Declared::Absent), "listed");
-        assert_eq!(engine.evaluate("1-fleeting/note.md", &Declared::Absent), "listed");
-        assert_eq!(engine.evaluate("0-inbox/note.md", &Declared::Absent), "private");
+        assert_eq!(
+            engine.evaluate("3-permanent/note.md", &Declared::Absent),
+            "listed"
+        );
+        assert_eq!(
+            engine.evaluate("1-fleeting/note.md", &Declared::Absent),
+            "listed"
+        );
+        assert_eq!(
+            engine.evaluate("0-inbox/note.md", &Declared::Absent),
+            "private"
+        );
     }
 
     #[test]
     fn frontmatter_overrides() {
-        let rules = vec![
-            ("3-permanent/**".to_string(), "public".to_string()),
-        ];
+        let rules = vec![("3-permanent/**".to_string(), "public".to_string())];
         let engine = VisibilityEngine::new("private", &rules).unwrap();
         assert_eq!(
             engine.evaluate("3-permanent/note.md", &Declared::from_value("private")),
@@ -419,20 +465,24 @@ mod tests {
         ];
         let engine = VisibilityEngine::new("listed", &rules).unwrap();
         // The point of this test is that the LATER rule wins; unchanged.
-        assert_eq!(engine.evaluate("3-permanent/secret-stuff.md", &Declared::Absent), "private");
+        assert_eq!(
+            engine.evaluate("3-permanent/secret-stuff.md", &Declared::Absent),
+            "private"
+        );
         // The earlier `public` rule now caps to `listed`.
-        assert_eq!(engine.evaluate("3-permanent/normal.md", &Declared::Absent), "listed");
+        assert_eq!(
+            engine.evaluate("3-permanent/normal.md", &Declared::Absent),
+            "listed"
+        );
     }
 
     #[test]
     fn evaluating_no_items_yields_no_tiers() {
         let engine = VisibilityEngine::new("private", &[]).unwrap();
         let items: Vec<(&str, Declared)> = Vec::new();
-        let result: Vec<&str> =
-            items.iter().map(|(p, d)| engine.evaluate(p, d)).collect();
+        let result: Vec<&str> = items.iter().map(|(p, d)| engine.evaluate(p, d)).collect();
         assert!(result.is_empty());
     }
-
 
     #[test]
     fn frontmatter_outranks_the_glob_in_both_directions() {

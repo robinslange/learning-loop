@@ -54,7 +54,10 @@ fn library_sources() -> Vec<PathBuf> {
 }
 
 fn relative(p: &Path) -> String {
-    p.strip_prefix(crate_root()).unwrap_or(p).to_string_lossy().replace('\\', "/")
+    p.strip_prefix(crate_root())
+        .unwrap_or(p)
+        .to_string_lossy()
+        .replace('\\', "/")
 }
 
 /// Whether `line` names a staging file.
@@ -78,7 +81,10 @@ fn the_sweep_reaches_the_crate_and_the_exception_still_needs_its_exemption() {
 
     let names: Vec<String> = files.iter().map(|p| relative(p)).collect();
     for expected in [THE_ONE, CURL_WRITES_IT, "src/main.rs", "src/sync/config.rs"] {
-        assert!(names.iter().any(|n| n == expected), "the sweep must reach {expected}");
+        assert!(
+            names.iter().any(|n| n == expected),
+            "the sweep must reach {expected}"
+        );
     }
 
     // An exemption for a file that no longer needs one is not cover, it is a
@@ -93,10 +99,18 @@ fn the_sweep_reaches_the_crate_and_the_exception_still_needs_its_exemption() {
 
     // And the detector has to fire on what it is looking for, or an empty
     // offender list means only that it fires on nothing.
-    assert!(names_a_staging_file(r#"    let tmp = path.with_extension("json.tmp");"#));
-    assert!(names_a_staging_file(r#"    let tmp = dest.with_extension("tmp");"#));
-    assert!(!names_a_staging_file(r#"    let tmp = tempfile::tempdir().unwrap();"#));
-    assert!(!names_a_staging_file(r#"    // a fixed "json.tmp" is what this replaced"#));
+    assert!(names_a_staging_file(
+        r#"    let tmp = path.with_extension("json.tmp");"#
+    ));
+    assert!(names_a_staging_file(
+        r#"    let tmp = dest.with_extension("tmp");"#
+    ));
+    assert!(!names_a_staging_file(
+        r#"    let tmp = tempfile::tempdir().unwrap();"#
+    ));
+    assert!(!names_a_staging_file(
+        r#"    // a fixed "json.tmp" is what this replaced"#
+    ));
 }
 
 #[test]

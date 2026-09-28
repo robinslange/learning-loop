@@ -5,8 +5,8 @@
 //! has no `vaults.json` and must keep working untouched - the registry
 //! appears only when a second vault is added.
 
-use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
 
 const REGISTRY: &str = "vaults.json";
 
@@ -34,11 +34,20 @@ pub fn load(plugin_data: &Path) -> anyhow::Result<Vec<VaultProfile>> {
         return Ok(Vec::new());
     }
     let raw: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&legacy_config)?)?;
-    let vault_path = raw.get("vault_path").and_then(|v| v.as_str())
-        .ok_or_else(|| anyhow::anyhow!(
-            "legacy config has no vault_path; run `ll vault add <path>` to register it"))?;
+    let vault_path = raw
+        .get("vault_path")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "legacy config has no vault_path; run `ll vault add <path>` to register it"
+            )
+        })?;
     Ok(vec![VaultProfile {
-        id: raw.get("vault_id").and_then(|v| v.as_str()).unwrap_or("default").to_string(),
+        id: raw
+            .get("vault_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("default")
+            .to_string(),
         config_dir: plugin_data.to_path_buf(),
         vault_path: PathBuf::from(vault_path),
     }])
@@ -65,21 +74,34 @@ pub fn add(plugin_data: &Path, profile: VaultProfile) -> anyhow::Result<()> {
     }
     existing.push(profile);
     let doc = RegistryDoc { vaults: existing };
-    std::fs::write(plugin_data.join(REGISTRY), serde_json::to_string_pretty(&doc)?)?;
+    std::fs::write(
+        plugin_data.join(REGISTRY),
+        serde_json::to_string_pretty(&doc)?,
+    )?;
     Ok(())
 }
 
 pub fn resolve_by_vault_path(plugin_data: &Path, vault: &Path) -> anyhow::Result<VaultProfile> {
     let profiles = load(plugin_data)?;
-    profiles.iter().find(|p| p.vault_path == vault).cloned().ok_or_else(|| {
-        let known: Vec<String> =
-            profiles.iter().map(|p| p.vault_path.display().to_string()).collect();
-        anyhow::anyhow!(
-            "no vault profile for {}. Known vaults: {}",
-            vault.display(),
-            if known.is_empty() { "(none registered)".into() } else { known.join(", ") }
-        )
-    })
+    profiles
+        .iter()
+        .find(|p| p.vault_path == vault)
+        .cloned()
+        .ok_or_else(|| {
+            let known: Vec<String> = profiles
+                .iter()
+                .map(|p| p.vault_path.display().to_string())
+                .collect();
+            anyhow::anyhow!(
+                "no vault profile for {}. Known vaults: {}",
+                vault.display(),
+                if known.is_empty() {
+                    "(none registered)".into()
+                } else {
+                    known.join(", ")
+                }
+            )
+        })
 }
 
 #[cfg(test)]
@@ -97,8 +119,10 @@ mod tests {
                 "visibility": {"default": "private", "rules": []},
                 "hub": {"endpoint": "wss://h.example/ws"},
                 "vault_path": vault
-            }).to_string(),
-        ).unwrap();
+            })
+            .to_string(),
+        )
+        .unwrap();
     }
 
     #[test]
@@ -109,9 +133,11 @@ mod tests {
         let profiles = load(d.path()).unwrap();
         assert_eq!(profiles.len(), 1);
         assert_eq!(profiles[0].config_dir, d.path());
-        assert!(!d.path().join("vaults.json").exists(),
+        assert!(
+            !d.path().join("vaults.json").exists(),
             "reading must not create the registry — a single-vault user \
-             experiences zero migration");
+             experiences zero migration"
+        );
     }
 
     #[test]
@@ -119,16 +145,24 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         legacy(d.path(), "/home/r/brain");
 
-        add(d.path(), VaultProfile {
-            id: "work".into(),
-            config_dir: d.path().join("work"),
-            vault_path: "/home/r/work-vault".into(),
-        }).unwrap();
+        add(
+            d.path(),
+            VaultProfile {
+                id: "work".into(),
+                config_dir: d.path().join("work"),
+                vault_path: "/home/r/work-vault".into(),
+            },
+        )
+        .unwrap();
 
         let profiles = load(d.path()).unwrap();
         assert_eq!(profiles.len(), 2);
-        assert!(profiles.iter().any(|p| p.vault_path == Path::new("/home/r/brain")),
-            "the pre-existing vault is carried into the registry, not lost");
+        assert!(
+            profiles
+                .iter()
+                .any(|p| p.vault_path == Path::new("/home/r/brain")),
+            "the pre-existing vault is carried into the registry, not lost"
+        );
     }
 
     #[test]
@@ -144,30 +178,43 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         legacy(d.path(), "/home/r/brain");
         let err = resolve_by_vault_path(d.path(), Path::new("/nope")).unwrap_err();
-        assert!(err.to_string().contains("/home/r/brain"),
-            "an agent that guessed wrong must be told what the options are");
+        assert!(
+            err.to_string().contains("/home/r/brain"),
+            "an agent that guessed wrong must be told what the options are"
+        );
     }
 
     #[test]
     fn profiles_never_share_a_config_dir() {
         let d = tempfile::tempdir().unwrap();
         legacy(d.path(), "/home/r/brain");
-        let err = add(d.path(), VaultProfile {
-            id: "clash".into(),
-            config_dir: d.path().to_path_buf(),
-            vault_path: "/home/r/other".into(),
-        }).unwrap_err();
-        assert!(err.to_string().contains("config_dir"),
+        let err = add(
+            d.path(),
+            VaultProfile {
+                id: "clash".into(),
+                config_dir: d.path().to_path_buf(),
+                vault_path: "/home/r/other".into(),
+            },
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("config_dir"),
             "sharing a config dir means sharing last-export-mtime and the seed \
-             entry — two vaults would silently clobber each other");
+             entry — two vaults would silently clobber each other"
+        );
     }
 
     #[test]
     fn a_registry_with_no_legacy_config_is_fine() {
         let d = tempfile::tempdir().unwrap();
-        fs::write(d.path().join("vaults.json"), serde_json::json!({
-            "vaults": [{"id":"a","config_dir":"/x/a","vault_path":"/v/a"}]
-        }).to_string()).unwrap();
+        fs::write(
+            d.path().join("vaults.json"),
+            serde_json::json!({
+                "vaults": [{"id":"a","config_dir":"/x/a","vault_path":"/v/a"}]
+            })
+            .to_string(),
+        )
+        .unwrap();
         assert_eq!(load(d.path()).unwrap().len(), 1);
     }
 
@@ -175,14 +222,20 @@ mod tests {
     fn profiles_never_share_a_vault_path() {
         let d = tempfile::tempdir().unwrap();
         legacy(d.path(), "/home/r/brain");
-        let err = add(d.path(), VaultProfile {
-            id: "duplicate".into(),
-            config_dir: d.path().join("duplicate"),
-            vault_path: "/home/r/brain".into(),
-        }).unwrap_err();
-        assert!(err.to_string().contains("vault_path"),
+        let err = add(
+            d.path(),
+            VaultProfile {
+                id: "duplicate".into(),
+                config_dir: d.path().join("duplicate"),
+                vault_path: "/home/r/brain".into(),
+            },
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("vault_path"),
             "two profiles pointing at the same vault_path make resolve_by_vault_path \
-             ambiguous — it would silently return whichever one comes first");
+             ambiguous — it would silently return whichever one comes first"
+        );
     }
 
     #[test]
@@ -195,20 +248,26 @@ mod tests {
                 "identity": {"displayName": "robin", "pubkey": "ed25519:AAAA"},
                 "visibility": {"default": "private", "rules": []},
                 "hub": {"endpoint": "wss://h.example/ws"}
-            }).to_string(),
-        ).unwrap();
+            })
+            .to_string(),
+        )
+        .unwrap();
 
         let err = load(d.path()).unwrap_err();
-        assert!(err.to_string().contains("ll vault add"),
-            "an operator hitting this needs to be told the command that fixes it");
+        assert!(
+            err.to_string().contains("ll vault add"),
+            "an operator hitting this needs to be told the command that fixes it"
+        );
     }
 
     #[test]
     fn a_corrupt_registry_errors_instead_of_looking_empty() {
         let d = tempfile::tempdir().unwrap();
         fs::write(d.path().join("vaults.json"), "{not valid json").unwrap();
-        assert!(load(d.path()).is_err(),
+        assert!(
+            load(d.path()).is_err(),
             "a corrupt registry must not be silently read as zero vaults — that \
-             looks exactly like a fresh install");
+             looks exactly like a fresh install"
+        );
     }
 }

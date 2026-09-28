@@ -1,11 +1,11 @@
+pub mod app;
 pub mod b64;
-pub mod preprocess;
+pub mod config;
+pub mod db;
+pub mod dup_scan_server;
 pub mod embed;
 pub mod model;
-pub mod db;
-pub mod search;
+pub mod preprocess;
 pub mod rerank;
-pub mod dup_scan_server;
+pub mod search;
 pub mod sync;
-pub mod app;
-pub mod config;

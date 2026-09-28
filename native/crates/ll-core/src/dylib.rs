@@ -110,8 +110,12 @@ fn ort_dir() -> Result<PathBuf> {
             .join(".learning-loop")
             .join("lib"),
     };
-    fs::create_dir_all(&dir)
-        .with_context(|| format!("failed to create runtime library directory {}", dir.display()))?;
+    fs::create_dir_all(&dir).with_context(|| {
+        format!(
+            "failed to create runtime library directory {}",
+            dir.display()
+        )
+    })?;
     Ok(dir)
 }
 
@@ -125,7 +129,10 @@ fn ort_dir() -> Result<PathBuf> {
 /// 2. Otherwise the pinned Microsoft bundle is downloaded, SHA-256-verified, and
 ///    the single library extracted to `~/.learning-loop/lib`.
 pub fn ensure_dylib() -> Result<PathBuf> {
-    if let Some(raw) = std::env::var("ORT_DYLIB_PATH").ok().filter(|p| !p.is_empty()) {
+    if let Some(raw) = std::env::var("ORT_DYLIB_PATH")
+        .ok()
+        .filter(|p| !p.is_empty())
+    {
         let resolved = validate_override(&raw)?;
         // `ort` reads ORT_DYLIB_PATH itself, so rewrite it to the resolved file.
         // A directory override (the plugin's `$BIN_DIR` convention) would otherwise
@@ -394,7 +401,10 @@ mod tests {
         decoy.write_all(b"DEBUG SYMBOLS, not the library").unwrap();
         // The real library, at <top>/lib/<file>.
         let real = lib_dir.join("libonnxruntime.1.24.2.dylib");
-        fs::File::create(&real).unwrap().write_all(b"REAL LIBRARY").unwrap();
+        fs::File::create(&real)
+            .unwrap()
+            .write_all(b"REAL LIBRARY")
+            .unwrap();
 
         let found = find_member(root.path(), "lib/libonnxruntime.1.24.2.dylib").unwrap();
         assert_eq!(
@@ -503,7 +513,10 @@ mod tests {
         // The manifest lives at the workspace root, outside this crate, so it is
         // absent when ll-core is consumed as a packaged crates.io crate. Skip
         // there rather than fail — the check is a workspace-repo invariant.
-        let manifest_path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../../provenance/runtime.json");
+        let manifest_path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../provenance/runtime.json"
+        );
         let Ok(manifest) = std::fs::read_to_string(manifest_path) else {
             eprintln!("skipping: {manifest_path} not present (packaged crate)");
             return;

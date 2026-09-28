@@ -1,18 +1,15 @@
-pub mod schema;
 pub mod index;
 pub mod query;
+pub mod schema;
 
-pub use schema::{open_db, open_or_create_db};
-#[cfg(feature = "research")]
-pub use schema::{migrate_embeddings, drop_old_embeddings};
-pub use index::{reindex, walk_vault, WalkEntry, IndexResult, EmbedItem, insert_embedded};
+pub use index::{insert_embedded, reindex, walk_vault, EmbedItem, IndexResult, WalkEntry};
 pub use query::{
-    load_embedding, load_all_embeddings, get_status, list_tags,
-    compute_sessions, compute_project_phases, Status, TagInfo,
-    chrono_iso_now, days_to_ymd,
-    link_stats, LinkStats, FolderStats,
-    list_intentions_summary, list_intentions_for_context,
-    IntentionSummary, IntentionDetail,
+    chrono_iso_now, compute_project_phases, compute_sessions, days_to_ymd, get_status, link_stats,
+    list_intentions_for_context, list_intentions_summary, list_tags, load_all_embeddings,
+    load_embedding, FolderStats, IntentionDetail, IntentionSummary, LinkStats, Status, TagInfo,
 };
 #[cfg(feature = "research")]
 pub use query::{list_sessions, SessionInfo};
+#[cfg(feature = "research")]
+pub use schema::{drop_old_embeddings, migrate_embeddings};
+pub use schema::{open_db, open_or_create_db};

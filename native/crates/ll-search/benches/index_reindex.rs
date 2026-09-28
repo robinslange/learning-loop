@@ -11,15 +11,19 @@
 
 mod common;
 
-use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
-use ll_search::db::{EmbedItem, insert_embedded};
-use ll_search::preprocess::{preprocess_note, preprocess_file};
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
+use ll_search::db::{insert_embedded, EmbedItem};
+use ll_search::preprocess::{preprocess_file, preprocess_note};
 
 const SEED: u64 = 20260511;
 const EMBED_DIM: usize = 384;
 
 fn note_count() -> usize {
-    if std::env::var("CARGO_BENCH_QUICK").is_ok() { 1000 } else { 10000 }
+    if std::env::var("CARGO_BENCH_QUICK").is_ok() {
+        1000
+    } else {
+        10000
+    }
 }
 
 /// Build the synthetic vault on disk and return (vault, db paths in tempdir).
@@ -34,24 +38,20 @@ fn bench_cold_preprocess_only(c: &mut Criterion) {
     let n = note_count();
     let vault = common::build_synthetic_vault_on_disk(n, SEED);
 
-    c.bench_with_input(
-        BenchmarkId::new("cold_preprocess_only", n),
-        &n,
-        |b, _| {
-            b.iter(|| {
-                let mut processed = 0usize;
-                for path in &vault.note_paths {
-                    if let Ok(raw) = std::fs::read_to_string(path) {
-                        let fname = path.file_name().unwrap().to_str().unwrap();
-                        if preprocess_note(&raw, fname).is_some() {
-                            processed += 1;
-                        }
+    c.bench_with_input(BenchmarkId::new("cold_preprocess_only", n), &n, |b, _| {
+        b.iter(|| {
+            let mut processed = 0usize;
+            for path in &vault.note_paths {
+                if let Ok(raw) = std::fs::read_to_string(path) {
+                    let fname = path.file_name().unwrap().to_str().unwrap();
+                    if preprocess_note(&raw, fname).is_some() {
+                        processed += 1;
                     }
                 }
-                processed
-            });
-        },
-    );
+            }
+            processed
+        });
+    });
 }
 
 /// Benchmark: preprocess all vault files + generate deterministic embeddings +
@@ -76,7 +76,9 @@ fn bench_cold_preprocess_plus_insert(c: &mut Criterion) {
             Err(_) => continue,
         };
         let fname = path.file_name().unwrap().to_str().unwrap();
-        let Some(result) = preprocess_file(&raw, fname) else { continue };
+        let Some(result) = preprocess_file(&raw, fname) else {
+            continue;
+        };
         let emb = common::deterministic_embedding(i as u64, EMBED_DIM, SEED);
         items.push(EmbedItem {
             path: format!("{i:05}.md"),
@@ -143,7 +145,9 @@ fn bench_pre_1f_insert_reference(c: &mut Criterion) {
             Err(_) => continue,
         };
         let fname = path.file_name().unwrap().to_str().unwrap();
-        let Some(result) = preprocess_file(&raw, fname) else { continue };
+        let Some(result) = preprocess_file(&raw, fname) else {
+            continue;
+        };
         let emb = common::deterministic_embedding(i as u64, EMBED_DIM, SEED);
         items.push(EmbedItem {
             path: format!("{i:05}.md"),

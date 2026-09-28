@@ -36,7 +36,9 @@ fn js_window_secs(text: &str) -> i64 {
 
     let multiplier: i64 = text
         .split("> ")
-        .find(|rest| rest.starts_with(|c: char| c.is_ascii_digit()) && rest.contains("syncIntervalSecs"))
+        .find(|rest| {
+            rest.starts_with(|c: char| c.is_ascii_digit()) && rest.contains("syncIntervalSecs")
+        })
         .and_then(|rest| rest.split(' ').next())
         .and_then(|n| n.parse().ok())
         .expect("quick.mjs must compare against <n> * syncIntervalSecs");
@@ -49,11 +51,19 @@ fn the_scan_reads_both_numbers_out_of_the_javascript() {
     // A scan that silently found nothing would make the comparison below agree
     // with anything.
     let text = std::fs::read_to_string(quick_mjs()).unwrap();
-    assert_eq!(js_window_secs(&text), 1800, "expected 6 * 300s from quick.mjs");
+    assert_eq!(
+        js_window_secs(&text),
+        1800,
+        "expected 6 * 300s from quick.mjs"
+    );
 
     // And it must be reading, not guessing: a changed interval has to move it.
     let edited = text.replace("syncIntervalSecs = 300", "syncIntervalSecs = 60");
-    assert_eq!(js_window_secs(&edited), 360, "the interval is read, not assumed");
+    assert_eq!(
+        js_window_secs(&edited),
+        360,
+        "the interval is read, not assumed"
+    );
 }
 
 #[test]

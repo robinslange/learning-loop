@@ -7,9 +7,9 @@ use crate::config::{PHASE_SIGMA_DIVISOR, RECENCY_BOOST_SCALAR, SECS_PER_DAY};
 use crate::db::load_all_embeddings;
 use crate::embed::embed_query;
 
-use super::scoring::finalize_rrf;
-use super::federation::{add_peer_rrf_scores_guarded, load_title_federated};
 use super::context::SearchContext;
+use super::federation::{add_peer_rrf_scores_guarded, load_title_federated};
+use super::scoring::finalize_rrf;
 
 // The model only ranks on score; full f64 precision (~18 chars) is wasted
 // context tokens. Filtering and sorting already ran on the full-precision
@@ -77,7 +77,9 @@ pub fn hybrid_query_with_ctx(
     temporal: &TemporalParams,
 ) -> anyhow::Result<Vec<SearchResult>> {
     let query_vec = embed_query(query_text)?;
-    Ok(hybrid_query_with_ctx_inner(ctx, conn, &query_vec, query_text, top_n, peers, temporal))
+    Ok(hybrid_query_with_ctx_inner(
+        ctx, conn, &query_vec, query_text, top_n, peers, temporal,
+    ))
 }
 
 pub(crate) fn hybrid_query_with_ctx_inner(
@@ -93,7 +95,14 @@ pub(crate) fn hybrid_query_with_ctx_inner(
 
     for (peer_id, peer_conn) in peers {
         let peer_embeddings = load_all_embeddings(peer_conn);
-        add_peer_rrf_scores_guarded(&mut rrf, peer_id, peer_conn, query_vec, query_text, &peer_embeddings);
+        add_peer_rrf_scores_guarded(
+            &mut rrf,
+            peer_id,
+            peer_conn,
+            query_vec,
+            query_text,
+            &peer_embeddings,
+        );
     }
 
     if temporal.has_any() {
@@ -121,7 +130,11 @@ pub(crate) fn result_title(
     if path.starts_with("peer:") {
         load_title_federated(path, conn, peers)
     } else {
-        ctx.titles.get(path).cloned().flatten().map(|a| a.to_string())
+        ctx.titles
+            .get(path)
+            .cloned()
+            .flatten()
+            .map(|a| a.to_string())
     }
 }
 
@@ -300,8 +313,8 @@ fn apply_temporal_boost(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::test_helpers::helpers::*;
+    use super::*;
     use rusqlite::Connection;
 
     fn query(
@@ -312,7 +325,15 @@ mod tests {
         top_n: usize,
     ) -> Vec<SearchResult> {
         let ctx = SearchContext::build(conn);
-        hybrid_query_with_ctx_inner(&ctx, conn, query_vec, text, top_n, peers, &TemporalParams::default())
+        hybrid_query_with_ctx_inner(
+            &ctx,
+            conn,
+            query_vec,
+            text,
+            top_n,
+            peers,
+            &TemporalParams::default(),
+        )
     }
 
     #[test]
@@ -327,7 +348,10 @@ mod tests {
         // Full f64 precision (0.2773399014778325) must not reach the wire; the
         // model only ranks on score, so it is rounded to 4dp at serialization.
         assert!(json.contains("\"score\":0.2773"), "got {json}");
-        assert!(!json.contains("0.2773399014778325"), "score not rounded: {json}");
+        assert!(
+            !json.contains("0.2773399014778325"),
+            "score not rounded: {json}"
+        );
     }
 
     #[test]
@@ -335,8 +359,18 @@ mod tests {
         let emb_a = norm(&[1.0, 0.0, 0.0]);
         let emb_b = norm(&[0.0, 1.0, 0.0]);
         let conn = create_test_db(&[
-            ("3-permanent/sleep.md", "sleep architecture", "Deep sleep is important for memory consolidation", &emb_a),
-            ("3-permanent/diet.md", "diet and nutrition", "Protein intake affects muscle recovery", &emb_b),
+            (
+                "3-permanent/sleep.md",
+                "sleep architecture",
+                "Deep sleep is important for memory consolidation",
+                &emb_a,
+            ),
+            (
+                "3-permanent/diet.md",
+                "diet and nutrition",
+                "Protein intake affects muscle recovery",
+                &emb_b,
+            ),
         ]);
 
         let query_vec = norm(&[1.0, 0.1, 0.0]);
@@ -361,12 +395,25 @@ mod tests {
         let emb_b = norm(&[0.9, 0.1, 0.0]);
         let emb_c = norm(&[0.8, 0.2, 0.0]);
 
-        let local = create_test_db(&[
-            ("3-permanent/sleep.md", "sleep architecture", "Deep sleep stages and cycles", &emb_a),
-        ]);
+        let local = create_test_db(&[(
+            "3-permanent/sleep.md",
+            "sleep architecture",
+            "Deep sleep stages and cycles",
+            &emb_a,
+        )]);
         let peer = create_peer_db(&[
-            ("3-permanent/circadian.md", "circadian rhythm", "Light exposure controls the circadian clock", &emb_b),
-            ("3-permanent/melatonin.md", "melatonin synthesis", "Melatonin is produced in the pineal gland", &emb_c),
+            (
+                "3-permanent/circadian.md",
+                "circadian rhythm",
+                "Light exposure controls the circadian clock",
+                &emb_b,
+            ),
+            (
+                "3-permanent/melatonin.md",
+                "melatonin synthesis",
+                "Melatonin is produced in the pineal gland",
+                &emb_c,
+            ),
         ]);
 
         let peers = vec![("alice".to_string(), peer)];
@@ -377,26 +424,41 @@ mod tests {
         assert!(paths.contains(&"3-permanent/sleep.md"));
         assert!(paths.iter().any(|p| p.starts_with("peer:alice/")));
 
-        let title = |path: &str| results.iter().find(|r| r.path == path).and_then(|r| r.title.clone());
-        assert_eq!(title("3-permanent/sleep.md").as_deref(), Some("sleep architecture"));
-        assert_eq!(title("peer:alice/3-permanent/circadian.md").as_deref(), Some("circadian rhythm"));
+        let title = |path: &str| {
+            results
+                .iter()
+                .find(|r| r.path == path)
+                .and_then(|r| r.title.clone())
+        };
+        assert_eq!(
+            title("3-permanent/sleep.md").as_deref(),
+            Some("sleep architecture")
+        );
+        assert_eq!(
+            title("peer:alice/3-permanent/circadian.md").as_deref(),
+            Some("circadian rhythm")
+        );
     }
 
     #[test]
     fn test_federated_peer_path_prefixing() {
         let emb = norm(&[1.0, 0.0, 0.0]);
-        let local = create_test_db(&[
-            ("local.md", "local note", "local content", &emb),
-        ]);
-        let peer = create_peer_db(&[
-            ("3-permanent/note.md", "peer note", "peer content about sleep", &emb),
-        ]);
+        let local = create_test_db(&[("local.md", "local note", "local content", &emb)]);
+        let peer = create_peer_db(&[(
+            "3-permanent/note.md",
+            "peer note",
+            "peer content about sleep",
+            &emb,
+        )]);
 
         let peers = vec![("bob".to_string(), peer)];
         let query_vec = norm(&[1.0, 0.0, 0.0]);
         let results = query(&local, &peers, &query_vec, "sleep", 10);
 
-        let peer_results: Vec<&SearchResult> = results.iter().filter(|r| r.path.starts_with("peer:")).collect();
+        let peer_results: Vec<&SearchResult> = results
+            .iter()
+            .filter(|r| r.path.starts_with("peer:"))
+            .collect();
         for r in &peer_results {
             assert!(r.path.starts_with("peer:bob/"));
             let after_prefix = r.path.strip_prefix("peer:bob/").unwrap();
@@ -407,12 +469,12 @@ mod tests {
     #[test]
     fn test_federated_peer_no_embeddings_table() {
         let emb = norm(&[1.0, 0.0, 0.0]);
-        let local = create_test_db(&[
-            ("local.md", "local note", "sleep cycles and stages", &emb),
-        ]);
-        let peer = create_peer_db_no_embeddings(&[
-            ("peer-note.md", "peer note", "circadian rhythm and sleep"),
-        ]);
+        let local = create_test_db(&[("local.md", "local note", "sleep cycles and stages", &emb)]);
+        let peer = create_peer_db_no_embeddings(&[(
+            "peer-note.md",
+            "peer note",
+            "circadian rhythm and sleep",
+        )]);
 
         let peers = vec![("charlie".to_string(), peer)];
         let query_vec = norm(&[1.0, 0.0, 0.0]);
@@ -420,7 +482,10 @@ mod tests {
 
         assert!(!results.is_empty());
         assert!(results.iter().any(|r| r.path == "local.md"));
-        let peer_results: Vec<&SearchResult> = results.iter().filter(|r| r.path.starts_with("peer:charlie/")).collect();
+        let peer_results: Vec<&SearchResult> = results
+            .iter()
+            .filter(|r| r.path.starts_with("peer:charlie/"))
+            .collect();
         for r in &peer_results {
             assert!(r.score > 0.0);
         }
@@ -431,8 +496,18 @@ mod tests {
         let emb_a = norm(&[1.0, 0.0, 0.0]);
         let emb_b = norm(&[0.0, 1.0, 0.0]);
         let conn = create_test_db(&[
-            ("3-permanent/sleep.md", "sleep architecture", "Deep sleep is important", &emb_a),
-            ("3-permanent/diet.md", "diet and nutrition", "Protein intake matters", &emb_b),
+            (
+                "3-permanent/sleep.md",
+                "sleep architecture",
+                "Deep sleep is important",
+                &emb_a,
+            ),
+            (
+                "3-permanent/diet.md",
+                "diet and nutrition",
+                "Protein intake matters",
+                &emb_b,
+            ),
         ]);
         let query_vec = norm(&[0.0, 0.0, 1.0]);
         let results = query(&conn, &[], &query_vec, "xyznonexistent", 5);
@@ -447,8 +522,18 @@ mod tests {
         let emb_a = norm(&[1.0, 0.0, 0.0]);
         let emb_b = norm(&[0.0, 1.0, 0.0]);
         let conn = create_test_db(&[
-            ("3-permanent/sleep.md", "sleep architecture", "Deep sleep is important", &emb_a),
-            ("3-permanent/diet.md", "diet and nutrition", "Protein intake matters", &emb_b),
+            (
+                "3-permanent/sleep.md",
+                "sleep architecture",
+                "Deep sleep is important",
+                &emb_a,
+            ),
+            (
+                "3-permanent/diet.md",
+                "diet and nutrition",
+                "Protein intake matters",
+                &emb_b,
+            ),
         ]);
         let query_vec = norm(&[1.0, 0.1, 0.0]);
         let results = query(&conn, &[], &query_vec, "sleep", 5);
@@ -463,20 +548,39 @@ mod tests {
         let emb_a = norm(&[1.0, 0.0, 0.0]);
         let emb_b = norm(&[0.0, 1.0, 0.0]);
         let conn = create_test_db(&[
-            ("3-permanent/sleep.md", "sleep architecture", "Deep sleep is important", &emb_a),
-            ("3-permanent/diet.md", "diet and nutrition", "Protein intake matters", &emb_b),
+            (
+                "3-permanent/sleep.md",
+                "sleep architecture",
+                "Deep sleep is important",
+                &emb_a,
+            ),
+            (
+                "3-permanent/diet.md",
+                "diet and nutrition",
+                "Protein intake matters",
+                &emb_b,
+            ),
         ]);
         // Query close to sleep, far from diet
         let query_vec = norm(&[1.0, 0.0, 0.0]);
         let results = query(&conn, &[], &query_vec, "sleep", 10);
-        assert!(results.len() >= 2, "need both notes returned to test filtering");
+        assert!(
+            results.len() >= 2,
+            "need both notes returned to test filtering"
+        );
         let max_score = results.iter().map(|r| r.score).fold(0.0_f64, f64::max);
         let min_score = results.iter().map(|r| r.score).fold(f64::MAX, f64::min);
         // Pick a threshold between the two scores so one passes and one doesn't
         let mid = (max_score + min_score) / 2.0;
         let response = build_query_response("sleep".to_string(), results, &conn, mid);
-        assert!(response.meta.above_threshold < 2, "threshold should filter at least one result");
-        assert!(response.meta.above_threshold >= 1, "threshold should keep at least one result");
+        assert!(
+            response.meta.above_threshold < 2,
+            "threshold should filter at least one result"
+        );
+        assert!(
+            response.meta.above_threshold >= 1,
+            "threshold should keep at least one result"
+        );
         assert_eq!(response.results.len(), response.meta.above_threshold);
         assert!(response.meta.hint.is_none());
         assert_eq!(response.meta.total_indexed, 2);
@@ -487,8 +591,18 @@ mod tests {
         let emb_a = norm(&[1.0, 0.0, 0.0]);
         let emb_b = norm(&[0.0, 1.0, 0.0]);
         let conn = create_test_db(&[
-            ("3-permanent/sleep.md", "sleep architecture", "Deep sleep", &emb_a),
-            ("3-permanent/diet.md", "diet and nutrition", "Protein intake", &emb_b),
+            (
+                "3-permanent/sleep.md",
+                "sleep architecture",
+                "Deep sleep",
+                &emb_a,
+            ),
+            (
+                "3-permanent/diet.md",
+                "diet and nutrition",
+                "Protein intake",
+                &emb_b,
+            ),
         ]);
         let query_vec = norm(&[1.0, 0.0, 0.0]);
         let results = query(&conn, &[], &query_vec, "sleep", 10);
@@ -515,19 +629,18 @@ mod tests {
     fn test_federated_peer_no_fts_table() {
         let emb_local = norm(&[1.0, 0.0, 0.0]);
         let emb_peer = norm(&[0.9, 0.1, 0.0]);
-        let local = create_test_db(&[
-            ("local.md", "local note", "sleep content", &emb_local),
-        ]);
-        let peer = create_peer_db_no_fts(&[
-            ("peer.md", "peer note", &emb_peer),
-        ]);
+        let local = create_test_db(&[("local.md", "local note", "sleep content", &emb_local)]);
+        let peer = create_peer_db_no_fts(&[("peer.md", "peer note", &emb_peer)]);
 
         let peers = vec![("delta".to_string(), peer)];
         let query_vec = norm(&[1.0, 0.0, 0.0]);
         let results = query(&local, &peers, &query_vec, "sleep", 10);
 
         assert!(!results.is_empty());
-        let peer_results: Vec<&SearchResult> = results.iter().filter(|r| r.path.starts_with("peer:delta/")).collect();
+        let peer_results: Vec<&SearchResult> = results
+            .iter()
+            .filter(|r| r.path.starts_with("peer:delta/"))
+            .collect();
         assert!(!peer_results.is_empty());
     }
 }

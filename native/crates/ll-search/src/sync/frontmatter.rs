@@ -34,8 +34,12 @@ fn split(raw: &str) -> Option<(&str, &str, &str, &str)> {
             // and the tail carries it -- the boundary `upsert_key` reassembles
             // against, and the reason an empty block yields an empty body
             // rather than a stray terminator.
-            let body_end = after_open[..offset].strip_suffix('\n').map_or(0, |b| b.len());
-            let body_end = after_open[..body_end].strip_suffix('\r').map_or(body_end, |b| b.len());
+            let body_end = after_open[..offset]
+                .strip_suffix('\n')
+                .map_or(0, |b| b.len());
+            let body_end = after_open[..body_end]
+                .strip_suffix('\r')
+                .map_or(body_end, |b| b.len());
             return Some((bom, open, &after_open[..body_end], &after_open[body_end..]));
         }
         offset += line.len();
@@ -125,7 +129,11 @@ pub fn upsert_key(raw: &str, key: &str, value: &str) -> String {
             let eol = &open[3..];
             new_fm.push_str(&format!("{key}: {value}{eol}"));
         } else {
-            let eol = if tail.starts_with("\r\n") { "\r\n" } else { "\n" };
+            let eol = if tail.starts_with("\r\n") {
+                "\r\n"
+            } else {
+                "\n"
+            };
             new_fm.push_str(&format!("{eol}{key}: {value}"));
         }
     }
@@ -141,12 +149,7 @@ pub fn upsert_key(raw: &str, key: &str, value: &str) -> String {
 ///
 /// It caught nothing when written — because the bug it exists for had already
 /// been fixed — which is the point: it fires on the next one.
-pub fn verify_insertion(
-    before: &str,
-    after: &str,
-    key: &str,
-    value: &str,
-) -> Result<(), String> {
+pub fn verify_insertion(before: &str, after: &str, key: &str, value: &str) -> Result<(), String> {
     let entry = format!("{key}: {value}");
 
     // A note with no frontmatter gains a whole block; the body must survive.
@@ -157,7 +160,9 @@ pub fn verify_insertion(
         return if after == expected {
             Ok(())
         } else {
-            Err(format!("block creation altered the note beyond inserting {entry:?}"))
+            Err(format!(
+                "block creation altered the note beyond inserting {entry:?}"
+            ))
         };
     }
 
@@ -218,12 +223,7 @@ pub fn verify_upsert(before: &str, after: &str, key: &str, value: &str) -> Resul
 /// Verify that `after` is `before` with exactly one line's value changed —
 /// same line count, same terminators, one differing line, and that line is the
 /// key we asked for.
-pub fn verify_replacement(
-    before: &str,
-    after: &str,
-    key: &str,
-    value: &str,
-) -> Result<(), String> {
+pub fn verify_replacement(before: &str, after: &str, key: &str, value: &str) -> Result<(), String> {
     let entry = format!("{key}: {value}");
     let b: Vec<&str> = before.split_inclusive('\n').collect();
     let a: Vec<&str> = after.split_inclusive('\n').collect();
@@ -281,10 +281,18 @@ mod tests {
     #[test]
     fn an_indented_key_is_not_a_top_level_key() {
         let nested = "---\nmeta:\n  visibility: public\n---\n\nBody.";
-        assert_eq!(read_key(nested, "visibility"), None, "indented key was read as top-level");
+        assert_eq!(
+            read_key(nested, "visibility"),
+            None,
+            "indented key was read as top-level"
+        );
 
         let quoted = "---\nnote: |\n  visibility: public\n---\n\nBody.";
-        assert_eq!(read_key(quoted, "visibility"), None, "block scalar content was read as a key");
+        assert_eq!(
+            read_key(quoted, "visibility"),
+            None,
+            "block scalar content was read as a key"
+        );
 
         // Not vacuous: a real top-level key still reads, value trimmed.
         let top = "---\nvisibility: public\n---\n\nBody.";
@@ -302,7 +310,11 @@ mod tests {
     #[test]
     fn an_empty_block_closes_and_the_body_below_it_is_not_frontmatter() {
         let note = "---\n---\n\nthe stamp reads\nvisibility: public\nin the docs\n";
-        assert_eq!(read_key(note, "visibility"), None, "body prose is not a declaration");
+        assert_eq!(
+            read_key(note, "visibility"),
+            None,
+            "body prose is not a declaration"
+        );
     }
 
     /// The converse. A horizontal rule inside a real block used to close it
@@ -327,7 +339,11 @@ mod tests {
     #[test]
     fn the_writer_and_the_reader_agree_on_what_a_top_level_key_is() {
         let note = "---\ntitle: N\nquoted:\n  visibility: public\n---\n\nBody.\n";
-        assert_eq!(read_key(note, "visibility"), None, "precondition: nested is not read");
+        assert_eq!(
+            read_key(note, "visibility"),
+            None,
+            "precondition: nested is not read"
+        );
 
         let after = upsert_key(note, "visibility", "private");
 
@@ -341,7 +357,6 @@ mod tests {
             "and must leave the nested one alone; got:\n{after}"
         );
     }
-
 
     #[test]
     fn reads_key_with_bom_and_crlf() {
@@ -384,12 +399,16 @@ mod tests {
     fn upsert_creates_a_crlf_block_above_a_crlf_body() {
         let raw = "\u{FEFF}# Title\r\n\r\nBody.\r\n";
         let out = upsert_key(raw, "id", "019abc");
-        assert_eq!(out, "\u{FEFF}---\r\nid: 019abc\r\n---\r\n# Title\r\n\r\nBody.\r\n");
-        assert!(verify_upsert(raw, &out, "id", "019abc").is_ok(), "guard refused: {out:?}");
+        assert_eq!(
+            out,
+            "\u{FEFF}---\r\nid: 019abc\r\n---\r\n# Title\r\n\r\nBody.\r\n"
+        );
+        assert!(
+            verify_upsert(raw, &out, "id", "019abc").is_ok(),
+            "guard refused: {out:?}"
+        );
         assert_eq!(read_key(&out, "id").as_deref(), Some("019abc"));
     }
-
-
 
     #[test]
     fn guard_accepts_a_clean_single_line_insertion() {
@@ -450,7 +469,6 @@ mod tests {
         assert!(verify_insertion(before, tampered, "visibility", "public").is_err());
     }
 
-
     #[test]
     fn guard_accepts_a_clean_value_replacement() {
         let before = "---\nid: old\ntitle: X\n---\n\nBody.";
@@ -493,7 +511,10 @@ mod tests {
         // Rebuilding via lines().join() silently swallowed it.
         let raw = "---\nfoo: bar\n\n---\n\nBody.";
         let out = upsert_key(raw, "visibility", "public");
-        assert!(out.contains("foo: bar\n\nvisibility: public"), "got: {out:?}");
+        assert!(
+            out.contains("foo: bar\n\nvisibility: public"),
+            "got: {out:?}"
+        );
         assert_eq!(read_key(&out, "visibility").as_deref(), Some("public"));
     }
 
@@ -510,7 +531,10 @@ mod tests {
     fn upsert_replace_preserves_crlf_terminators() {
         let raw = "---\r\nid: old\r\ntitle: X\r\n---\r\n\r\nBody.";
         let out = upsert_key(raw, "id", "new");
-        assert!(out.contains("id: new\r\n"), "terminator not preserved: {out:?}");
+        assert!(
+            out.contains("id: new\r\n"),
+            "terminator not preserved: {out:?}"
+        );
         assert!(out.contains("title: X\r\n"));
     }
 
@@ -527,16 +551,27 @@ mod tests {
             "---\r\nname: \"\"\r\ndescription: \"\"\r\nmetadata:\r\n  node_type: memory\r\n\
              {nested}  modified: 2026-09-24T00:00:00.000Z\r\n---\r\n\r\n# Project index\r\n"
         );
-        assert_eq!(read_key(&raw, "id"), None, "precondition: nested is not read");
+        assert_eq!(
+            read_key(&raw, "id"),
+            None,
+            "precondition: nested is not read"
+        );
 
         let out = upsert_key(&raw, "id", "019abc");
 
-        assert!(verify_upsert(&raw, &out, "id", "019abc").is_ok(), "guard refused: {out:?}");
+        assert!(
+            verify_upsert(&raw, &out, "id", "019abc").is_ok(),
+            "guard refused: {out:?}"
+        );
         assert_eq!(read_key(&out, "id").as_deref(), Some("019abc"));
-        assert!(out.contains(&format!("\r\n{nested}")), "nested id line changed: {out:?}");
+        assert!(
+            out.contains(&format!("\r\n{nested}")),
+            "nested id line changed: {out:?}"
+        );
         assert_eq!(out.lines().filter(|l| l.starts_with("id:")).count(), 1);
         assert!(
-            out.split_inclusive('\n').all(|l| l.ends_with("\r\n") || !l.ends_with('\n')),
+            out.split_inclusive('\n')
+                .all(|l| l.ends_with("\r\n") || !l.ends_with('\n')),
             "a line lost its CR: {out:?}"
         );
     }
@@ -547,7 +582,10 @@ mod tests {
     fn upsert_inserts_into_an_empty_block() {
         for raw in ["---\n---\n\nBody.\n", "---\r\n---\r\n\r\nBody.\r\n"] {
             let out = upsert_key(raw, "id", "019abc");
-            assert!(verify_upsert(raw, &out, "id", "019abc").is_ok(), "guard refused: {out:?}");
+            assert!(
+                verify_upsert(raw, &out, "id", "019abc").is_ok(),
+                "guard refused: {out:?}"
+            );
             assert_eq!(read_key(&out, "id").as_deref(), Some("019abc"));
         }
     }

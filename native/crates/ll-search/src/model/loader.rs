@@ -136,7 +136,12 @@ pub fn ensure_model(model: &KnownModel) -> Result<(PathBuf, PathBuf)> {
         KnownModel::BgeSmallEnV15 => {
             let model_path = dir.join("model_quantized.onnx");
             let tokenizer_path = dir.join("tokenizer.json");
-            download(BGE_SMALL_MODEL_URL, &model_path, MIN_MODEL_BYTES, BGE_SMALL_MODEL_SHA256)?;
+            download(
+                BGE_SMALL_MODEL_URL,
+                &model_path,
+                MIN_MODEL_BYTES,
+                BGE_SMALL_MODEL_SHA256,
+            )?;
             download(
                 BGE_SMALL_TOKENIZER_URL,
                 &tokenizer_path,
@@ -168,7 +173,10 @@ mod tests {
     fn test_model_urls_use_pinned_revision() {
         assert!(BGE_SMALL_MODEL_URL.contains(BGE_SMALL_REVISION));
         assert!(BGE_SMALL_TOKENIZER_URL.contains(BGE_SMALL_REVISION));
-        assert!(!BGE_SMALL_MODEL_URL.contains("/main/"), "model fetch must not track a moving revision");
+        assert!(
+            !BGE_SMALL_MODEL_URL.contains("/main/"),
+            "model fetch must not track a moving revision"
+        );
     }
 
     fn write_bytes(path: &Path, n: usize) -> String {
@@ -233,14 +241,25 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let dest = dir.path().join("model_quantized.onnx");
         let hash = write_bytes(&dest, 64 * 1024);
-        let result = download("https://example.invalid/nonexistent", &dest, 32 * 1024, &hash);
-        assert!(result.is_ok(), "a verified cache file must be a hit (no network)");
+        let result = download(
+            "https://example.invalid/nonexistent",
+            &dest,
+            32 * 1024,
+            &hash,
+        );
+        assert!(
+            result.is_ok(),
+            "a verified cache file must be a hit (no network)"
+        );
     }
 
     #[test]
     fn test_models_dir_honors_override() {
         let target = "/some/staged/models";
-        assert_eq!(resolve_models_dir(Some(target)).unwrap(), PathBuf::from(target));
+        assert_eq!(
+            resolve_models_dir(Some(target)).unwrap(),
+            PathBuf::from(target)
+        );
     }
 
     #[test]

@@ -3,8 +3,8 @@
 
 use sha2::{Digest, Sha256};
 
-use crate::sync::error::SyncError;
 use super::{CHUNKED_HEADER_LEN, CHUNK_MAX_BODY_SIZE};
+use crate::sync::error::SyncError;
 
 /// Per-chunk frame for v3 chunked uploads. Mirrors sync-hub `frame::ChunkedFrame`.
 ///
@@ -20,11 +20,7 @@ pub struct ChunkedFrame {
 }
 
 impl ChunkedFrame {
-    pub fn from_body(
-        seq: u32,
-        total: u32,
-        body: Vec<u8>,
-    ) -> std::result::Result<Self, SyncError> {
+    pub fn from_body(seq: u32, total: u32, body: Vec<u8>) -> std::result::Result<Self, SyncError> {
         if total == 0 || seq >= total {
             return Err(SyncError::SizeMismatch {
                 expected: total as usize,

@@ -16,9 +16,9 @@ pub(crate) fn load_link_graph(conn: &Connection) -> HashMap<String, Vec<String>>
     }
 
     let mut edges: HashMap<String, HashSet<String>> = HashMap::new();
-    let mut stmt = match conn.prepare(
-        "SELECT n.path, l.target_path FROM links l JOIN notes n ON l.source_id = n.id",
-    ) {
+    let mut stmt = match conn
+        .prepare("SELECT n.path, l.target_path FROM links l JOIN notes n ON l.source_id = n.id")
+    {
         Ok(s) => s,
         Err(_) => return HashMap::new(),
     };
@@ -34,13 +34,22 @@ pub(crate) fn load_link_graph(conn: &Connection) -> HashMap<String, Vec<String>>
         let (source_path, target_basename) = row;
         if let Some(target_path) = basename_to_path.get(&target_basename) {
             if source_path != *target_path {
-                edges.entry(source_path.clone()).or_default().insert(target_path.clone());
-                edges.entry(target_path.clone()).or_default().insert(source_path.clone());
+                edges
+                    .entry(source_path.clone())
+                    .or_default()
+                    .insert(target_path.clone());
+                edges
+                    .entry(target_path.clone())
+                    .or_default()
+                    .insert(source_path.clone());
             }
         }
     }
 
-    edges.into_iter().map(|(k, v)| (k, v.into_iter().collect())).collect()
+    edges
+        .into_iter()
+        .map(|(k, v)| (k, v.into_iter().collect()))
+        .collect()
 }
 
 pub(crate) fn load_tags_map(conn: &Connection) -> HashMap<String, Vec<String>> {
@@ -65,8 +74,8 @@ pub(crate) fn load_tags_map(conn: &Connection) -> HashMap<String, Vec<String>> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::test_helpers::helpers::*;
+    use super::*;
 
     #[test]
     fn test_ppr_single_seed_chain() {
@@ -105,21 +114,25 @@ mod tests {
                 ("d.md", "d", "content", &emb),
             ],
             &[
-                ("a.md", "b"), ("b.md", "bridge"),
-                ("bridge.md", "c"), ("c.md", "d"),
+                ("a.md", "b"),
+                ("b.md", "bridge"),
+                ("bridge.md", "c"),
+                ("c.md", "d"),
             ],
         );
 
         let graph = load_link_graph(&conn);
-        let results = personalized_pagerank(
-            &graph,
-            &["a.md".to_string(), "d.md".to_string()],
-            0.5,
-            20,
-        );
+        let results =
+            personalized_pagerank(&graph, &["a.md".to_string(), "d.md".to_string()], 0.5, 20);
 
-        let bridge_score = results.iter().find(|(p, _)| p == "bridge.md").map(|(_, s)| *s);
-        assert!(bridge_score.is_some(), "bridge node should appear in results");
+        let bridge_score = results
+            .iter()
+            .find(|(p, _)| p == "bridge.md")
+            .map(|(_, s)| *s);
+        assert!(
+            bridge_score.is_some(),
+            "bridge node should appear in results"
+        );
     }
 
     #[test]
@@ -133,7 +146,10 @@ mod tests {
     fn test_load_link_graph_undirected() {
         let emb = norm(&[1.0, 0.0, 0.0]);
         let conn = create_graph_db(
-            &[("a.md", "a", "content", &emb), ("b.md", "b", "content", &emb)],
+            &[
+                ("a.md", "a", "content", &emb),
+                ("b.md", "b", "content", &emb),
+            ],
             &[("a.md", "b")],
         );
         let graph = load_link_graph(&conn);

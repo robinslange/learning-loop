@@ -44,15 +44,18 @@ pub(crate) mod helpers {
             conn.execute(
                 "INSERT INTO notes_content (id, title, tags, body) VALUES (?1, ?2, '', ?3)",
                 params![id, title, body],
-            ).unwrap();
+            )
+            .unwrap();
             let blob: Vec<u8> = emb.iter().flat_map(|f| f.to_le_bytes()).collect();
             conn.execute(
                 "INSERT INTO embeddings (id, data) VALUES (?1, ?2)",
                 params![id, blob],
-            ).unwrap();
+            )
+            .unwrap();
         }
 
-        conn.execute_batch("INSERT INTO notes_fts(notes_fts) VALUES('rebuild')").unwrap();
+        conn.execute_batch("INSERT INTO notes_fts(notes_fts) VALUES('rebuild')")
+            .unwrap();
         conn
     }
 
@@ -97,10 +100,12 @@ pub(crate) mod helpers {
             conn.execute(
                 "INSERT INTO notes_content (id, title, tags, body) VALUES (?1, ?2, '', ?3)",
                 params![id, title, body],
-            ).unwrap();
+            )
+            .unwrap();
         }
 
-        conn.execute_batch("INSERT INTO notes_fts(notes_fts) VALUES('rebuild')").unwrap();
+        conn.execute_batch("INSERT INTO notes_fts(notes_fts) VALUES('rebuild')")
+            .unwrap();
         conn
     }
 
@@ -139,18 +144,23 @@ pub(crate) mod helpers {
             conn.execute(
                 "INSERT INTO notes_content (id, title, tags, body) VALUES (?1, ?2, '', ?3)",
                 params![id, title, title],
-            ).unwrap();
+            )
+            .unwrap();
             let blob: Vec<u8> = emb.iter().flat_map(|f| f.to_le_bytes()).collect();
             conn.execute(
                 "INSERT INTO embeddings (id, data) VALUES (?1, ?2)",
                 params![id, blob],
-            ).unwrap();
+            )
+            .unwrap();
         }
 
         conn
     }
 
-    pub fn create_graph_db(notes: &[(&str, &str, &str, &[f32])], links: &[(&str, &str)]) -> Connection {
+    pub fn create_graph_db(
+        notes: &[(&str, &str, &str, &[f32])],
+        links: &[(&str, &str)],
+    ) -> Connection {
         let conn = create_test_db(notes);
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS links (
@@ -159,25 +169,31 @@ pub(crate) mod helpers {
                 UNIQUE(source_id, target_path)
             );
             CREATE INDEX IF NOT EXISTS idx_links_target ON links(target_path);",
-        ).unwrap();
+        )
+        .unwrap();
 
         for (source_path, target_basename) in links {
-            let source_id: i64 = conn.query_row(
-                "SELECT id FROM notes WHERE path = ?1",
-                params![source_path],
-                |r| r.get(0),
-            ).unwrap();
+            let source_id: i64 = conn
+                .query_row(
+                    "SELECT id FROM notes WHERE path = ?1",
+                    params![source_path],
+                    |r| r.get(0),
+                )
+                .unwrap();
             conn.execute(
                 "INSERT OR IGNORE INTO links (source_id, target_path) VALUES (?1, ?2)",
                 params![source_id, target_basename],
-            ).unwrap();
+            )
+            .unwrap();
         }
         conn
     }
 
     pub fn norm(v: &[f32]) -> Vec<f32> {
         let mag = v.iter().map(|x| x * x).sum::<f32>().sqrt();
-        if mag == 0.0 { return v.to_vec(); }
+        if mag == 0.0 {
+            return v.to_vec();
+        }
         v.iter().map(|x| x / mag).collect()
     }
 }

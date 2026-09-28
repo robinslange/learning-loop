@@ -64,15 +64,13 @@
 use crate::b64;
 use std::path::Path;
 
-
 use super::config::peer_dir;
 use super::fetch::{is_safe_vault_id, permits_read};
 use super::grant::{self, GrantStatement};
 use super::key_id::KeyId;
 use super::link::{self, SignedGrant, StoredGrant};
-use super::state::{self, ReadableVaults};
 use super::protocol_v5::{GrantWire, RevocationWire};
-
+use super::state::{self, ReadableVaults};
 
 /// Whether `st` could be this key's reason to hold a cached copy of
 /// `vault_id`. Used to decide what **survives** a withdrawal, and by
@@ -183,7 +181,9 @@ impl ReadAuthority {
     /// Whether this machine may still hold a cached copy of `vault_id`: the
     /// hub last listed it, **and** a live grant covers it.
     pub fn covers(&self, vault_id: &str) -> bool {
-        self.listed.as_ref().is_some_and(|listed| listed.contains(vault_id))
+        self.listed
+            .as_ref()
+            .is_some_and(|listed| listed.contains(vault_id))
             && self.live.iter().any(|st| covers(st, &self.me, vault_id))
     }
 }
@@ -303,7 +303,10 @@ fn withdraw(
         eprintln!("refusing to act on a grant whose scope is not a usable vault id");
         return Ok(None);
     }
-    if remaining.iter().any(|st| st.expires_at > now && covers(st, me, vault_id)) {
+    if remaining
+        .iter()
+        .any(|st| st.expires_at > now && covers(st, me, vault_id))
+    {
         return Ok(None);
     }
     if !listed.is_some_and(|listed| listed.contains(vault_id)) {
@@ -321,8 +324,10 @@ fn withdraw(
         // Nothing cached for it. Applying the same revocation twice, or one
         // for a vault this client never read, is not a failure.
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(e) => Err(anyhow::Error::new(e)
-            .context(format!("removing the peer cache at {}", dir.display()))),
+        Err(e) => {
+            Err(anyhow::Error::new(e)
+                .context(format!("removing the peer cache at {}", dir.display())))
+        }
     }
 }
 
@@ -373,13 +378,17 @@ pub fn apply_grants(config_dir: &Path, grants: &[GrantWire]) -> anyhow::Result<u
         if wire.state != "active" {
             continue;
         }
-        let (Ok(statement), Ok(signature)) =
-            (b64::decode(&wire.statement_b64), b64::decode(&wire.signature_b64))
-        else {
+        let (Ok(statement), Ok(signature)) = (
+            b64::decode(&wire.statement_b64),
+            b64::decode(&wire.signature_b64),
+        ) else {
             eprintln!("skipping a grant that is not valid base64");
             continue;
         };
-        let signed = SignedGrant { statement, signature };
+        let signed = SignedGrant {
+            statement,
+            signature,
+        };
         // Self-authenticating, exactly as `reconcile` and the hub treat one:
         // the signature is checked against the key the statement names as
         // issuer. The hub carries grants; it does not vouch for them.
@@ -434,9 +443,10 @@ pub fn apply_revocations(
 ) -> anyhow::Result<Vec<String>> {
     let mut parsed: Vec<(Vec<u8>, Vec<u8>)> = Vec::new();
     for wire in revocations {
-        let (Ok(statement), Ok(signature)) =
-            (b64::decode(&wire.statement_b64), b64::decode(&wire.signature_b64))
-        else {
+        let (Ok(statement), Ok(signature)) = (
+            b64::decode(&wire.statement_b64),
+            b64::decode(&wire.signature_b64),
+        ) else {
             eprintln!("skipping a revocation that is not valid base64");
             continue;
         };
@@ -466,9 +476,19 @@ pub fn apply_revocations(
                 );
                 continue;
             }
-            let remaining: Vec<GrantStatement> =
-                held.iter().filter(|(i, _, _)| *i != idx).map(|(_, _, st)| st.clone()).collect();
-            deleted.extend(withdraw(config_dir, gone, &remaining, listed.as_ref(), me, now)?);
+            let remaining: Vec<GrantStatement> = held
+                .iter()
+                .filter(|(i, _, _)| *i != idx)
+                .map(|(_, _, st)| st.clone())
+                .collect();
+            deleted.extend(withdraw(
+                config_dir,
+                gone,
+                &remaining,
+                listed.as_ref(),
+                me,
+                now,
+            )?);
             rows.remove(idx);
         }
         Ok(deleted)
@@ -490,9 +510,19 @@ pub fn prune_expired(config_dir: &Path, me: &KeyId, now: i64) -> anyhow::Result<
             let Some((idx, _, gone)) = held.iter().find(|(_, _, st)| st.expires_at <= now) else {
                 break;
             };
-            let remaining: Vec<GrantStatement> =
-                held.iter().filter(|(i, _, _)| i != idx).map(|(_, _, st)| st.clone()).collect();
-            deleted.extend(withdraw(config_dir, gone, &remaining, listed.as_ref(), me, now)?);
+            let remaining: Vec<GrantStatement> = held
+                .iter()
+                .filter(|(i, _, _)| i != idx)
+                .map(|(_, _, st)| st.clone())
+                .collect();
+            deleted.extend(withdraw(
+                config_dir,
+                gone,
+                &remaining,
+                listed.as_ref(),
+                me,
+                now,
+            )?);
             rows.remove(*idx);
         }
         Ok(deleted)
@@ -528,7 +558,10 @@ mod tests {
 
     fn sign(k: &SigningKey, statement: Vec<u8>) -> SignedGrant {
         let signature = k.sign(&statement).to_bytes().to_vec();
-        SignedGrant { statement, signature }
+        SignedGrant {
+            statement,
+            signature,
+        }
     }
 
     fn issue(
@@ -581,7 +614,11 @@ mod tests {
     }
 
     fn revoking(by: &SigningKey, g: &SignedGrant) -> RevocationWire {
-        revocation(by, &grant::grant_id(&g.statement), statement(g).scope.as_deref())
+        revocation(
+            by,
+            &grant::grant_id(&g.statement),
+            statement(g).scope.as_deref(),
+        )
     }
 
     /// A peer cache with a file in it, so "the directory is gone" is a claim
@@ -610,9 +647,11 @@ mod tests {
 
     /// Put `vault_id` on the last list the hub gave `me`, cache or no cache.
     fn listed(dir: &Path, me: &KeyId, vault_id: &str) {
-        let mut list = listed_for(dir, me)
-            .unwrap()
-            .unwrap_or(ReadableVaults { me: me.clone(), at: NOW, vault_ids: Vec::new() });
+        let mut list = listed_for(dir, me).unwrap().unwrap_or(ReadableVaults {
+            me: me.clone(),
+            at: NOW,
+            vault_ids: Vec::new(),
+        });
         if !list.contains(vault_id) {
             list.vault_ids.push(vault_id.to_string());
         }
@@ -655,9 +694,18 @@ mod tests {
         let st = statement(&issue(&key(1), &me, GrantKind::Follow, Some("v-a"), LATER));
 
         assert!(covers(&st, &me, "v-a"));
-        assert!(!covers(&st, &me, "v-alice"), "a longer id that starts with the scope");
-        assert!(!covers(&st, &me, "v-"), "a shorter id the scope starts with");
-        assert!(!covers(&st, &me, "V-A"), "and it is not case-insensitive either");
+        assert!(
+            !covers(&st, &me, "v-alice"),
+            "a longer id that starts with the scope"
+        );
+        assert!(
+            !covers(&st, &me, "v-"),
+            "a shorter id the scope starts with"
+        );
+        assert!(
+            !covers(&st, &me, "V-A"),
+            "and it is not case-insensitive either"
+        );
     }
 
     // -- the store ---------------------------------------------------------
@@ -679,7 +727,11 @@ mod tests {
         let wires: Vec<GrantWire> = grants.iter().map(wire).collect();
 
         assert_eq!(apply_grants(dir.path(), &wires).unwrap(), 4);
-        assert_eq!(rows(dir.path()), 4, "a revocation can only resolve against a grant we kept");
+        assert_eq!(
+            rows(dir.path()),
+            4,
+            "a revocation can only resolve against a grant we kept"
+        );
     }
 
     #[test]
@@ -701,7 +753,10 @@ mod tests {
     fn a_grant_the_hub_does_not_call_active_is_not_stored() {
         let me = id(&key(9));
         let g = issue(&key(1), &me, GrantKind::Follow, Some("v-other"), LATER);
-        let pending = GrantWire { state: "pending".to_string(), ..wire(&g) };
+        let pending = GrantWire {
+            state: "pending".to_string(),
+            ..wire(&g)
+        };
         let dir = tempfile::tempdir().unwrap();
 
         assert_eq!(apply_grants(dir.path(), &[pending]).unwrap(), 0);
@@ -736,7 +791,10 @@ mod tests {
         apply_grants(dir.path(), &[wire(&g)]).unwrap();
 
         assert!(!peer_dir(dir.path(), "v-work").exists());
-        assert!(!peers_dir(dir.path()).exists(), "nothing under data/ was touched at all");
+        assert!(
+            !peers_dir(dir.path()).exists(),
+            "nothing under data/ was touched at all"
+        );
     }
 
     // -- revocation: the resolution rule -----------------------------------
@@ -752,14 +810,22 @@ mod tests {
         cache(dir.path(), &me, "v-other");
         cache(dir.path(), &me, "v-keep");
 
-        let deleted =
-            apply_revocations(dir.path(), &[revoking(&a, &revoked)], &me, NOW).unwrap();
+        let deleted = apply_revocations(dir.path(), &[revoking(&a, &revoked)], &me, NOW).unwrap();
 
         assert_eq!(deleted, vec!["v-other".to_string()]);
-        assert!(!cached(dir.path(), "v-other"),
-            "data already read cannot be recalled, but continuing to serve it is not revocation");
-        assert!(cached(dir.path(), "v-keep"), "a cache another grant justifies is untouched");
-        assert_eq!(rows(dir.path()), 1, "the withdrawn grant is gone from the store");
+        assert!(
+            !cached(dir.path(), "v-other"),
+            "data already read cannot be recalled, but continuing to serve it is not revocation"
+        );
+        assert!(
+            cached(dir.path(), "v-keep"),
+            "a cache another grant justifies is untouched"
+        );
+        assert_eq!(
+            rows(dir.path()),
+            1,
+            "the withdrawn grant is gone from the store"
+        );
     }
 
     /// The first line of the rule. A signature proves someone signed those
@@ -798,7 +864,10 @@ mod tests {
         let deleted = apply_revocations(dir.path(), &[forged], &me, NOW).unwrap();
 
         assert!(deleted.is_empty());
-        assert!(cached(dir.path(), "v-other"), "a stranger cannot revoke A's grant");
+        assert!(
+            cached(dir.path(), "v-other"),
+            "a stranger cannot revoke A's grant"
+        );
         assert_eq!(rows(dir.path()), 1);
     }
 
@@ -819,9 +888,16 @@ mod tests {
         let deleted = apply_revocations(dir.path(), &[widened], &me, NOW).unwrap();
 
         assert!(deleted.is_empty());
-        assert!(cached(dir.path(), "v-other"), "the narrow reading is not applied either");
+        assert!(
+            cached(dir.path(), "v-other"),
+            "the narrow reading is not applied either"
+        );
         assert!(cached(dir.path(), "v-elsewhere"));
-        assert_eq!(rows(dir.path()), 1, "and the grant is not withdrawn on a refusal");
+        assert_eq!(
+            rows(dir.path()),
+            1,
+            "and the grant is not withdrawn on a refusal"
+        );
         assert_eq!(rows(dir.path()), 1);
     }
 
@@ -870,7 +946,11 @@ mod tests {
         assert!(deleted.is_empty());
         assert!(cached(dir.path(), "v-one"));
         assert!(cached(dir.path(), "v-two"));
-        assert_eq!(rows(dir.path()), 0, "the grant is still withdrawn from the store");
+        assert_eq!(
+            rows(dir.path()),
+            0,
+            "the grant is still withdrawn from the store"
+        );
     }
 
     /// A scoped revocation must not take a cache somebody else's grant still
@@ -894,8 +974,10 @@ mod tests {
         let deleted = apply_revocations(dir.path(), &[revoking(&a, &held)], &me, NOW).unwrap();
 
         assert!(deleted.is_empty());
-        assert!(cached(dir.path(), "v-two"),
-            "revoking one person's follow must not delete what another person's link justifies");
+        assert!(
+            cached(dir.path(), "v-two"),
+            "revoking one person's follow must not delete what another person's link justifies"
+        );
     }
 
     /// The other side of that bail-out's midpoint: the survivor has to be
@@ -918,8 +1000,10 @@ mod tests {
         let deleted = apply_revocations(dir.path(), &[revoking(&a, &revoked)], &me, NOW).unwrap();
 
         assert_eq!(deleted, vec!["v-x".to_string()]);
-        assert!(!cached(dir.path(), "v-x"),
-            "a grant that has stopped meaning anything cannot be a reason to keep a cache");
+        assert!(
+            !cached(dir.path(), "v-x"),
+            "a grant that has stopped meaning anything cannot be a reason to keep a cache"
+        );
     }
 
     /// The other half of the `assoc` rule. It carries no read authority, so
@@ -938,7 +1022,10 @@ mod tests {
         let deleted = apply_revocations(dir.path(), &[revoking(&a, &held)], &me, NOW).unwrap();
 
         assert_eq!(deleted, vec!["v-two".to_string()]);
-        assert!(!cached(dir.path(), "v-two"), "an assoc is not a reason to keep a cache");
+        assert!(
+            !cached(dir.path(), "v-two"),
+            "an assoc is not a reason to keep a cache"
+        );
     }
 
     /// The `assoc` rule on the withdrawal side, which is the side the
@@ -957,7 +1044,10 @@ mod tests {
         let deleted = apply_revocations(dir.path(), &[revoking(&a, &held)], &me, NOW).unwrap();
 
         assert!(deleted.is_empty());
-        assert!(cached(dir.path(), "v-work"), "assoc carries no read authority in either direction");
+        assert!(
+            cached(dir.path(), "v-work"),
+            "assoc carries no read authority in either direction"
+        );
     }
 
     /// The scope reaches `withdraw` out of a signed statement and lands in a
@@ -989,9 +1079,14 @@ mod tests {
         let deleted = apply_revocations(dir.path(), &[revoking(&a, &held)], &me, NOW).unwrap();
 
         assert!(deleted.is_empty());
-        assert!(outside.join("keep.db").exists(),
-            "a signed statement does not get to name a path outside the peer cache");
-        assert!(innocent.exists(), "and the traversal was reachable: peers/ was there to walk");
+        assert!(
+            outside.join("keep.db").exists(),
+            "a signed statement does not get to name a path outside the peer cache"
+        );
+        assert!(
+            innocent.exists(),
+            "and the traversal was reachable: peers/ was there to walk"
+        );
     }
 
     /// A grant this machine ISSUED gives this machine no read, so it is not
@@ -1007,8 +1102,10 @@ mod tests {
         let deleted = apply_revocations(dir.path(), &[revoking(&mine, &held)], &me, NOW).unwrap();
 
         assert!(deleted.is_empty());
-        assert!(cached(dir.path(), "v-other"),
-            "our own grant to somebody else was never why we held this");
+        assert!(
+            cached(dir.path(), "v-other"),
+            "our own grant to somebody else was never why we held this"
+        );
         assert_eq!(rows(dir.path()), 0, "it is still withdrawn from the store");
     }
 
@@ -1037,15 +1134,24 @@ mod tests {
         // The hub lists it and we hold the grant; nothing was ever fetched
         // because the hub reported holding nothing for it.
         listed(dir.path(), &me, "v-never");
-        assert!(!peer_dir(dir.path(), "v-never").exists(),
-            "precondition: nothing was ever fetched for the vault being revoked");
+        assert!(
+            !peer_dir(dir.path(), "v-never").exists(),
+            "precondition: nothing was ever fetched for the vault being revoked"
+        );
 
         let deleted = apply_revocations(dir.path(), &[revoking(&a, &never_fetched)], &me, NOW)
             .expect("a revocation for a vault this client never read is not a failure");
 
         assert!(deleted.is_empty());
-        assert_eq!(rows(dir.path()), 0, "and the row still goes, so the cycle settles");
-        assert!(sibling.exists(), "peers/ was there to walk: the deletion was reachable");
+        assert_eq!(
+            rows(dir.path()),
+            0,
+            "and the row still goes, so the cycle settles"
+        );
+        assert!(
+            sibling.exists(),
+            "peers/ was there to walk: the deletion was reachable"
+        );
     }
 
     #[test]
@@ -1061,7 +1167,9 @@ mod tests {
             apply_revocations(dir.path(), std::slice::from_ref(&rev), &me, NOW).unwrap(),
             vec!["v-other".to_string()]
         );
-        assert!(apply_revocations(dir.path(), &[rev], &me, NOW).unwrap().is_empty());
+        assert!(apply_revocations(dir.path(), &[rev], &me, NOW)
+            .unwrap()
+            .is_empty());
     }
 
     // -- the deletion gate: a third party does not choose the target --------
@@ -1093,11 +1201,17 @@ mod tests {
             apply_revocations(dir.path(), &[revoking(&stranger, &bait)], &me, NOW).unwrap();
 
         assert!(deleted.is_empty());
-        assert!(victim.join("index.db").exists(),
+        assert!(
+            victim.join("index.db").exists(),
             "a signed scope says who wrote that string, not that they had any standing \
-             over the directory it names");
+             over the directory it names"
+        );
         assert!(cached(dir.path(), "v-mine"));
-        assert_eq!(rows(dir.path()), 0, "the revocation resolved: the gate is what refused");
+        assert_eq!(
+            rows(dir.path()),
+            0,
+            "the revocation resolved: the gate is what refused"
+        );
     }
 
     /// The same attack on a machine with any inbound unscoped `link` — the
@@ -1118,8 +1232,10 @@ mod tests {
             apply_revocations(dir.path(), &[revoking(&stranger, &bait)], &me, NOW).unwrap();
 
         assert!(deleted.is_empty());
-        assert!(cached(dir.path(), "v-mine"),
-            "a link this machine actually holds covers it, whatever a stranger signed");
+        assert!(
+            cached(dir.path(), "v-mine"),
+            "a link this machine actually holds covers it, whatever a stranger signed"
+        );
     }
 
     /// The gate reads the list **this** key was handed, not whichever list is
@@ -1139,8 +1255,10 @@ mod tests {
         let deleted = apply_revocations(dir.path(), &[revoking(&a, &held)], &me, NOW).unwrap();
 
         assert!(deleted.is_empty());
-        assert!(stranded.join("index.db").exists(),
-            "the list names the vault, and it is not this key's list");
+        assert!(
+            stranded.join("index.db").exists(),
+            "the list names the vault, and it is not this key's list"
+        );
     }
 
     /// And the gate's other direction, which is what stops it from being a
@@ -1180,10 +1298,15 @@ mod tests {
         let deleted = apply_revocations(dir.path(), &[revoking(&a, &held)], &me, NOW).unwrap();
 
         assert!(deleted.is_empty());
-        assert!(stranded.join("index.db").exists(),
-            "the bytes stay, and nothing on this machine will read them again");
-        assert_eq!(rows(dir.path()), 0,
-            "and the row is gone, so no later cycle can resolve this revocation either");
+        assert!(
+            stranded.join("index.db").exists(),
+            "the bytes stay, and nothing on this machine will read them again"
+        );
+        assert_eq!(
+            rows(dir.path()),
+            0,
+            "and the row is gone, so no later cycle can resolve this revocation either"
+        );
     }
 
     // -- expiry, the backstop ----------------------------------------------
@@ -1201,7 +1324,10 @@ mod tests {
         let deleted = prune_expired(dir.path(), &me, NOW).unwrap();
 
         assert_eq!(deleted, vec!["v-other".to_string()]);
-        assert!(!cached(dir.path(), "v-other"), "lapsing must have the same effect as revoking");
+        assert!(
+            !cached(dir.path(), "v-other"),
+            "lapsing must have the same effect as revoking"
+        );
         assert!(cached(dir.path(), "v-keep"));
         assert_eq!(rows(dir.path()), 1);
     }
@@ -1218,7 +1344,10 @@ mod tests {
         let (dir, me) = store(&[&g]);
         cache(dir.path(), &me, "v-other");
 
-        assert_eq!(prune_expired(dir.path(), &me, NOW).unwrap(), vec!["v-other".to_string()]);
+        assert_eq!(
+            prune_expired(dir.path(), &me, NOW).unwrap(),
+            vec!["v-other".to_string()]
+        );
         assert!(!cached(dir.path(), "v-other"));
         assert_eq!(rows(dir.path()), 0);
     }
@@ -1359,9 +1488,14 @@ mod tests {
         let deleted = apply_revocations(dir.path(), &[revoking(&a, &held)], &me, NOW).unwrap();
 
         assert_eq!(deleted, vec!["v-one".to_string()]);
-        assert!(v4.exists(),
-            "a v4 display-name cache is a migration decision, not a revocation's to make");
-        assert!(unrelated.exists(), "no grant named it, so nothing may remove it");
+        assert!(
+            v4.exists(),
+            "a v4 display-name cache is a migration decision, not a revocation's to make"
+        );
+        assert!(
+            unrelated.exists(),
+            "no grant named it, so nothing may remove it"
+        );
         assert!(stray.exists());
         assert!(sibling.exists(), "nothing outside peers/ is reachable");
         assert!(loose.exists(), "a file is not a peer cache");
@@ -1378,8 +1512,15 @@ mod tests {
         let (dir, me) = store(&[&held]);
         let v4 = cache(dir.path(), &me, "thomas_kirk");
 
-        assert!(apply_revocations(dir.path(), &[revoking(&a, &held)], &me, NOW).unwrap().is_empty());
-        assert!(v4.exists(), "revoking a link is an arbitrary moment to run a garbage collector");
+        assert!(
+            apply_revocations(dir.path(), &[revoking(&a, &held)], &me, NOW)
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            v4.exists(),
+            "revoking a link is an arbitrary moment to run a garbage collector"
+        );
     }
 
     /// A deletion and its row removal are one transaction. The failure this
@@ -1412,8 +1553,18 @@ mod tests {
         let outcome = apply_revocations(dir.path(), &[revoking(&a, &held)], &me, NOW);
 
         std::fs::set_permissions(&cache_dir, std::fs::Permissions::from_mode(0o755)).unwrap();
-        assert!(outcome.is_err(), "best-effort deletion would make revocation theatre");
-        assert!(cached(dir.path(), "v-other"), "the cache is still there, so the reason must be");
-        assert_eq!(rows(dir.path()), 1, "the next cycle can still resolve this revocation");
+        assert!(
+            outcome.is_err(),
+            "best-effort deletion would make revocation theatre"
+        );
+        assert!(
+            cached(dir.path(), "v-other"),
+            "the cache is still there, so the reason must be"
+        );
+        assert_eq!(
+            rows(dir.path()),
+            1,
+            "the next cycle can still resolve this revocation"
+        );
     }
 }

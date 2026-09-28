@@ -8,12 +8,16 @@
 
 mod common;
 
-use criterion::{Criterion, criterion_group, criterion_main};
+use criterion::{criterion_group, criterion_main, Criterion};
 
 const SEED: u64 = 20260511;
 
 fn bench_preprocess_only(c: &mut Criterion) {
-    let count: usize = if std::env::var("CARGO_BENCH_QUICK").is_ok() { 20 } else { 100 };
+    let count: usize = if std::env::var("CARGO_BENCH_QUICK").is_ok() {
+        20
+    } else {
+        100
+    };
     let texts: Vec<String> = (0..count)
         .map(|i| {
             let body = common::deterministic_text(SEED ^ i as u64, 100);
@@ -45,7 +49,11 @@ fn bench_real_onnx(c: &mut Criterion) {
         return;
     }
 
-    let count: usize = if std::env::var("CARGO_BENCH_QUICK").is_ok() { 10 } else { 100 };
+    let count: usize = if std::env::var("CARGO_BENCH_QUICK").is_ok() {
+        10
+    } else {
+        100
+    };
     let texts: Vec<String> = (0..count)
         .map(|i| {
             let body = common::deterministic_text(SEED ^ i as u64, 60);

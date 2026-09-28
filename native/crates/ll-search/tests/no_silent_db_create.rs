@@ -182,9 +182,16 @@ fn open_or_create_db_creates_parent_dir_and_file() {
     // sandboxed CI envs. The contract we care about lives one layer below the
     // subcommand: any caller of open_or_create_db gets a usable connection.
     let tmp = tempfile::tempdir().expect("tempdir");
-    let fresh_db = tmp.path().join("nested").join("more-nested").join("vault-index.db");
+    let fresh_db = tmp
+        .path()
+        .join("nested")
+        .join("more-nested")
+        .join("vault-index.db");
 
-    assert!(!fresh_db.parent().unwrap().exists(), "parent must not pre-exist");
+    assert!(
+        !fresh_db.parent().unwrap().exists(),
+        "parent must not pre-exist"
+    );
 
     let conn = ll_search::db::open_or_create_db(fresh_db.to_str().unwrap())
         .expect("open_or_create_db should succeed on missing path");

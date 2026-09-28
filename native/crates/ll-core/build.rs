@@ -96,7 +96,10 @@ fn download(url: &str, dest: &Path, min_bytes: u64, expected_sha256: &str) {
     let mut last_err = String::new();
     let mut downloaded = false;
     for attempt in 1..=MAX_ATTEMPTS {
-        eprintln!("Downloading {} (attempt {}/{}) ...", url, attempt, MAX_ATTEMPTS);
+        eprintln!(
+            "Downloading {} (attempt {}/{}) ...",
+            url, attempt, MAX_ATTEMPTS
+        );
         let output = std::process::Command::new("curl")
             .args(["-fsSL", "-o"])
             .arg(&tmp)
@@ -154,9 +157,8 @@ fn download(url: &str, dest: &Path, min_bytes: u64, expected_sha256: &str) {
 // path was used so the provenance is auditable in the build log.
 fn copy_local(env_path: &str, dest: &Path, min_bytes: u64) {
     let src = PathBuf::from(env_path);
-    let meta = fs::metadata(&src).unwrap_or_else(|e| {
-        panic!("local model path {} is not readable: {}", src.display(), e)
-    });
+    let meta = fs::metadata(&src)
+        .unwrap_or_else(|e| panic!("local model path {} is not readable: {}", src.display(), e));
     if meta.len() < min_bytes {
         panic!(
             "local model file {} is {} bytes, expected at least {} (truncated?)",
@@ -167,7 +169,10 @@ fn copy_local(env_path: &str, dest: &Path, min_bytes: u64) {
     }
     fs::copy(&src, dest)
         .unwrap_or_else(|e| panic!("copy {} -> {}: {}", src.display(), dest.display(), e));
-    eprintln!("Using local model from {} (LL_RERANKER override)", src.display());
+    eprintln!(
+        "Using local model from {} (LL_RERANKER override)",
+        src.display()
+    );
 }
 
 // LL_MODEL_CACHE_DIR is a durable CI cache outside the eviction-prone cargo cache:
@@ -191,8 +196,9 @@ fn fetch(
             std::fs::create_dir_all(&cache_dir).expect("create LL_MODEL_CACHE_DIR");
             let cached = cache_dir.join(filename);
             download(url, &cached, min_bytes, expected_sha256);
-            std::fs::copy(&cached, out_path)
-                .unwrap_or_else(|e| panic!("copy {} -> {}: {}", cached.display(), out_path.display(), e));
+            std::fs::copy(&cached, out_path).unwrap_or_else(|e| {
+                panic!("copy {} -> {}: {}", cached.display(), out_path.display(), e)
+            });
         }
         _ => download(url, out_path, min_bytes, expected_sha256),
     }

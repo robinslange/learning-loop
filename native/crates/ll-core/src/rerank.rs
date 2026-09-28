@@ -10,7 +10,8 @@ use serde::Serialize;
 use tokenizers::Tokenizer;
 
 const RERANKER_MODEL: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/reranker.onnx"));
-const RERANKER_TOKENIZER: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/reranker_tokenizer.json"));
+const RERANKER_TOKENIZER: &[u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/reranker_tokenizer.json"));
 
 /// A single reranked result returned by [`rerank`].
 #[derive(Debug, Serialize)]
@@ -133,7 +134,11 @@ pub fn rerank_with_report(
         }
     }
 
-    scored.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    scored.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     scored.truncate(top_n);
     RerankReport { scored, failed }
 }
@@ -165,11 +170,7 @@ fn score_pair_typed(st: &RerankState, query: &str, document: &str) -> Result<f64
         .map_err(|_| "reranker session mutex poisoned".to_string())?;
 
     let outputs = if st.wants_token_type_ids {
-        let type_ids: Vec<i64> = encoding
-            .get_type_ids()
-            .iter()
-            .map(|&t| t as i64)
-            .collect();
+        let type_ids: Vec<i64> = encoding.get_type_ids().iter().map(|&t| t as i64).collect();
         let token_type_ids = Tensor::from_array((shape, type_ids.into_boxed_slice()))
             .map_err(|e| format!("tensor build failed: {e}"))?;
         let inputs = ort::inputs! {

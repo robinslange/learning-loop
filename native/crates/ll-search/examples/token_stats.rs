@@ -35,7 +35,9 @@ fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
 
 fn main() {
     let mut args = std::env::args().skip(1);
-    let vault = args.next().expect("usage: token_stats <vault> [tokenizer.json]");
+    let vault = args
+        .next()
+        .expect("usage: token_stats <vault> [tokenizer.json]");
     let tok_path = args.next().unwrap_or_else(|| {
         format!(
             "{}/.learning-loop/models/bge-small-en-v1.5/tokenizer.json",
@@ -66,7 +68,11 @@ fn main() {
         let folder = f
             .strip_prefix(&vault_path)
             .ok()
-            .and_then(|r| r.components().next().map(|c| c.as_os_str().to_string_lossy().to_string()))
+            .and_then(|r| {
+                r.components()
+                    .next()
+                    .map(|c| c.as_os_str().to_string_lossy().to_string())
+            })
             .unwrap_or_else(|| "?".into());
         per_folder.entry(folder).or_default().push(enc.len());
     }
@@ -74,7 +80,11 @@ fn main() {
     let all: Vec<usize> = per_folder.values().flatten().copied().collect();
     let pctl = |v: &mut Vec<usize>, p: f64| {
         v.sort_unstable();
-        if v.is_empty() { 0 } else { v[((p * (v.len() - 1) as f64) as usize).min(v.len() - 1)] }
+        if v.is_empty() {
+            0
+        } else {
+            v[((p * (v.len() - 1) as f64) as usize).min(v.len() - 1)]
+        }
     };
 
     println!("Exact token lengths (bge-small tokenizer), window = {MAX_TOKENS}\n");
@@ -83,8 +93,7 @@ fn main() {
         "folder", "notes", "over512", "p50", "p90", "max", "seen%"
     );
 
-    let mut rows: Vec<(String, Vec<usize>)> =
-        per_folder.into_iter().map(|(k, v)| (k, v)).collect();
+    let mut rows: Vec<(String, Vec<usize>)> = per_folder.into_iter().map(|(k, v)| (k, v)).collect();
     rows.sort_by_key(|(_, v)| std::cmp::Reverse(v.len()));
 
     for (folder, mut lens) in rows {
@@ -119,7 +128,10 @@ fn main() {
     // Chunking only pays where the tail is large enough to hold a distinct
     // idea. Notes just over the window lose a sentence, not a section.
     for mult in [1.5f64, 2.0, 4.0] {
-        let c = all.iter().filter(|&&t| t as f64 > MAX_TOKENS as f64 * mult).count();
+        let c = all
+            .iter()
+            .filter(|&&t| t as f64 > MAX_TOKENS as f64 * mult)
+            .count();
         println!(
             "  over {}x the window: {c} notes ({:.1}%)",
             mult,

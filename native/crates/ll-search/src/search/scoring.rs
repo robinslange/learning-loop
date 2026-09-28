@@ -1,20 +1,21 @@
-pub use ll_core::scoring::{
-    PrfParams,
-    dot_product,
-    add_ranked_rrf, add_weighted_rrf, finalize_rrf,
-    FusionWeights,
-    collect_seeds, rocchio_prf_with,
-};
 use ll_core::scoring::VAULT_FTS;
+pub use ll_core::scoring::{
+    add_ranked_rrf, add_weighted_rrf, collect_seeds, dot_product, finalize_rrf, rocchio_prf_with,
+    FusionWeights, PrfParams,
+};
 
-pub(crate) fn fts_bm25_query(conn: &rusqlite::Connection, query: &str, limit: usize) -> Vec<(i64, String, f64)> {
+pub(crate) fn fts_bm25_query(
+    conn: &rusqlite::Connection,
+    query: &str,
+    limit: usize,
+) -> Vec<(i64, String, f64)> {
     ll_core::scoring::fts_bm25_query(conn, query, limit, &VAULT_FTS)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::test_helpers::helpers::*;
+    use super::*;
     use rusqlite::Connection;
 
     #[test]
@@ -47,7 +48,8 @@ mod tests {
                  tokenize='porter unicode61 remove_diacritics 1'
              );
              INSERT INTO notes_fts(notes_fts) VALUES('rebuild');",
-        ).unwrap();
+        )
+        .unwrap();
 
         let results = fts_bm25_query(&conn, "sleep", 10);
         assert_eq!(results.len(), 1);
@@ -56,9 +58,7 @@ mod tests {
 
     #[test]
     fn test_fts_empty_query() {
-        let conn = create_test_db(&[
-            ("note.md", "note", "content", &norm(&[1.0, 0.0, 0.0])),
-        ]);
+        let conn = create_test_db(&[("note.md", "note", "content", &norm(&[1.0, 0.0, 0.0]))]);
         let results = fts_bm25_query(&conn, "", 10);
         assert!(results.is_empty());
     }

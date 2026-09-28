@@ -239,14 +239,22 @@ mod tests {
     fn the_hubs_list_round_trips() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join("federation")).unwrap();
-        write_readable_vaults(dir.path(), &ReadableVaults {
-            me: key(1),
-            at: 1_000,
-            vault_ids: vec!["v-a".into(), "v-b".into()],
-        }).unwrap();
+        write_readable_vaults(
+            dir.path(),
+            &ReadableVaults {
+                me: key(1),
+                at: 1_000,
+                vault_ids: vec!["v-a".into(), "v-b".into()],
+            },
+        )
+        .unwrap();
 
         let listed = read_readable_vaults(dir.path()).unwrap().unwrap();
-        assert_eq!(listed.me, key(1), "whose list this is survives the round trip");
+        assert_eq!(
+            listed.me,
+            key(1),
+            "whose list this is survives the round trip"
+        );
         assert!(listed.contains("v-a"));
         assert!(listed.contains("v-b"));
         assert!(!listed.contains("v-c"));
@@ -261,11 +269,24 @@ mod tests {
     /// the other.
     #[test]
     fn contains_matches_a_whole_id_and_never_a_prefix_of_one() {
-        let listed = ReadableVaults { me: key(1), at: 1, vault_ids: vec!["v-a".into()] };
+        let listed = ReadableVaults {
+            me: key(1),
+            at: 1,
+            vault_ids: vec!["v-a".into()],
+        };
         assert!(listed.contains("v-a"));
-        assert!(!listed.contains("v-alice"), "a longer id that starts with a listed one");
-        assert!(!listed.contains("v-"), "a shorter id the listed one starts with");
-        assert!(!listed.contains("V-A"), "and it is not case-insensitive either");
+        assert!(
+            !listed.contains("v-alice"),
+            "a longer id that starts with a listed one"
+        );
+        assert!(
+            !listed.contains("v-"),
+            "a shorter id the listed one starts with"
+        );
+        assert!(
+            !listed.contains("V-A"),
+            "and it is not case-insensitive either"
+        );
     }
 
     /// The opposite rule from [`read_state`], and the reason it is opposite:
@@ -278,7 +299,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join("federation")).unwrap();
         std::fs::write(
-            dir.path().join("federation").join("readable-vaults.json"), "{not json").unwrap();
+            dir.path().join("federation").join("readable-vaults.json"),
+            "{not json",
+        )
+        .unwrap();
 
         assert!(read_readable_vaults(dir.path()).unwrap().is_none());
     }
@@ -293,7 +317,11 @@ mod tests {
     /// the clamp a negative age would render as freshness.
     #[test]
     fn age_never_reads_as_negative() {
-        let listed = ReadableVaults { me: key(1), at: 9_000, vault_ids: Vec::new() };
+        let listed = ReadableVaults {
+            me: key(1),
+            at: 9_000,
+            vault_ids: Vec::new(),
+        };
         assert_eq!(listed.age(9_500), 500);
         assert_eq!(listed.age(1_000), 0);
     }
@@ -315,10 +343,13 @@ mod tests {
         std::fs::write(
             dir.path().join("federation").join("readable-vaults.json"),
             r#"{"at":1,"vault_ids":["v-a"]}"#,
-        ).unwrap();
+        )
+        .unwrap();
 
-        assert!(read_readable_vaults(dir.path()).unwrap().is_none(),
-            "a list with no key on it is not this key's list");
+        assert!(
+            read_readable_vaults(dir.path()).unwrap().is_none(),
+            "a list with no key on it is not this key's list"
+        );
     }
 
     /// `deny_unknown_fields`, in the direction it is there for: an older
@@ -328,9 +359,15 @@ mod tests {
     fn a_list_file_carrying_a_field_this_build_does_not_know_reads_as_absent() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join("federation")).unwrap();
-        write_readable_vaults(dir.path(), &ReadableVaults {
-            me: key(1), at: 1, vault_ids: vec!["v-a".into()],
-        }).unwrap();
+        write_readable_vaults(
+            dir.path(),
+            &ReadableVaults {
+                me: key(1),
+                at: 1,
+                vault_ids: vec!["v-a".into()],
+            },
+        )
+        .unwrap();
         let path = readable_vaults_path(dir.path());
         let mut v: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
@@ -345,9 +382,15 @@ mod tests {
     #[test]
     fn the_list_on_disk_carries_the_key_it_was_answered_for() {
         let dir = tempfile::tempdir().unwrap();
-        write_readable_vaults(dir.path(), &ReadableVaults {
-            me: key(1), at: 1_000, vault_ids: vec!["v-a".into()],
-        }).unwrap();
+        write_readable_vaults(
+            dir.path(),
+            &ReadableVaults {
+                me: key(1),
+                at: 1_000,
+                vault_ids: vec!["v-a".into()],
+            },
+        )
+        .unwrap();
 
         let raw = std::fs::read_to_string(readable_vaults_path(dir.path())).unwrap();
         let v: serde_json::Value = serde_json::from_str(&raw).unwrap();
@@ -361,17 +404,22 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join("federation")).unwrap();
 
-        write_state(dir.path(), &SyncState {
-            last_attempt_at: 1_000, last_success_at: None,
-            outcome: "error".into(),
-            detail: Some("hub key mismatch".into()),
-            hub_holds: None,
-            skipped_fetches: None,
-            refused_grants: None,
-            consecutive_failures: None,
-            first_failure_at: None,
-            terminal: None,
-        }).unwrap();
+        write_state(
+            dir.path(),
+            &SyncState {
+                last_attempt_at: 1_000,
+                last_success_at: None,
+                outcome: "error".into(),
+                detail: Some("hub key mismatch".into()),
+                hub_holds: None,
+                skipped_fetches: None,
+                refused_grants: None,
+                consecutive_failures: None,
+                first_failure_at: None,
+                terminal: None,
+            },
+        )
+        .unwrap();
 
         let s = read_state(dir.path()).unwrap().unwrap();
         assert_eq!(s.outcome, "error");
@@ -384,18 +432,26 @@ mod tests {
     fn state_records_that_the_hub_holds_nothing() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join("federation")).unwrap();
-        write_state(dir.path(), &SyncState {
-            last_attempt_at: 1_000, last_success_at: Some(1_000),
-            outcome: "ok".into(), detail: None,
-            hub_holds: Some(HubHolds::Nothing),
-            skipped_fetches: None,
-            refused_grants: None,
-            consecutive_failures: None,
-            first_failure_at: None,
-            terminal: None,
-        }).unwrap();
-        assert_eq!(read_state(dir.path()).unwrap().unwrap().hub_holds,
-                   Some(HubHolds::Nothing));
+        write_state(
+            dir.path(),
+            &SyncState {
+                last_attempt_at: 1_000,
+                last_success_at: Some(1_000),
+                outcome: "ok".into(),
+                detail: None,
+                hub_holds: Some(HubHolds::Nothing),
+                skipped_fetches: None,
+                refused_grants: None,
+                consecutive_failures: None,
+                first_failure_at: None,
+                terminal: None,
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            read_state(dir.path()).unwrap().unwrap().hub_holds,
+            Some(HubHolds::Nothing)
+        );
     }
 
     #[test]
@@ -410,37 +466,55 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join("federation")).unwrap();
         std::fs::write(dir.path().join("federation/sync-state.json"), "{not json").unwrap();
-        assert!(read_state(dir.path()).unwrap().is_none(),
-            "a bad state file must not break the sync that would rewrite it");
+        assert!(
+            read_state(dir.path()).unwrap().is_none(),
+            "a bad state file must not break the sync that would rewrite it"
+        );
     }
 
     #[test]
     fn a_cycle_that_fails_before_anything_creates_federation_still_records() {
         let dir = tempfile::tempdir().unwrap();
-        assert!(!dir.path().join("federation").exists(), "precondition: a cold config dir");
+        assert!(
+            !dir.path().join("federation").exists(),
+            "precondition: a cold config dir"
+        );
 
-        write_state(dir.path(), &SyncState {
-            last_attempt_at: 1_000, last_success_at: None,
-            outcome: OUTCOME_ERROR.into(),
-            detail: Some("no federation seed found".into()),
-            hub_holds: None,
-            skipped_fetches: None,
-            refused_grants: None,
-            consecutive_failures: None,
-            first_failure_at: None,
-            terminal: None,
-        }).unwrap();
+        write_state(
+            dir.path(),
+            &SyncState {
+                last_attempt_at: 1_000,
+                last_success_at: None,
+                outcome: OUTCOME_ERROR.into(),
+                detail: Some("no federation seed found".into()),
+                hub_holds: None,
+                skipped_fetches: None,
+                refused_grants: None,
+                consecutive_failures: None,
+                first_failure_at: None,
+                terminal: None,
+            },
+        )
+        .unwrap();
 
-        assert_eq!(read_state(dir.path()).unwrap().unwrap().outcome, OUTCOME_ERROR);
+        assert_eq!(
+            read_state(dir.path()).unwrap().unwrap().outcome,
+            OUTCOME_ERROR
+        );
     }
 
     #[test]
     fn a_second_write_replaces_the_first_and_leaves_it_readable() {
         let dir = tempfile::tempdir().unwrap();
         let first = SyncState {
-            last_attempt_at: 1_000, last_success_at: Some(1_000),
-            outcome: OUTCOME_OK.into(), detail: None,
-            hub_holds: Some(HubHolds::Index { sha256: "abc".into(), note_count: 1 }),
+            last_attempt_at: 1_000,
+            last_success_at: Some(1_000),
+            outcome: OUTCOME_OK.into(),
+            detail: None,
+            hub_holds: Some(HubHolds::Index {
+                sha256: "abc".into(),
+                note_count: 1,
+            }),
             skipped_fetches: None,
             refused_grants: None,
             consecutive_failures: None,
@@ -449,8 +523,10 @@ mod tests {
         };
         write_state(dir.path(), &first).unwrap();
         let second = SyncState {
-            last_attempt_at: 2_000, last_success_at: Some(1_000),
-            outcome: OUTCOME_ERROR.into(), detail: Some("hub unreachable".into()),
+            last_attempt_at: 2_000,
+            last_success_at: Some(1_000),
+            outcome: OUTCOME_ERROR.into(),
+            detail: Some("hub unreachable".into()),
             hub_holds: None,
             skipped_fetches: None,
             refused_grants: None,
@@ -465,8 +541,11 @@ mod tests {
             .unwrap()
             .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
             .collect();
-        assert_eq!(left, vec!["sync-state.json".to_string()],
-            "each write renames its temp file into place; none is left beside the target");
+        assert_eq!(
+            left,
+            vec!["sync-state.json".to_string()],
+            "each write renames its temp file into place; none is left beside the target"
+        );
     }
 
     /// Every other test here builds a `SyncState` in Rust and round-trips it
@@ -489,13 +568,22 @@ mod tests {
         )
         .unwrap();
 
-        let s = read_state(dir.path()).unwrap().expect("an old state file is not a missing one");
-        assert_eq!(s.last_success_at, Some(900),
-            "the history this file exists to carry survives the upgrade");
-        assert_eq!(s.skipped_fetches, None,
-            "a cycle that ran before the read half existed skipped an unknown number, not zero");
-        assert_eq!(s.refused_grants, None,
-            "and one that ran before the link half existed refused an unknown number too");
+        let s = read_state(dir.path())
+            .unwrap()
+            .expect("an old state file is not a missing one");
+        assert_eq!(
+            s.last_success_at,
+            Some(900),
+            "the history this file exists to carry survives the upgrade"
+        );
+        assert_eq!(
+            s.skipped_fetches, None,
+            "a cycle that ran before the read half existed skipped an unknown number, not zero"
+        );
+        assert_eq!(
+            s.refused_grants, None,
+            "and one that ran before the link half existed refused an unknown number too"
+        );
     }
 
     /// The file is a contract with every reader of `federation/`, not just
@@ -503,48 +591,71 @@ mod tests {
     #[test]
     fn the_file_on_disk_carries_the_hubs_count_under_a_tagged_hub_holds() {
         let dir = tempfile::tempdir().unwrap();
-        write_state(dir.path(), &SyncState {
-            last_attempt_at: 1_000, last_success_at: Some(1_000),
-            outcome: OUTCOME_OK.into(), detail: None,
-            hub_holds: Some(HubHolds::Index { sha256: "abc123".into(), note_count: 3578 }),
-            skipped_fetches: Some(2),
-            refused_grants: Some(1),
-            consecutive_failures: None,
-            first_failure_at: None,
-            terminal: None,
-        }).unwrap();
+        write_state(
+            dir.path(),
+            &SyncState {
+                last_attempt_at: 1_000,
+                last_success_at: Some(1_000),
+                outcome: OUTCOME_OK.into(),
+                detail: None,
+                hub_holds: Some(HubHolds::Index {
+                    sha256: "abc123".into(),
+                    note_count: 3578,
+                }),
+                skipped_fetches: Some(2),
+                refused_grants: Some(1),
+                consecutive_failures: None,
+                first_failure_at: None,
+                terminal: None,
+            },
+        )
+        .unwrap();
 
-        assert!(dir.path().join("federation/sync-state.json").exists(),
+        assert!(
+            dir.path().join("federation/sync-state.json").exists(),
             "every reader of federation/ finds this file by name; without this the \
-             path helper is free to move it and only the readers would find out");
+             path helper is free to move it and only the readers would find out"
+        );
         let raw = std::fs::read_to_string(sync_state_path(dir.path())).unwrap();
         let v: serde_json::Value = serde_json::from_str(&raw).unwrap();
         assert_eq!(v["outcome"], "ok");
         assert_eq!(v["hub_holds"]["kind"], "index");
         assert_eq!(v["hub_holds"]["sha256"], "abc123");
         assert_eq!(v["hub_holds"]["note_count"], 3578);
-        assert_eq!(v["skipped_fetches"], 2,
+        assert_eq!(
+            v["skipped_fetches"], 2,
             "`ll status` reads this key out of the file; a rename that only touched \
-             the struct would leave every out-of-process reader behind");
+             the struct would leave every out-of-process reader behind"
+        );
         assert_eq!(v["refused_grants"], 1, "same contract, same reason");
-        assert!(v.get("note_count").is_none(),
+        assert!(
+            v.get("note_count").is_none(),
             "the count lives inside hub_holds; a loose one beside it is the field \
-             that let 'holds nothing' and 'holds 3578 notes' be recorded together");
+             that let 'holds nothing' and 'holds 3578 notes' be recorded together"
+        );
 
-        write_state(dir.path(), &SyncState {
-            last_attempt_at: 1_000, last_success_at: Some(1_000),
-            outcome: OUTCOME_OK.into(), detail: None,
-            hub_holds: Some(HubHolds::Nothing),
-            skipped_fetches: None,
-            refused_grants: None,
-            consecutive_failures: None,
-            first_failure_at: None,
-            terminal: None,
-        }).unwrap();
+        write_state(
+            dir.path(),
+            &SyncState {
+                last_attempt_at: 1_000,
+                last_success_at: Some(1_000),
+                outcome: OUTCOME_OK.into(),
+                detail: None,
+                hub_holds: Some(HubHolds::Nothing),
+                skipped_fetches: None,
+                refused_grants: None,
+                consecutive_failures: None,
+                first_failure_at: None,
+                terminal: None,
+            },
+        )
+        .unwrap();
         let raw = std::fs::read_to_string(sync_state_path(dir.path())).unwrap();
         let v: serde_json::Value = serde_json::from_str(&raw).unwrap();
-        assert_eq!(v["hub_holds"]["kind"], "nothing",
+        assert_eq!(
+            v["hub_holds"]["kind"], "nothing",
             "the outage signature is the one tag an out-of-process reader must not \
-             have renamed under it");
+             have renamed under it"
+        );
     }
 }

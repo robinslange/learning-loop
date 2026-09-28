@@ -2,8 +2,8 @@ use std::sync::OnceLock;
 
 use anyhow::Context as _;
 
-use crate::model::{EmbeddingProvider, KnownModel};
 use crate::model::loader;
+use crate::model::{EmbeddingProvider, KnownModel};
 
 static PROVIDER: OnceLock<Box<dyn EmbeddingProvider>> = OnceLock::new();
 
@@ -32,11 +32,15 @@ fn initialized() -> anyhow::Result<&'static dyn EmbeddingProvider> {
 }
 
 pub fn embed_query(text: &str) -> anyhow::Result<Vec<f32>> {
-    initialized()?.embed_query(text).context("embed_query failed")
+    initialized()?
+        .embed_query(text)
+        .context("embed_query failed")
 }
 
 pub fn embed_documents(texts: &[String]) -> anyhow::Result<Vec<Vec<f32>>> {
-    initialized()?.embed_documents(texts).context("embed_documents failed")
+    initialized()?
+        .embed_documents(texts)
+        .context("embed_documents failed")
 }
 
 #[cfg(test)]

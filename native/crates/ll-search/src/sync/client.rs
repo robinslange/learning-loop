@@ -1,11 +1,11 @@
-use std::path::Path;
-use std::time::Duration;
 use anyhow::Context;
 use ed25519_dalek::SigningKey;
 use futures_util::{SinkExt, StreamExt};
 use rusqlite::Connection;
 use serde::Serialize;
-use sha2::{Sha256, Digest};
+use sha2::{Digest, Sha256};
+use std::path::Path;
+use std::time::Duration;
 use tokio_tungstenite::tungstenite::http::Uri;
 use tokio_tungstenite::tungstenite::Message;
 
@@ -65,9 +65,8 @@ fn send_timeout() -> Duration {
     *RESOLVED.get_or_init(|| env_millis("LL_SYNC_SEND_TIMEOUT_MS", SEND_TIMEOUT))
 }
 
-pub(super) type WsStream = tokio_tungstenite::WebSocketStream<
-    tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
->;
+pub(super) type WsStream =
+    tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
 
 /// The hub endpoint, parsed once, for everything that needs a piece of it.
 ///
@@ -104,7 +103,9 @@ pub(super) struct HubUrl {
 /// spellings of one host are reconciled — once, so that comparing a host from
 /// here against a host from anywhere else compares hosts and not notations.
 fn unbracket(host: &str) -> &str {
-    host.strip_prefix('[').and_then(|h| h.strip_suffix(']')).unwrap_or(host)
+    host.strip_prefix('[')
+        .and_then(|h| h.strip_suffix(']'))
+        .unwrap_or(host)
 }
 
 impl HubUrl {
@@ -119,9 +120,9 @@ impl HubUrl {
             Some(other) => anyhow::bail!(
                 "unsupported hub scheme {other:?} in {endpoint:?}; federation requires wss://"
             ),
-            None => anyhow::bail!(
-                "hub endpoint {endpoint:?} has no scheme; federation requires wss://"
-            ),
+            None => {
+                anyhow::bail!("hub endpoint {endpoint:?} has no scheme; federation requires wss://")
+            }
         };
         let authority = uri
             .authority()
@@ -142,7 +143,11 @@ impl HubUrl {
             host: host.to_string(),
             port: uri.port_u16().unwrap_or(if tls { 443 } else { 80 }),
             authority: authority.as_str().to_string(),
-            path_and_query: uri.path_and_query().map(|p| p.as_str()).unwrap_or("/").to_string(),
+            path_and_query: uri
+                .path_and_query()
+                .map(|p| p.as_str())
+                .unwrap_or("/")
+                .to_string(),
         })
     }
 
@@ -272,24 +277,32 @@ pub async fn sync_all_async(
             prev.as_ref().and_then(|p| p.last_success_at),
             None,
             None,
-            Some(prev.as_ref().and_then(|p| p.consecutive_failures).unwrap_or(0) + 1),
+            Some(
+                prev.as_ref()
+                    .and_then(|p| p.consecutive_failures)
+                    .unwrap_or(0)
+                    + 1,
+            ),
             prev.as_ref().and_then(|p| p.first_failure_at).or(Some(now)),
             Some(SyncError::is_terminal(e)),
         ),
     };
     // Failing to record the cycle must never mask the cycle's own error.
-    let _ = state::write_state(config_dir, &SyncState {
-        last_attempt_at: now,
-        last_success_at,
-        outcome: outcome_label.to_string(),
-        detail,
-        hub_holds: known_holds,
-        skipped_fetches,
-        refused_grants,
-        consecutive_failures,
-        first_failure_at,
-        terminal,
-    });
+    let _ = state::write_state(
+        config_dir,
+        &SyncState {
+            last_attempt_at: now,
+            last_success_at,
+            outcome: outcome_label.to_string(),
+            detail,
+            hub_holds: known_holds,
+            skipped_fetches,
+            refused_grants,
+            consecutive_failures,
+            first_failure_at,
+            terminal,
+        },
+    );
 
     outcome
 }
@@ -338,11 +351,13 @@ fn upload_plan(
         return Ok(UploadPlan::SingleFrame);
     }
     let Some(l) = limits else {
-        return Err(anyhow::Error::new(SyncError::EnvelopeOversize { cap: HUB_INBOUND_CAP })
-            .context(format!(
-                "the export is {export_len} bytes, one frame holds {HUB_INBOUND_CAP}, and this \
+        return Err(anyhow::Error::new(SyncError::EnvelopeOversize {
+            cap: HUB_INBOUND_CAP,
+        })
+        .context(format!(
+            "the export is {export_len} bytes, one frame holds {HUB_INBOUND_CAP}, and this \
                  hub did not offer chunked upload. Retrying will not change this"
-            )));
+        )));
     };
     let chunk_bytes = (l.max_chunk_bytes as usize).min(CHUNK_MAX_BODY_SIZE);
     if chunk_bytes == 0 {
@@ -420,10 +435,11 @@ async fn run_cycle(
     // And the deletions before any of the network half. Spec:334 is not
     // best-effort: a cycle that dies uploading must still have stopped
     // serving what it no longer holds a grant for.
-    let swept: Vec<String> = grants::apply_revocations(config_dir, &ready.revocations, &me, unix_now())?
-        .into_iter()
-        .chain(grants::prune_expired(config_dir, &me, unix_now())?)
-        .collect();
+    let swept: Vec<String> =
+        grants::apply_revocations(config_dir, &ready.revocations, &me, unix_now())?
+            .into_iter()
+            .chain(grants::prune_expired(config_dir, &me, unix_now())?)
+            .collect();
     for vault_id in &swept {
         eprintln!("Removed the cached index for {vault_id}: the grant behind it is gone");
     }
@@ -451,16 +467,27 @@ async fn run_cycle(
     // longer lists. And stamped with `at`, because how old this answer is is
     // the only honest thing a long-offline machine can say about it.
     let listed_at = unix_now();
-    state::write_readable_vaults(config_dir, &state::ReadableVaults {
-        me: me.clone(),
-        at: listed_at,
-        vault_ids: super::fetch::readable_vaults(
-            &ready.vault_state, &ready.grants, &me, vault_id, listed_at,
-        ),
-    })?;
+    state::write_readable_vaults(
+        config_dir,
+        &state::ReadableVaults {
+            me: me.clone(),
+            at: listed_at,
+            vault_ids: super::fetch::readable_vaults(
+                &ready.vault_state,
+                &ready.grants,
+                &me,
+                vault_id,
+                listed_at,
+            ),
+        },
+    )?;
 
     let uploaded = upload_index(
-        &mut ws, config_dir, vault_id, this_vault, &prepared,
+        &mut ws,
+        config_dir,
+        vault_id,
+        this_vault,
+        &prepared,
         ready.chunked_upload.as_ref(),
     )
     .await?;
@@ -470,9 +497,16 @@ async fn run_cycle(
     // handshake, less this one. Nothing here asks it to list anything, and
     // nothing here derives the list from a grant: a `link` is unscoped, so a
     // client that tried would read nothing on a machine that was just linked.
-    let read =
-        fetch_all(&mut ws, config_dir, &ready.vault_state, &ready.grants, &me, vault_id, unix_now())
-            .await?;
+    let read = fetch_all(
+        &mut ws,
+        config_dir,
+        &ready.vault_state,
+        &ready.grants,
+        &me,
+        vault_id,
+        unix_now(),
+    )
+    .await?;
 
     let _ = ws.close(None).await;
     eprintln!("Sync complete");
@@ -542,7 +576,10 @@ async fn prepare_export(
         })
         .await
         .map_err(|e| anyhow::anyhow!("export task panicked: {e}"))??;
-        eprintln!("Export complete: {} exported, {} skipped", result.exported, result.skipped);
+        eprintln!(
+            "Export complete: {} exported, {} skipped",
+            result.exported, result.skipped
+        );
         if result.unindexed > 0 {
             eprintln!(
                 "  {} note(s) carry no stable id and were not considered. They are not \
@@ -575,27 +612,26 @@ async fn prepare_export(
     // from disk, a re-index in between would make the source's `model_id`
     // describe different bytes than the ones on the wire.
     let export_owned = export_path.clone();
-    let (note_count, schema_version, model_id) = tokio::task::spawn_blocking(
-        move || -> anyhow::Result<(i64, String, String)> {
+    let (note_count, schema_version, model_id) =
+        tokio::task::spawn_blocking(move || -> anyhow::Result<(i64, String, String)> {
             let export = Connection::open_with_flags(
                 &export_owned,
                 rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
             )?;
             let meta = |key: &str| -> anyhow::Result<String> {
-                Ok(export.query_row(
-                    "SELECT value FROM meta WHERE key = ?1",
-                    [key],
-                    |r| r.get::<_, String>(0),
-                )?)
+                Ok(
+                    export.query_row("SELECT value FROM meta WHERE key = ?1", [key], |r| {
+                        r.get::<_, String>(0)
+                    })?,
+                )
             };
             let note_count = meta("note_count")?
                 .parse()
                 .context("export meta note_count is not an integer")?;
             Ok((note_count, meta("schema_version")?, meta("model_id")?))
-        },
-    )
-    .await
-    .map_err(|e| anyhow::anyhow!("export meta lookup panicked: {e}"))??;
+        })
+        .await
+        .map_err(|e| anyhow::anyhow!("export meta lookup panicked: {e}"))??;
 
     Ok(PreparedExport {
         bytes,
@@ -691,9 +727,10 @@ pub(super) async fn connect_and_authenticate(
     let exporter = channel_binding(&ws, insecure_ws_allowed())?;
 
     let vault_ids: Vec<String> = config.vault_id.clone().into_iter().collect();
-    let ready =
-        super::handshake::authenticate(&mut ws, seed, config, &vault_ids, &exporter, model_id, invite)
-            .await?;
+    let ready = super::handshake::authenticate(
+        &mut ws, seed, config, &vault_ids, &exporter, model_id, invite,
+    )
+    .await?;
     eprintln!("Authenticated (protocol v{})", ready.protocol_version);
 
     Ok((ws, ready))
@@ -735,7 +772,10 @@ fn this_vault_state<'c, 'v>(
     let vault_id = config.vault_id.as_deref().ok_or_else(|| {
         anyhow::anyhow!("no vault_id in this federation config; run `ll join` in this vault")
     })?;
-    Ok((vault_id, vault_state.iter().find(|v| v.vault_id == vault_id)))
+    Ok((
+        vault_id,
+        vault_state.iter().find(|v| v.vault_id == vault_id),
+    ))
 }
 
 /// What the upload half did, and what the hub holds once it has done it.
@@ -784,14 +824,17 @@ async fn upload_index(
 
     let plan = upload_plan(prepared.bytes.len(), chunked_upload)?;
 
-    send_json(ws, &ClientMsg::UploadIndex {
-        vault_id: vault_id.to_string(),
-        sha256: prepared.hash.clone(),
-        note_count: prepared.note_count,
-        schema_version: prepared.schema_version.clone(),
-        model_id: prepared.model_id.clone(),
-        chunked: plan.declaration(&prepared.bytes),
-    })
+    send_json(
+        ws,
+        &ClientMsg::UploadIndex {
+            vault_id: vault_id.to_string(),
+            sha256: prepared.hash.clone(),
+            note_count: prepared.note_count,
+            schema_version: prepared.schema_version.clone(),
+            model_id: prepared.model_id.clone(),
+            chunked: plan.declaration(&prepared.bytes),
+        },
+    )
     .await?;
     match plan {
         UploadPlan::SingleFrame => send_binary(ws, prepared.bytes.clone()).await?,
@@ -982,8 +1025,8 @@ pub(super) async fn recv_binary(ws: &mut WsStream) -> anyhow::Result<Vec<u8>> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::protocol_v5::HeldIndex;
+    use super::*;
 
     /// Every `ws://` case in this module needs the escape hatch in a known
     /// state, and a test binary is one process: taking the same lock
@@ -1004,7 +1047,9 @@ mod tests {
     #[test]
     fn check_hub_scheme_rejects_cleartext_ws() {
         let _env = without_the_escape_hatch();
-        let err = check_hub_scheme("ws://hub.example.com/ws").unwrap_err().to_string();
+        let err = check_hub_scheme("ws://hub.example.com/ws")
+            .unwrap_err()
+            .to_string();
         assert!(err.contains("ws://"), "error should name the scheme: {err}");
         assert!(check_hub_scheme("http://hub.example.com").is_err());
         assert!(check_hub_scheme("hub.example.com").is_err());
@@ -1027,14 +1072,21 @@ mod tests {
             "ws://100.101.102.103:8787",
             "ws://my-hub.tailnet-name.ts.net:8787",
         ] {
-            assert!(check_hub_scheme(endpoint).is_err(),
-                "no host is exempt from the TLS requirement: {endpoint}");
+            assert!(
+                check_hub_scheme(endpoint).is_err(),
+                "no host is exempt from the TLS requirement: {endpoint}"
+            );
         }
 
         std::env::set_var("LL_ALLOW_INSECURE_WS", "1");
-        for endpoint in ["ws://127.0.0.1:8080/ws", "ws://my-hub.tailnet-name.ts.net:8787"] {
-            assert!(check_hub_scheme(endpoint).is_ok(),
-                "the harness switch lifts it for every host, not a list of them: {endpoint}");
+        for endpoint in [
+            "ws://127.0.0.1:8080/ws",
+            "ws://my-hub.tailnet-name.ts.net:8787",
+        ] {
+            assert!(
+                check_hub_scheme(endpoint).is_ok(),
+                "the harness switch lifts it for every host, not a list of them: {endpoint}"
+            );
         }
         std::env::remove_var("LL_ALLOW_INSECURE_WS");
     }
@@ -1060,9 +1112,14 @@ mod tests {
             .expect_err("cleartext ws:// must not reach the socket")
             .to_string();
 
-        assert!(err.contains("wss://"), "the scheme rule is what refused: {err}");
-        assert!(!err.contains("failed to connect to hub"),
-            "and it refused before anything was dialled: {err}");
+        assert!(
+            err.contains("wss://"),
+            "the scheme rule is what refused: {err}"
+        );
+        assert!(
+            !err.contains("failed to connect to hub"),
+            "and it refused before anything was dialled: {err}"
+        );
     }
 
     // -----------------------------------------------------------------
@@ -1101,7 +1158,9 @@ mod tests {
             "wss://[::1]:8443/ws",
             "wss://127.0.0.1:9000",
         ] {
-            let Ok(parsed) = HubUrl::parse(endpoint) else { continue };
+            let Ok(parsed) = HubUrl::parse(endpoint) else {
+                continue;
+            };
             assert_eq!(
                 Some(parsed.host.clone()),
                 dialer_host(endpoint),
@@ -1120,9 +1179,11 @@ mod tests {
             "wss://legit.hub.example@evil.example.com/ws",
         ] {
             let err = HubUrl::parse(endpoint).unwrap_err().to_string();
-            assert!(err.contains("userinfo"),
+            assert!(
+                err.contains("userinfo"),
                 "{endpoint:?} must be refused for naming two hosts, not for some \
-                 incidental reason: {err}");
+                 incidental reason: {err}"
+            );
         }
     }
 
@@ -1137,7 +1198,10 @@ mod tests {
             "wss://hub.example\r\nEvil: injected/ws",
             "wss://hub.example\n/ws",
         ] {
-            assert!(HubUrl::parse(endpoint).is_err(), "{endpoint:?} must not parse");
+            assert!(
+                HubUrl::parse(endpoint).is_err(),
+                "{endpoint:?} must not parse"
+            );
         }
     }
 
@@ -1148,13 +1212,19 @@ mod tests {
     /// and by accident.
     #[test]
     fn only_ws_and_wss_are_hub_schemes() {
-        for endpoint in ["http://hub.example", "https://hub.example", "ftp://hub.example"] {
+        for endpoint in [
+            "http://hub.example",
+            "https://hub.example",
+            "ftp://hub.example",
+        ] {
             let err = HubUrl::parse(endpoint).unwrap_err().to_string();
             assert!(err.contains("scheme"), "{endpoint:?}: {err}");
         }
         assert!(HubUrl::parse("wss://hub.example").is_ok());
-        assert!(HubUrl::parse("ws://hub.example").is_ok(),
-            "positive control: the parse itself has no opinion about ws://");
+        assert!(
+            HubUrl::parse("ws://hub.example").is_ok(),
+            "positive control: the parse itself has no opinion about ws://"
+        );
     }
 
     /// `http::Uri` accepts an authority that is nothing but a port, and
@@ -1233,8 +1303,11 @@ mod tests {
         assert_eq!(ws_uri("wss://hub.example"), "wss://hub.example/ws");
         assert_eq!(ws_uri("wss://hub.example/"), "wss://hub.example/ws");
         assert_eq!(ws_uri("wss://hub.example/ws"), "wss://hub.example/ws");
-        assert_eq!(ws_uri("wss://[::1]:8443/ws"), "wss://[::1]:8443/ws",
-            "a bracketed IPv6 authority survives the round trip with its brackets");
+        assert_eq!(
+            ws_uri("wss://[::1]:8443/ws"),
+            "wss://[::1]:8443/ws",
+            "a bracketed IPv6 authority survives the round trip with its brackets"
+        );
     }
 
     #[test]
@@ -1249,7 +1322,8 @@ mod tests {
 
         let bracketed = HubUrl::parse("wss://[::1]:8443/ws").unwrap();
         assert_eq!((bracketed.host.as_str(), bracketed.port), ("::1", 8443));
-        assert_eq!(bracketed.authority, "[::1]:8443",
+        assert_eq!(
+            bracketed.authority, "[::1]:8443",
             "the Host header keeps the brackets and the port",
         );
     }
@@ -1262,49 +1336,69 @@ mod tests {
         let mitm = concat!("MITM", "-vulnerable");
         let src = include_str!("client.rs");
         assert!(!src.contains(no_auth));
-        assert!(!src.contains(mitm),
-            "an unpinned hub is now an error, so there is nothing left to warn about");
+        assert!(
+            !src.contains(mitm),
+            "an unpinned hub is now an error, so there is nothing left to warn about"
+        );
     }
 
-
     fn held(sha256: &str) -> HeldIndex {
-        HeldIndex { sha256: sha256.into(), note_count: 10, uploaded_at: 1 }
+        HeldIndex {
+            sha256: sha256.into(),
+            note_count: 10,
+            uploaded_at: 1,
+        }
     }
 
     #[test]
     fn uploads_when_the_hub_holds_nothing_even_if_the_local_hash_matches() {
-        let decision = upload_decision("abc123", Some(&VaultState {
-            vault_id: "v1".into(),
-            holds: None,
-        }));
+        let decision = upload_decision(
+            "abc123",
+            Some(&VaultState {
+                vault_id: "v1".into(),
+                holds: None,
+            }),
+        );
 
-        assert_eq!(decision, UploadDecision::Upload,
+        assert_eq!(
+            decision,
+            UploadDecision::Upload,
             "THE 2026-07 OUTAGE: the client said 'no changes' from its own file \
-             while the hub held nothing, for two months, at INFO level");
+             while the hub held nothing, for two months, at INFO level"
+        );
     }
 
     #[test]
     fn skips_only_when_the_hub_confirms_it_holds_this_exact_index() {
-        let decision = upload_decision("abc123", Some(&VaultState {
-            vault_id: "v1".into(),
-            holds: Some(held("abc123")),
-        }));
+        let decision = upload_decision(
+            "abc123",
+            Some(&VaultState {
+                vault_id: "v1".into(),
+                holds: Some(held("abc123")),
+            }),
+        );
         assert_eq!(decision, UploadDecision::Skip);
     }
 
     #[test]
     fn uploads_when_the_hub_holds_a_different_index() {
-        let decision = upload_decision("abc123", Some(&VaultState {
-            vault_id: "v1".into(),
-            holds: Some(held("stale999")),
-        }));
+        let decision = upload_decision(
+            "abc123",
+            Some(&VaultState {
+                vault_id: "v1".into(),
+                holds: Some(held("stale999")),
+            }),
+        );
         assert_eq!(decision, UploadDecision::Upload);
     }
 
     #[test]
     fn uploads_when_the_hub_does_not_mention_this_vault_at_all() {
-        assert_eq!(upload_decision("abc123", None), UploadDecision::Upload,
-            "a hub that never mentions the vault has not confirmed it holds the index");
+        assert_eq!(
+            upload_decision("abc123", None),
+            UploadDecision::Upload,
+            "a hub that never mentions the vault has not confirmed it holds the index"
+        );
     }
 
     /// The positive control deliberately looks for a token that exists only
@@ -1315,12 +1409,19 @@ mod tests {
     fn the_local_hash_file_is_never_consulted_for_the_decision() {
         let src = include_str!("client.rs");
         let idx = src.find("pub fn upload_decision").expect("function exists");
-        let body = src[idx..].split("\n}\n").next().expect("function has a closing brace");
-        assert!(body.contains("UploadDecision::Skip"),
+        let body = src[idx..]
+            .split("\n}\n")
+            .next()
+            .expect("function has a closing brace");
+        assert!(
+            body.contains("UploadDecision::Skip"),
             "positive control: if this slice missed the function body, the assertion below \
-             would pass by reading nothing");
-        assert!(!body.contains("last-export-hash"),
-            "the upload decision must depend only on what the hub reports");
+             would pass by reading nothing"
+        );
+        assert!(
+            !body.contains("last-export-hash"),
+            "the upload decision must depend only on what the hub reports"
+        );
     }
 
     type WsServer = tokio_tungstenite::WebSocketStream<tokio::net::TcpStream>;
@@ -1356,7 +1457,10 @@ mod tests {
     }
 
     async fn client_to(addr: std::net::SocketAddr) -> WsStream {
-        tokio_tungstenite::connect_async(format!("ws://{addr}")).await.unwrap().0
+        tokio_tungstenite::connect_async(format!("ws://{addr}"))
+            .await
+            .unwrap()
+            .0
     }
 
     #[tokio::test]
@@ -1374,11 +1478,21 @@ mod tests {
                 other => panic!("expected one raw binary frame, got {other:?}"),
             };
             let ClientMsg::UploadIndex {
-            chunked: None, ref vault_id, ref sha256, .. } = declared else {
+                chunked: None,
+                ref vault_id,
+                ref sha256,
+                ..
+            } = declared
+            else {
                 panic!("expected upload-index, got {declared:?}")
             };
-            let ack = HubMsg::UploadAck { vault_id: vault_id.clone(), sha256: sha256.clone() };
-            ws.send(Message::text(serde_json::to_string(&ack).unwrap())).await.unwrap();
+            let ack = HubMsg::UploadAck {
+                vault_id: vault_id.clone(),
+                sha256: sha256.clone(),
+            };
+            ws.send(Message::text(serde_json::to_string(&ack).unwrap()))
+                .await
+                .unwrap();
             let _ = tx.send((declared, frame));
         })
         .await;
@@ -1403,11 +1517,19 @@ mod tests {
         );
 
         let (declared, frame) = rx.await.unwrap();
-        assert_eq!(frame, body,
-            "the hub runs Sha256 over exactly this frame: no envelope header, no zstd, no chunking");
+        assert_eq!(
+            frame, body,
+            "the hub runs Sha256 over exactly this frame: no envelope header, no zstd, no chunking"
+        );
         match declared {
             ClientMsg::UploadIndex {
-            chunked: None, vault_id, sha256, note_count, schema_version, model_id } => {
+                chunked: None,
+                vault_id,
+                sha256,
+                note_count,
+                schema_version,
+                model_id,
+            } => {
                 assert_eq!(vault_id, "v1");
                 assert_eq!(sha256, expected_hash);
                 assert_eq!(note_count, 42);
@@ -1423,8 +1545,12 @@ mod tests {
         let addr = spawn_mock_hub(|mut ws| async move {
             let _decl = ws.next().await;
             let _frame = ws.next().await;
-            let reject = HubMsg::Reject { reason: "not authorized to write this vault".into() };
-            ws.send(Message::text(serde_json::to_string(&reject).unwrap())).await.unwrap();
+            let reject = HubMsg::Reject {
+                reason: "not authorized to write this vault".into(),
+            };
+            ws.send(Message::text(serde_json::to_string(&reject).unwrap()))
+                .await
+                .unwrap();
         })
         .await;
 
@@ -1437,15 +1563,24 @@ mod tests {
         let mut ws = client_to(addr).await;
 
         let (vault_id, this_vault) = this_vault_state(&config, &[]).unwrap();
-        let err =
-            upload_index(&mut ws, dir.path(), vault_id, this_vault, &prepared_fixture(b"x".to_vec()), None)
-                .await
-                .unwrap_err()
-                .to_string();
+        let err = upload_index(
+            &mut ws,
+            dir.path(),
+            vault_id,
+            this_vault,
+            &prepared_fixture(b"x".to_vec()),
+            None,
+        )
+        .await
+        .unwrap_err()
+        .to_string();
         assert!(err.contains("not authorized to write this vault"), "{err}");
         // The fixture's mtime is 7, so a swallowed reject would advance this to "7".
-        assert_eq!(std::fs::read_to_string(&mtime_path).unwrap(), "1",
-            "a rejected upload must not advance the re-export watermark");
+        assert_eq!(
+            std::fs::read_to_string(&mtime_path).unwrap(),
+            "1",
+            "a rejected upload must not advance the re-export watermark"
+        );
     }
 
     #[tokio::test]
@@ -1457,7 +1592,9 @@ mod tests {
                 vault_id: "v1".into(),
                 sha256: "beef".repeat(16),
             };
-            ws.send(Message::text(serde_json::to_string(&ack).unwrap())).await.unwrap();
+            ws.send(Message::text(serde_json::to_string(&ack).unwrap()))
+                .await
+                .unwrap();
         })
         .await;
 
@@ -1475,10 +1612,19 @@ mod tests {
             .await
             .unwrap_err()
             .to_string();
-        assert!(err.contains(&prepared.hash), "the error names what we sent: {err}");
-        assert!(err.contains(&"beef".repeat(16)), "and what the hub acked: {err}");
-        assert_eq!(std::fs::read_to_string(&mtime_path).unwrap(), "1",
-            "an unaccountable ack must not advance the re-export watermark either");
+        assert!(
+            err.contains(&prepared.hash),
+            "the error names what we sent: {err}"
+        );
+        assert!(
+            err.contains(&"beef".repeat(16)),
+            "and what the hub acked: {err}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&mtime_path).unwrap(),
+            "1",
+            "an unaccountable ack must not advance the re-export watermark either"
+        );
     }
 
     /// The upload writes the re-export watermark and the next export reads
@@ -1498,30 +1644,48 @@ mod tests {
         let mut config = FederationConfig::test_fixture("private", vec![]);
         config.vault_id = Some("v1".into());
 
-        let first = prepare_export(&source, &vault, dir.path(), &config).await.unwrap();
-        assert!(first.result.is_some(), "precondition: a cold config dir exports");
+        let first = prepare_export(&source, &vault, dir.path(), &config)
+            .await
+            .unwrap();
+        assert!(
+            first.result.is_some(),
+            "precondition: a cold config dir exports"
+        );
 
         let addr = spawn_mock_hub(|mut ws| async move {
-            let Message::Text(t) = ws.next().await.unwrap().unwrap() else { panic!("no decl") };
+            let Message::Text(t) = ws.next().await.unwrap().unwrap() else {
+                panic!("no decl")
+            };
             let ClientMsg::UploadIndex {
-            chunked: None, vault_id, sha256, .. } =
-                serde_json::from_str(t.as_str()).unwrap()
+                chunked: None,
+                vault_id,
+                sha256,
+                ..
+            } = serde_json::from_str(t.as_str()).unwrap()
             else {
                 panic!("expected upload-index")
             };
             let _frame = ws.next().await.unwrap().unwrap();
             let ack = HubMsg::UploadAck { vault_id, sha256 };
-            ws.send(Message::text(serde_json::to_string(&ack).unwrap())).await.unwrap();
+            ws.send(Message::text(serde_json::to_string(&ack).unwrap()))
+                .await
+                .unwrap();
         })
         .await;
         let mut ws = client_to(addr).await;
         let (vault_id, this_vault) = this_vault_state(&config, &[]).unwrap();
-        upload_index(&mut ws, dir.path(), vault_id, this_vault, &first, None).await.unwrap();
+        upload_index(&mut ws, dir.path(), vault_id, this_vault, &first, None)
+            .await
+            .unwrap();
 
-        let second = prepare_export(&source, &vault, dir.path(), &config).await.unwrap();
-        assert!(second.result.is_none(),
+        let second = prepare_export(&source, &vault, dir.path(), &config)
+            .await
+            .unwrap();
+        assert!(
+            second.result.is_none(),
             "the vault has not changed, so the watermark the upload just wrote must \
-             satisfy the next export's check");
+             satisfy the next export's check"
+        );
     }
 
     /// Ties the three keys `prepare_export` reads to the three
@@ -1546,11 +1710,15 @@ mod tests {
         super::super::export::public_vault_with_note(&vault);
 
         let config = FederationConfig::test_fixture("private", vec![]);
-        let prepared =
-            prepare_export(&source, &vault, dir.path(), &config).await.unwrap();
+        let prepared = prepare_export(&source, &vault, dir.path(), &config)
+            .await
+            .unwrap();
 
         let exported = prepared.result.as_ref().expect("the export ran").exported;
-        assert_eq!(exported, 1, "precondition: the fixture note is public and exports");
+        assert_eq!(
+            exported, 1,
+            "precondition: the fixture note is public and exports"
+        );
         assert_eq!(prepared.note_count, exported as i64);
         assert_eq!(prepared.model_id, "test-model");
         assert_eq!(prepared.schema_version, "2");
@@ -1589,7 +1757,9 @@ mod tests {
         .await;
         let err = match err {
             Err(e) => e,
-            Ok(_) => panic!("a rule change must force a re-export, but the stale export was served"),
+            Ok(_) => {
+                panic!("a rule change must force a re-export, but the stale export was served")
+            }
         };
 
         // It tried to rebuild rather than serving the stale bytes: the only
@@ -1631,20 +1801,34 @@ mod tests {
         assert_eq!(start, shape(v), "reading the same vault twice must agree");
 
         // Rename in place. Same count, same mtimes, different note.
-        std::fs::rename(v.join("3-permanent/b.md"), v.join("3-permanent/b-separation.md")).unwrap();
+        std::fs::rename(
+            v.join("3-permanent/b.md"),
+            v.join("3-permanent/b-separation.md"),
+        )
+        .unwrap();
         let renamed = shape(v);
-        assert_ne!(start, renamed, "a rename is invisible to a count and must not be here");
+        assert_ne!(
+            start, renamed,
+            "a rename is invisible to a count and must not be here"
+        );
 
         // Move between folders, which is how a note leaves a `listed` glob.
         std::fs::rename(v.join("3-permanent/a.md"), v.join("0-inbox/a.md")).unwrap();
         let moved = shape(v);
-        assert_ne!(renamed, moved, "a move between folders changes which rules apply");
+        assert_ne!(
+            renamed, moved,
+            "a move between folders changes which rules apply"
+        );
 
         // And the two a count already saw.
         std::fs::write(v.join("0-inbox/c.md"), "c").unwrap();
         assert_ne!(moved, shape(v), "a new note must still be seen");
         std::fs::remove_file(v.join("0-inbox/c.md")).unwrap();
-        assert_eq!(moved, shape(v), "removing it again must return the earlier shape");
+        assert_eq!(
+            moved,
+            shape(v),
+            "removing it again must return the earlier shape"
+        );
     }
 
     /// The declared metadata must describe the bytes on the wire, so it is
@@ -1675,12 +1859,19 @@ mod tests {
             export_shape_fingerprint(&config, &vault_mtime_and_path_digest(vault.path()).1),
         )
         .unwrap();
-        let prepared =
-            prepare_export(&dir.path().join("no-such-source.db"), vault.path(), dir.path(), &config)
-                .await
-                .unwrap();
+        let prepared = prepare_export(
+            &dir.path().join("no-such-source.db"),
+            vault.path(),
+            dir.path(),
+            &config,
+        )
+        .await
+        .unwrap();
 
-        assert!(prepared.result.is_none(), "precondition: the export was reused, not rebuilt");
+        assert!(
+            prepared.result.is_none(),
+            "precondition: the export was reused, not rebuilt"
+        );
         assert_eq!(prepared.note_count, 7);
         assert_eq!(prepared.schema_version, "9");
         assert_eq!(prepared.model_id, "from-the-export");
@@ -1692,8 +1883,10 @@ mod tests {
         assert!(config.vault_id.is_none(), "fixture precondition");
 
         let err = this_vault_state(&config, &[]).unwrap_err().to_string();
-        assert!(err.contains("ll join"),
-            "ambiguous scope fails loud and names the fix, never defaults or skips: {err}");
+        assert!(
+            err.contains("ll join"),
+            "ambiguous scope fails loud and names the fix, never defaults or skips: {err}"
+        );
     }
 
     /// **D-6.** Six of the seven call sites pass `&[]`, where a fallback to
@@ -1707,23 +1900,37 @@ mod tests {
         let mut config = FederationConfig::test_fixture("private", vec![]);
         config.vault_id = Some("v-mine".into());
         let states = vec![
-            VaultState { vault_id: "v-someone-else".into(), holds: Some(held("theirs")) },
-            VaultState { vault_id: "v-another".into(), holds: Some(held("also-theirs")) },
+            VaultState {
+                vault_id: "v-someone-else".into(),
+                holds: Some(held("theirs")),
+            },
+            VaultState {
+                vault_id: "v-another".into(),
+                holds: Some(held("also-theirs")),
+            },
         ];
 
         let (vault_id, this_vault) = this_vault_state(&config, &states).unwrap();
         assert_eq!(vault_id, "v-mine");
-        assert!(this_vault.is_none(),
+        assert!(
+            this_vault.is_none(),
             "the hub listed vaults, none of them this one — an entry that is not \
-             this vault's says nothing about this vault");
-        assert_eq!(upload_decision("whatever", this_vault), UploadDecision::Upload);
+             this vault's says nothing about this vault"
+        );
+        assert_eq!(
+            upload_decision("whatever", this_vault),
+            UploadDecision::Upload
+        );
         assert_eq!(hub_holds(this_vault), HubHolds::Nothing);
     }
 
     // --- chunked upload -------------------------------------------------
 
     fn limits(max_chunk_bytes: u32, max_total_bytes: u64) -> ChunkedUploadLimits {
-        ChunkedUploadLimits { max_chunk_bytes, max_total_bytes }
+        ChunkedUploadLimits {
+            max_chunk_bytes,
+            max_total_bytes,
+        }
     }
 
     /// TWIN TEST -- sync-hub asserts this same literal in
@@ -1747,8 +1954,14 @@ mod tests {
     fn an_export_that_fits_is_sent_as_one_frame() {
         assert_eq!(upload_plan(1024, None).unwrap(), UploadPlan::SingleFrame);
         let l = limits(8 * 1024 * 1024, 200 * 1024 * 1024);
-        assert_eq!(upload_plan(1024, Some(&l)).unwrap(), UploadPlan::SingleFrame);
-        assert_eq!(upload_plan(HUB_INBOUND_CAP, Some(&l)).unwrap(), UploadPlan::SingleFrame);
+        assert_eq!(
+            upload_plan(1024, Some(&l)).unwrap(),
+            UploadPlan::SingleFrame
+        );
+        assert_eq!(
+            upload_plan(HUB_INBOUND_CAP, Some(&l)).unwrap(),
+            UploadPlan::SingleFrame
+        );
     }
 
     /// The case this exists for: a vault too big for one frame, and a hub that
@@ -1758,7 +1971,9 @@ mod tests {
         let l = limits(8 * 1024 * 1024, 200 * 1024 * 1024);
         assert_eq!(
             upload_plan(HUB_INBOUND_CAP + 1, Some(&l)).unwrap(),
-            UploadPlan::Chunked { chunk_bytes: 8 * 1024 * 1024 },
+            UploadPlan::Chunked {
+                chunk_bytes: 8 * 1024 * 1024
+            },
         );
     }
 
@@ -1781,13 +1996,17 @@ mod tests {
         let tiny = limits(64 * 1024, 200 * 1024 * 1024);
         assert_eq!(
             upload_plan(HUB_INBOUND_CAP + 1, Some(&tiny)).unwrap(),
-            UploadPlan::Chunked { chunk_bytes: 64 * 1024 },
+            UploadPlan::Chunked {
+                chunk_bytes: 64 * 1024
+            },
         );
         // And never above this client's own frame limit, whatever is offered.
         let huge = limits(u32::MAX, u64::MAX);
         assert_eq!(
             upload_plan(HUB_INBOUND_CAP + 1, Some(&huge)).unwrap(),
-            UploadPlan::Chunked { chunk_bytes: CHUNK_MAX_BODY_SIZE },
+            UploadPlan::Chunked {
+                chunk_bytes: CHUNK_MAX_BODY_SIZE
+            },
         );
     }
 
@@ -1808,8 +2027,13 @@ mod tests {
     fn the_declaration_describes_the_frames_that_will_follow() {
         let body: Vec<u8> = (0..2500u32).map(|i| (i % 251) as u8).collect();
         let plan = UploadPlan::Chunked { chunk_bytes: 1000 };
-        let d = plan.declaration(&body).expect("a chunked plan declares itself");
-        assert_eq!(d.chunks, 3, "2500 bytes in 1000-byte chunks is three frames");
+        let d = plan
+            .declaration(&body)
+            .expect("a chunked plan declares itself");
+        assert_eq!(
+            d.chunks, 3,
+            "2500 bytes in 1000-byte chunks is three frames"
+        );
         assert_eq!(d.chunk_size_max, 1000);
 
         let hashes: Vec<[u8; 32]> = body
@@ -1848,7 +2072,10 @@ mod tests {
         // constant says -- which is how a 50 MB cap sat here while the wire
         // refused anything over 16 MiB. These two numbers were measured
         // against a live server and are the rule itself.
-        assert!(upload_fits(16_777_216), "an export filling the frame exactly is sendable");
+        assert!(
+            upload_fits(16_777_216),
+            "an export filling the frame exactly is sendable"
+        );
         assert!(!upload_fits(16_777_217), "one byte more is not");
         assert!(upload_fits(0));
     }
@@ -1867,8 +2094,10 @@ mod tests {
         let mut ws = client_to(addr).await;
 
         let err = recv_binary(&mut ws).await.unwrap_err();
-        assert!(matches!(err.downcast_ref::<SyncError>(), Some(SyncError::FrameKind)),
-            "the hub broke the one-binary-frame promise: {err}");
+        assert!(
+            matches!(err.downcast_ref::<SyncError>(), Some(SyncError::FrameKind)),
+            "the hub broke the one-binary-frame promise: {err}"
+        );
     }
 
     /// **D-10.** Dropping the dotfile skip left the whole suite green. The
@@ -1884,13 +2113,18 @@ mod tests {
         std::fs::write(root.join(".obsidian/workspace.md"), "x").unwrap();
         std::fs::write(root.join(".hidden.md"), "x").unwrap();
 
-        assert_eq!(max_md_mtime(root), 0,
-            "nothing here is a note the export would read");
+        assert_eq!(
+            max_md_mtime(root),
+            0,
+            "nothing here is a note the export would read"
+        );
 
         std::fs::write(root.join("notes/real.md"), "x").unwrap();
-        assert!(max_md_mtime(root) > 0,
+        assert!(
+            max_md_mtime(root) > 0,
             "positive control: an ordinary note in an ordinary directory does count, \
-             so the zero above is the skip and not an empty scan");
+             so the zero above is the skip and not an empty scan"
+        );
     }
 
     /// **D-10.** `prepare_export` re-exports when the vault has changed OR
@@ -1911,41 +2145,66 @@ mod tests {
         super::super::export::public_vault_with_note(&vault);
         let config = FederationConfig::test_fixture("private", vec![]);
 
-        let first = prepare_export(&source, &vault, dir.path(), &config).await.unwrap();
-        assert!(first.result.is_some(), "precondition: a cold config dir exports");
+        let first = prepare_export(&source, &vault, dir.path(), &config)
+            .await
+            .unwrap();
+        assert!(
+            first.result.is_some(),
+            "precondition: a cold config dir exports"
+        );
         // The watermark is the upload's to write, and there is no hub here.
         std::fs::write(
             last_export_mtime_path(dir.path()),
             first.current_max_mtime.to_string(),
         )
         .unwrap();
-        let again = prepare_export(&source, &vault, dir.path(), &config).await.unwrap();
-        assert!(again.result.is_none(),
-            "precondition: the watermark is current, so nothing else would re-export");
+        let again = prepare_export(&source, &vault, dir.path(), &config)
+            .await
+            .unwrap();
+        assert!(
+            again.result.is_none(),
+            "precondition: the watermark is current, so nothing else would re-export"
+        );
 
         std::fs::remove_file(export_db_path(dir.path())).unwrap();
-        let rebuilt = prepare_export(&source, &vault, dir.path(), &config).await.unwrap();
-        assert!(rebuilt.result.is_some(),
+        let rebuilt = prepare_export(&source, &vault, dir.path(), &config)
+            .await
+            .unwrap();
+        assert!(
+            rebuilt.result.is_some(),
             "the watermark says the vault has not changed and there is still nothing \
-             to send; the export has to be rebuilt anyway");
+             to send; the export has to be rebuilt anyway"
+        );
     }
 
     #[test]
     fn the_hub_holding_nothing_is_recorded_as_nothing() {
-        assert_eq!(hub_holds(None), HubHolds::Nothing,
-            "a hub that never mentions the vault holds nothing for it");
         assert_eq!(
-            hub_holds(Some(&VaultState { vault_id: "v1".into(), holds: None })),
+            hub_holds(None),
+            HubHolds::Nothing,
+            "a hub that never mentions the vault holds nothing for it"
+        );
+        assert_eq!(
+            hub_holds(Some(&VaultState {
+                vault_id: "v1".into(),
+                holds: None
+            })),
             HubHolds::Nothing,
         );
     }
 
     #[test]
     fn the_recorded_count_is_the_hubs_not_the_local_one() {
-        let state = VaultState { vault_id: "v1".into(), holds: Some(held("abc123")) };
+        let state = VaultState {
+            vault_id: "v1".into(),
+            holds: Some(held("abc123")),
+        };
         assert_eq!(
             hub_holds(Some(&state)),
-            HubHolds::Index { sha256: "abc123".into(), note_count: 10 },
+            HubHolds::Index {
+                sha256: "abc123".into(),
+                note_count: 10
+            },
             "note_count is what the hub reports it holds; the local export's count \
              is a different number and answers a different question",
         );
@@ -1956,8 +2215,14 @@ mod tests {
         let mut config = FederationConfig::test_fixture("private", vec![]);
         config.vault_id = Some("v2".into());
         let states = vec![
-            VaultState { vault_id: "v1".into(), holds: Some(held("wrong")) },
-            VaultState { vault_id: "v2".into(), holds: Some(held("right")) },
+            VaultState {
+                vault_id: "v1".into(),
+                holds: Some(held("wrong")),
+            },
+            VaultState {
+                vault_id: "v2".into(),
+                holds: Some(held("right")),
+            },
         ];
 
         let (vault_id, this_vault) = this_vault_state(&config, &states).unwrap();
@@ -2027,7 +2292,10 @@ mod tests {
             .map(|(i, _)| i)
             .collect();
         assert_eq!(
-            sites.iter().filter(|&&i| lines[i].contains(definition)).count(),
+            sites
+                .iter()
+                .filter(|&&i| lines[i].contains(definition))
+                .count(),
             1,
             "positive control: the definition is in this file, so a slice that \
              found nothing would not pass this",
@@ -2058,7 +2326,11 @@ mod tests {
             serde_json::from_str(include_str!("federation-v5-transcript.json"))
                 .expect("the transcript is valid JSON");
         let ex = &t["tls_exporter"];
-        let label = ex["label"].as_str().expect("tls_exporter.label").as_bytes().to_vec();
+        let label = ex["label"]
+            .as_str()
+            .expect("tls_exporter.label")
+            .as_bytes()
+            .to_vec();
         let length = ex["length"].as_u64().expect("tls_exporter.length") as usize;
         let context = match &ex["context"] {
             serde_json::Value::Null => None,
@@ -2100,9 +2372,8 @@ mod tests {
         let issued = rcgen::generate_simple_self_signed(vec!["127.0.0.1".to_string()])
             .expect("rcgen mints a certificate for the loopback address");
         let cert_der: CertificateDer<'static> = issued.cert.der().clone();
-        let key_der = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(
-            issued.signing_key.serialize_der(),
-        ));
+        let key_der =
+            PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(issued.signing_key.serialize_der()));
 
         let server_config = rustls::ServerConfig::builder()
             .with_no_client_auth()
@@ -2124,7 +2395,13 @@ mod tests {
             *outcome_out.lock().unwrap() = Some(result);
         });
 
-        TlsHub { addr, signer, cert: cert_der, derived, outcome }
+        TlsHub {
+            addr,
+            signer,
+            cert: cert_der,
+            derived,
+            outcome,
+        }
     }
 
     impl TlsHub {
@@ -2145,14 +2422,20 @@ mod tests {
     ) -> Result<(), String> {
         use ed25519_dalek::Signer;
 
-        use crate::b64;
         use super::super::handshake::random_nonce;
         use super::super::protocol_v5::{
             client_auth_message, hub_challenge_message, PROTOCOL_VERSION,
         };
+        use crate::b64;
 
-        let (tcp, _) = listener.accept().await.map_err(|e| format!("accept: {e}"))?;
-        let tls = acceptor.accept(tcp).await.map_err(|e| format!("tls handshake: {e}"))?;
+        let (tcp, _) = listener
+            .accept()
+            .await
+            .map_err(|e| format!("accept: {e}"))?;
+        let tls = acceptor
+            .accept(tcp)
+            .await
+            .map_err(|e| format!("tls handshake: {e}"))?;
 
         // Derive from the transcript's own numbers, not from this crate's
         // constants. The client derives from its constants; agreement is the
@@ -2164,10 +2447,9 @@ mod tests {
             conn.export_keying_material(&mut out[..], &label, context.as_deref())
                 .map_err(|e| format!("export_keying_material: {e}"))?;
         }
-        let exporter: [u8; 32] = out
-            .try_into()
-            .map_err(|_| "the transcript's exporter length is not what the handshake signs over"
-                .to_string())?;
+        let exporter: [u8; 32] = out.try_into().map_err(|_| {
+            "the transcript's exporter length is not what the handshake signs over".to_string()
+        })?;
         *derived.lock().unwrap() = Some(exporter);
 
         let mut ws = tokio_tungstenite::accept_async(tls)
@@ -2179,13 +2461,17 @@ mod tests {
                 .map_err(|e| format!("client-hello: {e}"))?,
             other => return Err(format!("expected a client-hello, got {other:?}")),
         };
-        let ClientMsg::ClientHello { key_id, nonce_c, .. } = hello else {
+        let ClientMsg::ClientHello {
+            key_id, nonce_c, ..
+        } = hello
+        else {
             return Err(format!("expected a client-hello, got {hello:?}"));
         };
         let nonce_c = b64::decode(&nonce_c).map_err(|e| format!("nonce_c: {e}"))?;
         let nonce_h = random_nonce();
-        let hub_key_id =
-            KeyId::from_pubkey(&signer.verifying_key()).as_str().to_string();
+        let hub_key_id = KeyId::from_pubkey(&signer.verifying_key())
+            .as_str()
+            .to_string();
         let sig_h = signer.sign(&hub_challenge_message(&nonce_h, &nonce_c, &exporter));
         let challenge = HubMsg::HubChallenge {
             nonce_h: b64::encode(&nonce_h),
@@ -2231,8 +2517,11 @@ mod tests {
     fn config_for(hub: &TlsHub) -> FederationConfig {
         let mut config = FederationConfig::test_fixture("private", vec![]);
         config.hub.endpoint = format!("wss://{}", hub.addr);
-        config.hub.key_id =
-            Some(KeyId::from_pubkey(&hub.signer.verifying_key()).as_str().to_string());
+        config.hub.key_id = Some(
+            KeyId::from_pubkey(&hub.signer.verifying_key())
+                .as_str()
+                .to_string(),
+        );
         config.vault_id = Some("v1".into());
         config
     }
@@ -2257,19 +2546,25 @@ mod tests {
         let seed = SigningKey::from_bytes(&[9u8; 32]);
         let config = config_for(&hub);
 
-        let (_ws, ready) =
-            connect_and_authenticate(&config, &seed, "peer", "model", None)
-                .await
-                .expect("the handshake completes over TLS");
+        let (_ws, ready) = connect_and_authenticate(&config, &seed, "peer", "model", None)
+            .await
+            .expect("the handshake completes over TLS");
 
-        assert_eq!(ready.protocol_version, super::super::protocol_v5::PROTOCOL_VERSION);
+        assert_eq!(
+            ready.protocol_version,
+            super::super::protocol_v5::PROTOCOL_VERSION
+        );
         assert_eq!(
             hub.outcome.lock().unwrap().clone(),
             Some(Ok(())),
             "the hub ran the whole exchange, including verifying the client's own \
              signature over the exporter",
         );
-        let derived = hub.derived.lock().unwrap().expect("the hub derived an exporter");
+        let derived = hub
+            .derived
+            .lock()
+            .unwrap()
+            .expect("the hub derived an exporter");
         assert_ne!(
             derived, [0u8; 32],
             "a TLS exporter of 32 zero bytes would make this test pass for a client \
@@ -2339,8 +2634,10 @@ mod tests {
 
         let err = channel_binding(&ws, false).unwrap_err().to_string();
         assert!(err.contains("not TLS"), "{err}");
-        assert!(channel_binding(&ws, true).is_ok(),
-            "control: the same stream, one flag away from an answer");
+        assert!(
+            channel_binding(&ws, true).is_ok(),
+            "control: the same stream, one flag away from an answer"
+        );
     }
 
     /// The other route. `LL_ALLOW_INSECURE_WS` buys a constant, and the

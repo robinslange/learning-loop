@@ -58,7 +58,10 @@ pub async fn fetch(endpoint: &str) -> anyhow::Result<HubIdentity> {
     tokio::time::timeout(FETCH_TIMEOUT, get(&origin))
         .await
         .map_err(|_| {
-            anyhow::anyhow!("timed out fetching {WELL_KNOWN_PATH} from {}", origin.authority)
+            anyhow::anyhow!(
+                "timed out fetching {WELL_KNOWN_PATH} from {}",
+                origin.authority
+            )
         })?
 }
 
@@ -173,10 +176,12 @@ mod tests {
     /// for byte.
     #[tokio::test]
     async fn the_host_header_is_the_authority_the_request_went_to() {
-        let hub = test_hub::spawn_raw_http("HTTP/1.1 404 Not Found\r\ncontent-length: 0\r\n\r\n").await;
+        let hub =
+            test_hub::spawn_raw_http("HTTP/1.1 404 Not Found\r\ncontent-length: 0\r\n\r\n").await;
         let origin = HubUrl::parse(&hub.ws_url()).unwrap();
         let expected = format!("Host: {}\r\n", origin.authority);
-        assert!(origin.authority.contains(':'),
+        assert!(
+            origin.authority.contains(':'),
             "precondition: this mock is on an ephemeral port, so the port has to \
              survive into the header or the request reaches the wrong vhost",
         );
@@ -191,7 +196,9 @@ mod tests {
         let request = seen.await.unwrap();
 
         assert!(request.contains(&expected), "{request}");
-        assert_eq!(request.lines().filter(|l| l.starts_with("Host:")).count(), 1,
+        assert_eq!(
+            request.lines().filter(|l| l.starts_with("Host:")).count(),
+            1,
             "one Host line: an endpoint that could smuggle a second one is refused \
              by the parse, not tidied up here",
         );
@@ -207,7 +214,8 @@ mod tests {
 
     #[tokio::test]
     async fn a_non_200_answer_names_the_status_instead_of_parsing_the_body() {
-        let hub = test_hub::spawn_raw_http("HTTP/1.1 404 Not Found\r\ncontent-length: 0\r\n\r\n").await;
+        let hub =
+            test_hub::spawn_raw_http("HTTP/1.1 404 Not Found\r\ncontent-length: 0\r\n\r\n").await;
         let err = fetch(&hub.ws_url()).await.unwrap_err();
         assert!(err.to_string().contains("404"), "{err}");
     }

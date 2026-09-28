@@ -47,7 +47,10 @@ fn mjs_path() -> PathBuf {
 /// point: a third difference should be looked at, not absorbed.
 fn canonical(src: &str) -> String {
     let s = src.replace("\\/", "/").replace("[\\s\\S]", ".");
-    match s.strip_prefix("(?s:").and_then(|inner| inner.strip_suffix(')')) {
+    match s
+        .strip_prefix("(?s:")
+        .and_then(|inner| inner.strip_suffix(')'))
+    {
         Some(unwrapped) => unwrapped.to_string(),
         None => s,
     }
@@ -73,8 +76,10 @@ fn js_patterns(text: &str) -> Vec<(String, String)> {
             // is everything up to the last `/` on the line, the flags are the
             // letters right after it.
             if let Some(end) = rest.rfind('/') {
-                let flags: String =
-                    rest[end + 1..].chars().take_while(|c| c.is_ascii_alphabetic()).collect();
+                let flags: String = rest[end + 1..]
+                    .chars()
+                    .take_while(|c| c.is_ascii_alphabetic())
+                    .collect();
                 let body = if flags.contains('i') {
                     format!("(?i){}", &rest[..end])
                 } else {
@@ -101,7 +106,12 @@ fn the_scan_finds_every_pattern_in_the_file() {
         text.matches("re: /").count(),
         "the scan dropped a pattern the file declares"
     );
-    assert_eq!(found.len(), 13, "found {} patterns: {found:#?}", found.len());
+    assert_eq!(
+        found.len(),
+        13,
+        "found {} patterns: {found:#?}",
+        found.len()
+    );
 
     // The `i` flag is folded into the body, so a case-insensitive JS pattern
     // is only equal to a Rust port that says `(?i)`.
@@ -112,24 +122,37 @@ fn the_scan_finds_every_pattern_in_the_file() {
     assert!(url.1.starts_with("(?i)"), "i flag not folded: {}", url.1);
 
     // And it reads the bodies, not just the kinds.
-    let aws: &(String, String) =
-        found.iter().find(|(k, _)| k == "aws-key").expect("aws-key is in the file");
+    let aws: &(String, String) = found
+        .iter()
+        .find(|(k, _)| k == "aws-key")
+        .expect("aws-key is in the file");
     assert_eq!(aws.1, "AKIA[0-9A-Z]{16}");
 
     // The normaliser must actually close the two gaps it claims to, or the
     // comparison is passing for the wrong reason.
-    assert_eq!(canonical(r"[A-Za-z0-9._\-\/+=]{20,}"), canonical(r"[A-Za-z0-9._\-/+=]{20,}"));
-    assert_eq!(canonical(r"KEY-----[\s\S]*?-----END"), canonical(r"(?s:KEY-----.*?-----END)"));
+    assert_eq!(
+        canonical(r"[A-Za-z0-9._\-\/+=]{20,}"),
+        canonical(r"[A-Za-z0-9._\-/+=]{20,}")
+    );
+    assert_eq!(
+        canonical(r"KEY-----[\s\S]*?-----END"),
+        canonical(r"(?s:KEY-----.*?-----END)")
+    );
     // And must NOT absorb a real difference.
-    assert_ne!(canonical(r"AKIA[0-9A-Z]{16}"), canonical(r"AKIA[0-9A-Z]{20}"));
+    assert_ne!(
+        canonical(r"AKIA[0-9A-Z]{16}"),
+        canonical(r"AKIA[0-9A-Z]{20}")
+    );
 }
 
 #[test]
 fn the_rust_and_js_secret_patterns_are_the_same_set() {
     let text = std::fs::read_to_string(mjs_path()).unwrap();
 
-    let js: BTreeSet<(String, String)> =
-        js_patterns(&text).into_iter().map(|(k, p)| (k, canonical(&p))).collect();
+    let js: BTreeSet<(String, String)> = js_patterns(&text)
+        .into_iter()
+        .map(|(k, p)| (k, canonical(&p)))
+        .collect();
     let rust: BTreeSet<(String, String)> = SECRET_PATTERN_SOURCES
         .iter()
         .map(|(k, p)| (k.to_string(), canonical(p)))

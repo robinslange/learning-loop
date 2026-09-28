@@ -6,7 +6,7 @@ use ll_core::{
     embed::ModelConfig,
     error::Error,
     rerank::{rerank_with_report, RerankReport},
-    scoring::{try_fts_bm25_query, fts_bm25_query, VAULT_FTS},
+    scoring::{fts_bm25_query, try_fts_bm25_query, VAULT_FTS},
     store::EmbeddingStore,
     Error as CrateError, Result as CrateResult, PAGERANK_ITERS, TOP_K,
 };
@@ -16,7 +16,10 @@ use std::sync::Arc;
 
 #[test]
 fn error_display_dim_mismatch() {
-    let err = Error::EmbeddingDimMismatch { expected: 384, actual: 256 };
+    let err = Error::EmbeddingDimMismatch {
+        expected: 384,
+        actual: 256,
+    };
     let msg = err.to_string();
     assert!(msg.contains("384"), "expected 384 in message, got: {msg}");
     assert!(msg.contains("256"), "expected 256 in message, got: {msg}");
@@ -36,21 +39,31 @@ fn error_from_rusqlite() {
     let sqlite_err = rusqlite::Error::InvalidParameterCount(1, 2);
     let err: Error = sqlite_err.into();
     let msg = err.to_string();
-    assert!(msg.contains("sqlite"), "expected 'sqlite' in message, got: {msg}");
+    assert!(
+        msg.contains("sqlite"),
+        "expected 'sqlite' in message, got: {msg}"
+    );
 }
 
 #[test]
 fn error_store_lookup() {
-    let err = Error::StoreLookup { key: "brain/missing.md".to_string() };
+    let err = Error::StoreLookup {
+        key: "brain/missing.md".to_string(),
+    };
     let msg = err.to_string();
-    assert!(msg.contains("missing.md"), "expected key in message, got: {msg}");
+    assert!(
+        msg.contains("missing.md"),
+        "expected key in message, got: {msg}"
+    );
 }
 
 // ── Result alias ─────────────────────────────────────────────────────────────
 
 #[test]
 fn result_alias_ok() {
-    fn make() -> CrateResult<u32> { Ok(42) }
+    fn make() -> CrateResult<u32> {
+        Ok(42)
+    }
     let ok = make();
     assert_eq!(ok.expect("value should be Ok"), 42);
 }
@@ -87,7 +100,9 @@ fn make_store() -> Arc<EmbeddingStore> {
 #[test]
 fn get_arc_by_path_found() {
     let store = make_store();
-    let arc = store.get_arc_by_path("notes/a.md").expect("notes/a.md should exist");
+    let arc = store
+        .get_arc_by_path("notes/a.md")
+        .expect("notes/a.md should exist");
     assert_eq!(arc.len(), 3);
     assert!((arc[0] - 1.0).abs() < 1e-6, "first component should be 1.0");
     assert!(arc[1].abs() < 1e-6);
@@ -104,7 +119,10 @@ fn get_arc_by_id_found() {
     let store = make_store();
     let arc = store.get_arc_by_id(2).expect("id 2 should exist");
     assert_eq!(arc.len(), 3);
-    assert!((arc[1] - 1.0).abs() < 1e-6, "second component should be 1.0");
+    assert!(
+        (arc[1] - 1.0).abs() < 1e-6,
+        "second component should be 1.0"
+    );
 }
 
 #[test]
@@ -147,7 +165,10 @@ fn model_config_new_defaults() {
     assert!(cfg.passage_prefix.is_none());
     assert!(!cfg.needs_token_type_ids);
     assert!(!cfg.needs_external_pooling);
-    assert!(cfg.normalize_embeddings, "normalize_embeddings should default to true");
+    assert!(
+        cfg.normalize_embeddings,
+        "normalize_embeddings should default to true"
+    );
     assert!(cfg.output_tensor_name.is_none());
 }
 
@@ -157,7 +178,9 @@ fn model_config_new_defaults() {
 
 #[test]
 fn error_display_lock_poisoned() {
-    let err = Error::LockPoisoned { what: "reranker session" };
+    let err = Error::LockPoisoned {
+        what: "reranker session",
+    };
     let msg = err.to_string();
     assert!(
         msg.contains("reranker session"),

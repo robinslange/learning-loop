@@ -90,11 +90,7 @@ const FTS_TRIGGER_AU: &str =
 ///
 /// Exposed as `pub` so benchmarks and integration tests can drive the write
 /// path without going through the full `reindex` pipeline (including ONNX).
-pub fn insert_embedded(
-    conn: &Connection,
-    items: &[&EmbedItem],
-    vecs: &[Vec<f32>],
-) -> Result<()> {
+pub fn insert_embedded(conn: &Connection, items: &[&EmbedItem], vecs: &[Vec<f32>]) -> Result<()> {
     debug_assert_eq!(items.len(), vecs.len(), "items and vecs must be 1-to-1");
 
     // Drop FTS triggers for the duration of this batch so each notes_content
@@ -119,7 +115,14 @@ pub fn insert_embedded(
                  RETURNING id",
             )?
             .query_row(
-                params![item.path, item.hash, item.mtime, item.title, item.tags, item.note_uuid],
+                params![
+                    item.path,
+                    item.hash,
+                    item.mtime,
+                    item.title,
+                    item.tags,
+                    item.note_uuid
+                ],
                 |row| row.get(0),
             )?;
 
@@ -132,10 +135,8 @@ pub fn insert_embedded(
             .execute(params![note_id])?;
 
         let blob: Vec<u8> = vec.iter().flat_map(|f| f.to_le_bytes()).collect();
-        conn.prepare_cached(
-            "INSERT INTO embeddings (id, data) VALUES (?1, ?2)",
-        )?
-        .execute(params![note_id, blob])?;
+        conn.prepare_cached("INSERT INTO embeddings (id, data) VALUES (?1, ?2)")?
+            .execute(params![note_id, blob])?;
 
         conn.prepare_cached("DELETE FROM links WHERE source_id = ?1")?
             .execute(params![note_id])?;
@@ -268,8 +269,7 @@ fn follow_moved_notes(
          DELETE FROM desired_paths;",
     )?;
     {
-        let mut ins =
-            tx.prepare("INSERT INTO desired_paths (note_uuid, path) VALUES (?1, ?2)")?;
+        let mut ins = tx.prepare("INSERT INTO desired_paths (note_uuid, path) VALUES (?1, ?2)")?;
         for file in vault_files {
             if let Some(uuid) = note_uuids.get(&file.rel_path) {
                 ins.execute(params![uuid, file.rel_path])?;
@@ -312,8 +312,11 @@ pub fn reindex(conn: &Connection, vault_path: &str, force: bool) -> Result<Index
     // Every note gets a stable id, whether or not its content changed. Doing
     // this inside the per-file loop would skip unchanged notes, so an
     // incremental index would leave most of the vault unaddressable.
-    let ResolvedIds { ids: note_uuids, reassigned: duplicate_ids, refused: refused_ids } =
-        resolve_note_uuids(Path::new(vault_path), &vault_files);
+    let ResolvedIds {
+        ids: note_uuids,
+        reassigned: duplicate_ids,
+        refused: refused_ids,
+    } = resolve_note_uuids(Path::new(vault_path), &vault_files);
 
     let moved = follow_moved_notes(conn, &vault_files, &note_uuids)?;
     if moved > 0 {
@@ -343,9 +346,8 @@ pub fn reindex(conn: &Connection, vault_path: &str, force: bool) -> Result<Index
         let tx = conn.unchecked_transaction()?;
         let mut n = 0usize;
         {
-            let mut stmt = tx.prepare(
-                "UPDATE notes SET note_uuid = ?1 WHERE path = ?2 AND note_uuid IS NULL",
-            )?;
+            let mut stmt = tx
+                .prepare("UPDATE notes SET note_uuid = ?1 WHERE path = ?2 AND note_uuid IS NULL")?;
             for file in &vault_files {
                 if let Some(uuid) = note_uuids.get(&file.rel_path) {
                     n += stmt.execute(rusqlite::params![uuid, file.rel_path])?;
@@ -361,17 +363,15 @@ pub fn reindex(conn: &Connection, vault_path: &str, force: bool) -> Result<Index
 
     let mut existing: HashMap<String, (i64, String, f64)> = HashMap::new();
     {
-        let mut stmt = conn
-            .prepare("SELECT id, path, content_hash, mtime FROM notes")?;
-        let rows = stmt
-            .query_map([], |row| {
-                Ok((
-                    row.get::<_, i64>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, f64>(3)?,
-                ))
-            })?;
+        let mut stmt = conn.prepare("SELECT id, path, content_hash, mtime FROM notes")?;
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, f64>(3)?,
+            ))
+        })?;
         for row in rows {
             let (id, path, hash, mtime) = row?;
             existing.insert(path, (id, hash, mtime));
@@ -506,14 +506,10 @@ pub fn reindex(conn: &Connection, vault_path: &str, force: bool) -> Result<Index
         .unwrap_or(0);
 
     let now = chrono_iso_now();
-    conn.prepare_cached(
-        "INSERT OR REPLACE INTO meta (key, value) VALUES (?1, ?2)",
-    )?
-    .execute(params!["indexed_at", now])?;
-    conn.prepare_cached(
-        "INSERT OR REPLACE INTO meta (key, value) VALUES (?1, ?2)",
-    )?
-    .execute(params!["note_count", total.to_string()])?;
+    conn.prepare_cached("INSERT OR REPLACE INTO meta (key, value) VALUES (?1, ?2)")?
+        .execute(params!["indexed_at", now])?;
+    conn.prepare_cached("INSERT OR REPLACE INTO meta (key, value) VALUES (?1, ?2)")?
+        .execute(params!["note_count", total.to_string()])?;
 
     conn.execute_batch("COMMIT;")?;
 
@@ -537,7 +533,6 @@ pub fn reindex(conn: &Connection, vault_path: &str, force: bool) -> Result<Index
         refused_ids,
     })
 }
-
 
 /// Return the note's stable id, assigning and persisting one if absent.
 ///
@@ -595,10 +590,7 @@ pub struct ResolvedIds {
 /// Then only the embedding is lost, since its `id:` on disk is still there.
 /// The next run tries again. Aborting instead took the whole vault's index
 /// down over one file.
-pub fn resolve_note_uuids(
-    vault_path: &Path,
-    entries: &[WalkEntry],
-) -> ResolvedIds {
+pub fn resolve_note_uuids(vault_path: &Path, entries: &[WalkEntry]) -> ResolvedIds {
     let mut ids: HashMap<String, String> = HashMap::new();
     let mut seen: HashSet<String> = HashSet::new();
     let mut reassigned: Vec<(String, String)> = Vec::new();
@@ -636,7 +628,11 @@ pub fn resolve_note_uuids(
         }
     }
 
-    ResolvedIds { ids, reassigned, refused }
+    ResolvedIds {
+        ids,
+        reassigned,
+        refused,
+    }
 }
 
 pub fn walk_vault(vault_path: &str) -> Vec<WalkEntry> {
@@ -676,13 +672,12 @@ fn walk_dir(root: &Path, dir: &Path, entries: &mut Vec<WalkEntry>) {
             walk_dir(root, &path, entries);
         } else if name_str.ends_with(".md") {
             let mtime = match fs::metadata(&path) {
-                Ok(m) => {
-                    m.modified()
-                        .ok()
-                        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                        .map(|d| d.as_secs_f64() * 1000.0)
-                        .unwrap_or(0.0)
-                }
+                Ok(m) => m
+                    .modified()
+                    .ok()
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|d| d.as_secs_f64() * 1000.0)
+                    .unwrap_or(0.0),
                 Err(_) => continue,
             };
 
@@ -706,7 +701,6 @@ mod tests {
     use super::*;
     use crate::db::schema::open_or_create_db;
     use tempfile::TempDir;
-
 
     #[test]
     fn assigns_a_uuid_to_a_note_without_one() {
@@ -761,10 +755,13 @@ mod tests {
         let id = ensure_note_uuid(dir.path(), "note.md").unwrap();
 
         let raw = std::fs::read_to_string(&p).unwrap();
-        std::fs::write(&p, raw.replace("Body.", "Rewritten body, entirely different.")).unwrap();
+        std::fs::write(
+            &p,
+            raw.replace("Body.", "Rewritten body, entirely different."),
+        )
+        .unwrap();
         assert_eq!(ensure_note_uuid(dir.path(), "note.md").unwrap(), id);
     }
-
 
     #[test]
     fn resolves_a_uuid_per_entry() {
@@ -773,7 +770,11 @@ mod tests {
         std::fs::write(dir.path().join("b.md"), "---\ntitle: B\n---\n\nB.").unwrap();
 
         let entries = walk_vault(dir.path().to_str().unwrap());
-        let ResolvedIds { ids, reassigned: dupes, .. } = resolve_note_uuids(dir.path(), &entries);
+        let ResolvedIds {
+            ids,
+            reassigned: dupes,
+            ..
+        } = resolve_note_uuids(dir.path(), &entries);
 
         assert_eq!(ids.len(), 2);
         assert!(dupes.is_empty());
@@ -787,14 +788,20 @@ mod tests {
         std::fs::write(
             dir.path().join("a.md"),
             format!("---\nid: {shared}\ntitle: A\n---\n\nBody A."),
-        ).unwrap();
+        )
+        .unwrap();
         std::fs::write(
             dir.path().join("b.md"),
             format!("---\nid: {shared}\ntitle: B\n---\n\nBody B."),
-        ).unwrap();
+        )
+        .unwrap();
 
         let entries = walk_vault(dir.path().to_str().unwrap());
-        let ResolvedIds { ids, reassigned: dupes, .. } = resolve_note_uuids(dir.path(), &entries);
+        let ResolvedIds {
+            ids,
+            reassigned: dupes,
+            ..
+        } = resolve_note_uuids(dir.path(), &entries);
 
         assert_eq!(dupes.len(), 1, "exactly one loser reported");
         assert_ne!(ids["a.md"], ids["b.md"], "collision resolved");
@@ -804,22 +811,44 @@ mod tests {
         let id_a = crate::sync::frontmatter::read_key(&a, "id").unwrap();
         let id_b = crate::sync::frontmatter::read_key(&b, "id").unwrap();
         assert_ne!(id_a, id_b, "resolved on disk, not just in memory");
-        assert!(id_a == shared || id_b == shared, "first writer keeps the id");
+        assert!(
+            id_a == shared || id_b == shared,
+            "first writer keeps the id"
+        );
     }
 
     #[test]
     fn resolution_is_idempotent_across_runs() {
         let dir = TempDir::new().unwrap();
         let shared = "01926d7e-0000-7000-8000-000000000002";
-        std::fs::write(dir.path().join("a.md"), format!("---\nid: {shared}\n---\nA.")).unwrap();
-        std::fs::write(dir.path().join("b.md"), format!("---\nid: {shared}\n---\nB.")).unwrap();
+        std::fs::write(
+            dir.path().join("a.md"),
+            format!("---\nid: {shared}\n---\nA."),
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("b.md"),
+            format!("---\nid: {shared}\n---\nB."),
+        )
+        .unwrap();
 
         let entries = walk_vault(dir.path().to_str().unwrap());
-        let ResolvedIds { ids: first, reassigned: dupes1, .. } = resolve_note_uuids(dir.path(), &entries);
+        let ResolvedIds {
+            ids: first,
+            reassigned: dupes1,
+            ..
+        } = resolve_note_uuids(dir.path(), &entries);
         assert_eq!(dupes1.len(), 1);
 
-        let ResolvedIds { ids: second, reassigned: dupes2, .. } = resolve_note_uuids(dir.path(), &entries);
-        assert!(dupes2.is_empty(), "a resolved collision must not re-report forever");
+        let ResolvedIds {
+            ids: second,
+            reassigned: dupes2,
+            ..
+        } = resolve_note_uuids(dir.path(), &entries);
+        assert!(
+            dupes2.is_empty(),
+            "a resolved collision must not re-report forever"
+        );
         assert_eq!(first, second, "ids stay put once assigned");
     }
 
@@ -831,7 +860,11 @@ mod tests {
         std::fs::write(dir.path().join("c.md"), "---\ntitle: C\n---\n\nC.").unwrap();
 
         let entries = walk_vault(dir.path().to_str().unwrap());
-        let ResolvedIds { ids, reassigned: dupes, refused } = resolve_note_uuids(dir.path(), &entries);
+        let ResolvedIds {
+            ids,
+            reassigned: dupes,
+            refused,
+        } = resolve_note_uuids(dir.path(), &entries);
 
         assert!(dupes.is_empty());
         assert_eq!(refused.len(), 1);
@@ -893,7 +926,11 @@ mod tests {
     #[test]
     fn insert_embedded_fts_is_searchable_after_insert() {
         let (_dir, conn) = open_temp_db();
-        let item = make_item("fts-test.md", "Unique FTS Title", "xyzzy placeholder content");
+        let item = make_item(
+            "fts-test.md",
+            "Unique FTS Title",
+            "xyzzy placeholder content",
+        );
         let vec = vec![0.5_f32; 384];
 
         conn.execute_batch("BEGIN TRANSACTION;").unwrap();
@@ -931,7 +968,11 @@ mod tests {
         assert_eq!(count, 1, "upsert should not duplicate the note");
 
         let title: String = conn
-            .query_row("SELECT title FROM notes WHERE path = 'upsert.md'", [], |row| row.get(0))
+            .query_row(
+                "SELECT title FROM notes WHERE path = 'upsert.md'",
+                [],
+                |row| row.get(0),
+            )
             .unwrap();
         assert_eq!(title, "Version 2");
     }
@@ -954,7 +995,10 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(trigger_count, 1, "notes_content_ai trigger should be restored after insert_embedded");
+        assert_eq!(
+            trigger_count, 1,
+            "notes_content_ai trigger should be restored after insert_embedded"
+        );
 
         // Verify incremental FTS updates work after restore
         conn.execute(
@@ -968,7 +1012,10 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(fts_hit, 1, "trigger should fire for inserts after insert_embedded completes");
+        assert_eq!(
+            fts_hit, 1,
+            "trigger should fire for inserts after insert_embedded completes"
+        );
     }
 
     /// The absorbing state: a note with an `id:` on disk, a row whose mtime
@@ -1011,7 +1058,11 @@ mod tests {
         reindex(&conn, dir.path().to_str().unwrap(), false).unwrap();
 
         let got: Option<String> = conn
-            .query_row("SELECT note_uuid FROM notes WHERE path = 'note.md'", [], |r| r.get(0))
+            .query_row(
+                "SELECT note_uuid FROM notes WHERE path = 'note.md'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(
             got.as_deref(),
@@ -1063,15 +1114,28 @@ mod tests {
             .expect("a promoted note must not abort the reindex");
 
         let rows: i64 = conn
-            .query_row("SELECT count(*) FROM notes WHERE note_uuid = ?1", [id], |r| r.get(0))
+            .query_row(
+                "SELECT count(*) FROM notes WHERE note_uuid = ?1",
+                [id],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(rows, 1, "one note, one row: the id must not be duplicated");
         let path: String = conn
-            .query_row("SELECT path FROM notes WHERE note_uuid = ?1", [id], |r| r.get(0))
+            .query_row("SELECT path FROM notes WHERE note_uuid = ?1", [id], |r| {
+                r.get(0)
+            })
             .unwrap();
-        assert_eq!(path, "3-permanent/note.md", "the row must follow the note to its new path");
+        assert_eq!(
+            path, "3-permanent/note.md",
+            "the row must follow the note to its new path"
+        );
         let hash: String = conn
-            .query_row("SELECT content_hash FROM notes WHERE note_uuid = ?1", [id], |r| r.get(0))
+            .query_row(
+                "SELECT content_hash FROM notes WHERE note_uuid = ?1",
+                [id],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(
             hash, "h",
@@ -1139,12 +1203,16 @@ mod tests {
             .expect("a swap must not abort the reindex");
 
         let path_of = |id: &str| -> String {
-            conn.query_row("SELECT path FROM notes WHERE note_uuid = ?1", [id], |r| r.get(0))
-                .unwrap()
+            conn.query_row("SELECT path FROM notes WHERE note_uuid = ?1", [id], |r| {
+                r.get(0)
+            })
+            .unwrap()
         };
         let title_at = |path: &str| -> String {
-            conn.query_row("SELECT title FROM notes WHERE path = ?1", [path], |r| r.get(0))
-                .unwrap()
+            conn.query_row("SELECT title FROM notes WHERE path = ?1", [path], |r| {
+                r.get(0)
+            })
+            .unwrap()
         };
 
         assert_eq!(path_of(id_a), "b.md", "note A must follow its id to b.md");
@@ -1157,8 +1225,9 @@ mod tests {
         );
         assert_eq!(title_at("b.md"), "A", "and the same the other way round");
 
-        let rows: i64 =
-            conn.query_row("SELECT count(*) FROM notes", [], |r| r.get(0)).unwrap();
+        let rows: i64 = conn
+            .query_row("SELECT count(*) FROM notes", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(rows, 2, "two notes, two rows");
     }
 
@@ -1207,7 +1276,11 @@ mod tests {
         let (ida, idb, idc) = ("id-a", "id-b", "id-c");
         let conn = rows_at(
             &db,
-            &[("a.md", Some(ida)), ("b.md", Some(idb)), ("c.md", Some(idc))],
+            &[
+                ("a.md", Some(ida)),
+                ("b.md", Some(idb)),
+                ("c.md", Some(idc)),
+            ],
         );
 
         // a -> b -> c -> a
@@ -1217,7 +1290,9 @@ mod tests {
         assert_eq!(moved, 3, "all three rows moved");
         for (id, path) in [(ida, "b.md"), (idb, "c.md"), (idc, "a.md")] {
             let got: String = conn
-                .query_row("SELECT path FROM notes WHERE note_uuid = ?1", [id], |r| r.get(0))
+                .query_row("SELECT path FROM notes WHERE note_uuid = ?1", [id], |r| {
+                    r.get(0)
+                })
                 .unwrap();
             assert_eq!(got, path, "{id} must land on {path}");
         }
@@ -1257,12 +1332,16 @@ mod tests {
         assert_eq!(follow_moved_notes(&conn, &files, &ids).unwrap(), 1);
 
         let landed: String = conn
-            .query_row("SELECT path FROM notes WHERE note_uuid = 'id-b'", [], |r| r.get(0))
+            .query_row("SELECT path FROM notes WHERE note_uuid = 'id-b'", [], |r| {
+                r.get(0)
+            })
             .unwrap();
         assert_eq!(landed, "a.md", "the id that owns a.md must get it");
 
         let ghost: String = conn
-            .query_row("SELECT path FROM notes WHERE note_uuid IS NULL", [], |r| r.get(0))
+            .query_row("SELECT path FROM notes WHERE note_uuid IS NULL", [], |r| {
+                r.get(0)
+            })
             .unwrap();
         assert!(
             !ghost.ends_with(".md"),
@@ -1270,7 +1349,6 @@ mod tests {
              pass reaches it, got {ghost}"
         );
     }
-
 
     /// Pins the NULL-`note_uuid` blind spot so the doc comment above cannot
     /// drift back into claiming coverage this pass does not have.
@@ -1308,7 +1386,6 @@ mod tests {
         );
     }
 
-
     /// The mixed, ordinary case: one id-less row, one with an id. The park is
     /// keyed on PATH, not on the candidate's `note_uuid`, so the id-less row
     /// IS parked here — it holds a path that another row's id now owns. It can
@@ -1325,20 +1402,27 @@ mod tests {
         let conn = rows_at(&db, &[("a.md", None), ("b.md", Some("id-b"))]);
         let (files, ids) = desired(&[("a.md", "id-b"), ("b.md", "id-a")]);
 
-        assert_eq!(follow_moved_notes(&conn, &files, &ids).unwrap(), 1, "id-b lands on a.md");
+        assert_eq!(
+            follow_moved_notes(&conn, &files, &ids).unwrap(),
+            1,
+            "id-b lands on a.md"
+        );
 
         let landed: String = conn
-            .query_row("SELECT path FROM notes WHERE note_uuid = 'id-b'", [], |r| r.get(0))
+            .query_row("SELECT path FROM notes WHERE note_uuid = 'id-b'", [], |r| {
+                r.get(0)
+            })
             .unwrap();
         assert_eq!(landed, "a.md");
 
         let ghost: String = conn
-            .query_row("SELECT path FROM notes WHERE note_uuid IS NULL", [], |r| r.get(0))
+            .query_row("SELECT path FROM notes WHERE note_uuid IS NULL", [], |r| {
+                r.get(0)
+            })
             .unwrap();
         assert!(
             !ghost.ends_with(".md"),
             "the id-less row must be parked outside the vault's path space, got {ghost}"
         );
     }
-
 }
