@@ -128,6 +128,7 @@ function parseEnumBody(code, brace) {
   const variants = {};
   const positionalsOf = {};
   const nestedOf = {};
+  const gated = new Set();
   let depth = 1;
   let attrs = '';
   let variant = null;
@@ -154,6 +155,7 @@ function parseEnumBody(code, brace) {
       const m = /^([A-Z]\w*)/.exec(code.slice(i));
       if (m) {
         variant = m[1];
+        if (/#\[cfg\(\s*feature\b/.test(attrs)) gated.add(variant);
         variants[variant] = new Set();
         positionalsOf[variant] = [];
         attrs = '';
@@ -182,7 +184,7 @@ function parseEnumBody(code, brace) {
     }
     i += 1;
   }
-  return { variants, positionalsOf, nestedOf };
+  return { variants, positionalsOf, nestedOf, gated };
 }
 
 /** Every `#[derive(Subcommand)] enum X` in main.rs. */
@@ -191,17 +193,21 @@ function parseSubcommandEnums(src) {
   const enums = {};
   const positions = {};
   const nested = {};
+  const featureGated = {};
   for (const m of code.matchAll(/#\[derive\([^)]*\bSubcommand\b[^)]*\)\]\s*enum\s+(\w+)\s*\{/g)) {
     const brace = m.index + m[0].length - 1;
-    const { variants, positionalsOf, nestedOf } = parseEnumBody(code, brace);
+    const { variants, positionalsOf, nestedOf, gated } = parseEnumBody(code, brace);
     enums[m[1]] = variants;
+    featureGated[m[1]] = gated;
     positions[m[1]] = positionalsOf;
     for (const [variant, child] of Object.entries(nestedOf)) nested[`${m[1]}.${variant}`] = child;
   }
-  return { enums, positions, nested };
+  return { enums, positions, nested, featureGated };
 }
 
-const { enums, positions, nested } = parseSubcommandEnums(readFileSync(MAIN_RS, 'utf8'));
+const { enums, positions, nested, featureGated } = parseSubcommandEnums(
+  readFileSync(MAIN_RS, 'utf8'),
+);
 
 /** `{ 'reflect-scan': Set<flag>, 'link approve': Set<flag>, ... }` */
 function flattenCli(enumName, prefix = '') {
@@ -222,6 +228,9 @@ function flattenCli(enumName, prefix = '') {
 }
 
 const CLI = flattenCli('Commands');
+
+/** Commands behind a cargo feature, which a release binary does not have. */
+const FEATURE_GATED = new Set([...featureGated.Commands].map(kebab));
 
 /** `{ 'join': { min: 3, max: 3 }, 'intentions': { min: 1, max: 2 }, ... }` */
 function flattenArity(enumName, prefix = '') {
@@ -479,6 +488,28 @@ test('every command in the CLI is named in ARCHITECTURE.md', () => {
     missing.sort(),
     [],
     `commands the CLI has and ${ARCHITECTURE} does not name:\n${missing.sort().join('\n')}`,
+  );
+});
+
+test('only ARCHITECTURE.md shows a research-only command being run', () => {
+  // A feature-gated command is still in the enum, so the existence test above
+  // passes a skill that tells a user to run one, and the release binary they
+  // have answers "unrecognized subcommand". ARCHITECTURE.md is where the
+  // research build is documented, under its own heading.
+  assert.ok(FEATURE_GATED.has('tune-prf'), 'the derivation must see the research gate');
+  assert.ok(!FEATURE_GATED.has('eval-funnel'), 'eval-funnel ships, so it must not read as gated');
+  const leaked = [];
+  for (const rel of DOCS()) {
+    if (rel === ARCHITECTURE) continue;
+    for (const span of codeSpans(readFileSync(join(ROOT, rel), 'utf8'))) {
+      const hit = parseSpan(span);
+      if (hit && FEATURE_GATED.has(hit.name)) leaked.push(`${rel}: ll-search ${hit.name}`);
+    }
+  }
+  assert.deepEqual(
+    [...new Set(leaked)].sort(),
+    [],
+    `research-only commands in docs:\n${leaked.join('\n')}`,
   );
 });
 

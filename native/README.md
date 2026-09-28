@@ -31,10 +31,10 @@ ll-search sync <db-path> <vault-path> [--config-dir PATH]
 ll-search join <hub> <invite-code> <vault-path> [--config-dir PATH]
 ll-search status [--config-dir PATH]
 ll-search watch <vault-path> <db-path> [--sync-interval SECS] [--config-dir PATH] [--pid-file PATH]
-ll-search migrate <db-path> --model NAME [--drop-old]
-ll-search benchmark <db-path> --model-a NAME --model-b NAME "query1" "query2" ...
 ll-search version
 ```
+
+`benchmark`, `migrate`, `tune-prf`, `eval-prf`, `tune-weights`, `lane-diag` and `sessions` are hand-run research tools and are not in release builds. Build with `cargo build -p ll-search --features research` to use them; `ARCHITECTURE.md` lists their arguments.
 
 All commands output JSON to stdout, errors to stderr, except `status`, which prints plain text for a person to read. Exit 0 on success, 1 on error.
 
