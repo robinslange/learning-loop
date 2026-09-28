@@ -302,8 +302,8 @@ fn follow_moved_notes(
 pub fn reindex(conn: &Connection, vault_path: &str, force: bool) -> Result<IndexResult> {
     if force {
         eprintln!("Force rebuild: dropping all tables...");
-        drop_all(conn);
-        create_schema(conn);
+        drop_all(conn)?;
+        create_schema(conn)?;
     }
 
     let vault_files = walk_vault(vault_path);

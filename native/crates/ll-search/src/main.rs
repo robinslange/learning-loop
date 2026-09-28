@@ -939,7 +939,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
                 let target = parse_model(&model)?;
                 let provider = ll_search::model::loader::load_provider(&target)
                     .context("failed to load model")?;
-                let result = ll_search::db::migrate_embeddings(&conn, provider.as_ref());
+                let result = ll_search::db::migrate_embeddings(&conn, provider.as_ref())?;
                 out(&result)?;
             }
         }
