@@ -57,12 +57,12 @@ pub fn open_or_create_db(db_path: &str) -> Result<Connection> {
         > 0;
 
     if !has_meta {
-        create_schema(&conn);
+        create_schema(&conn)?;
     }
 
-    ensure_embeddings_table(&conn);
-    ensure_links_table(&conn);
-    ensure_intentions_table(&conn);
+    ensure_embeddings_table(&conn)?;
+    ensure_links_table(&conn)?;
+    ensure_intentions_table(&conn)?;
     run_migrations(&conn)?;
     Ok(conn)
 }
@@ -155,7 +155,7 @@ pub(crate) fn run_migrations(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn create_schema(conn: &Connection) {
+pub(crate) fn create_schema(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
 
@@ -223,29 +223,30 @@ pub(crate) fn create_schema(conn: &Connection) {
             VALUES (new.id, new.title, new.tags, new.body);
         END;",
     )
-    .expect("failed to create schema");
+    .context("failed to create schema")?;
 
     let upsert = "INSERT OR REPLACE INTO meta (key, value) VALUES (?1, ?2)";
-    conn.execute(upsert, params!["schema_version", SCHEMA_VERSION.to_string()])
-        .unwrap();
+    conn.execute(upsert, params!["schema_version", SCHEMA_VERSION.to_string()])?;
     if let Some(p) = embed::try_provider() {
-        conn.execute(upsert, params!["model_id", p.model_id()]).unwrap();
+        conn.execute(upsert, params!["model_id", p.model_id()])?;
     }
-    conn.execute(upsert, params!["dtype", DTYPE]).unwrap();
-    conn.execute(upsert, params!["indexed_at", ""]).unwrap();
-    conn.execute(upsert, params!["note_count", "0"]).unwrap();
+    conn.execute(upsert, params!["dtype", DTYPE])?;
+    conn.execute(upsert, params!["indexed_at", ""])?;
+    conn.execute(upsert, params!["note_count", "0"])?;
+    Ok(())
 }
 
-fn ensure_embeddings_table(conn: &Connection) {
+fn ensure_embeddings_table(conn: &Connection) -> Result<()> {
     if !table_exists(conn, "embeddings") {
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS embeddings (id INTEGER PRIMARY KEY, data BLOB NOT NULL);",
         )
-        .expect("failed to create embeddings table");
+        .context("failed to create embeddings table")?;
     }
+    Ok(())
 }
 
-fn ensure_links_table(conn: &Connection) {
+fn ensure_links_table(conn: &Connection) -> Result<()> {
     if !table_exists(conn, "links") {
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS links (
@@ -255,11 +256,12 @@ fn ensure_links_table(conn: &Connection) {
             );
             CREATE INDEX IF NOT EXISTS idx_links_target ON links(target_path);",
         )
-        .expect("failed to create links table");
+        .context("failed to create links table")?;
     }
+    Ok(())
 }
 
-fn ensure_intentions_table(conn: &Connection) {
+fn ensure_intentions_table(conn: &Connection) -> Result<()> {
     if !table_exists(conn, "intentions") {
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS intentions (
@@ -270,9 +272,10 @@ fn ensure_intentions_table(conn: &Connection) {
             );
             CREATE INDEX IF NOT EXISTS idx_intentions_context ON intentions(context);",
         )
-        .expect("failed to create intentions table");
+        .context("failed to create intentions table")?;
         conn.execute("UPDATE notes SET mtime = 0", []).ok();
     }
+    Ok(())
 }
 
 pub(crate) fn drop_vec0_remnants(conn: &Connection) {
@@ -298,7 +301,7 @@ pub(crate) fn table_exists(conn: &Connection, name: &str) -> bool {
         > 0
 }
 
-pub(crate) fn drop_all(conn: &Connection) {
+pub(crate) fn drop_all(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "DROP TABLE IF EXISTS links;
         DROP TABLE IF EXISTS embeddings;
@@ -310,9 +313,10 @@ pub(crate) fn drop_all(conn: &Connection) {
         DROP TABLE IF EXISTS notes;
         DROP TABLE IF EXISTS meta;",
     )
-    .expect("failed to drop tables");
+    .context("failed to drop tables")?;
     drop_vec0_remnants(conn);
     conn.execute_batch("VACUUM;").ok();
+    Ok(())
 }
 
 pub fn check_model_mismatch(conn: &Connection, active_model_id: &str) -> bool {
@@ -325,7 +329,7 @@ pub fn check_model_mismatch(conn: &Connection, active_model_id: &str) -> bool {
 pub fn migrate_embeddings(
     conn: &Connection,
     provider: &dyn crate::model::EmbeddingProvider,
-) -> IndexResult {
+) -> Result<IndexResult> {
     let model_id = provider.model_id();
     eprintln!("Migrating embeddings to {} ...", model_id);
 
@@ -333,18 +337,16 @@ pub fn migrate_embeddings(
     conn.execute_batch(
         "CREATE TABLE embeddings_new (id INTEGER PRIMARY KEY, data BLOB NOT NULL);",
     )
-    .expect("create embeddings_new");
+    .context("failed to create embeddings_new")?;
 
     let notes: Vec<(i64, String)> = {
         let mut stmt = conn
-            .prepare("SELECT n.id, nc.body FROM notes n JOIN notes_content nc ON n.id = nc.id")
-            .unwrap();
-        stmt.query_map([], |row| {
-            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
-        })
-        .unwrap()
-        .filter_map(|r| r.ok())
-        .collect()
+            .prepare("SELECT n.id, nc.body FROM notes n JOIN notes_content nc ON n.id = nc.id")?;
+        let rows = stmt
+            .query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)))?
+            .filter_map(|r| r.ok())
+            .collect();
+        rows
     };
 
     let batch_size = 32;
@@ -353,50 +355,45 @@ pub fn migrate_embeddings(
 
     for chunk in notes.chunks(batch_size) {
         let texts: Vec<String> = chunk.iter().map(|(_, body)| body.clone()).collect();
-        let vecs = provider.embed_documents(&texts).expect("embed failed");
+        let vecs = provider.embed_documents(&texts).context("embed failed")?;
 
-        conn.execute_batch("BEGIN TRANSACTION;").unwrap();
+        conn.execute_batch("BEGIN TRANSACTION;")?;
         for ((id, _), vec) in chunk.iter().zip(vecs.iter()) {
             let blob: Vec<u8> = vec.iter().flat_map(|f| f.to_le_bytes()).collect();
             conn.execute(
                 "INSERT OR REPLACE INTO embeddings_new (id, data) VALUES (?1, ?2)",
                 params![id, blob],
-            )
-            .unwrap();
+            )?;
         }
-        conn.execute_batch("COMMIT;").unwrap();
+        conn.execute_batch("COMMIT;")?;
 
         embedded += chunk.len();
         eprintln!("  Migrated {}/{}", embedded, total);
     }
 
-    conn.execute_batch("BEGIN IMMEDIATE;").unwrap();
-    conn.execute_batch("ALTER TABLE embeddings RENAME TO embeddings_old;")
-        .unwrap();
-    conn.execute_batch("ALTER TABLE embeddings_new RENAME TO embeddings;")
-        .unwrap();
+    conn.execute_batch("BEGIN IMMEDIATE;")?;
+    conn.execute_batch("ALTER TABLE embeddings RENAME TO embeddings_old;")?;
+    conn.execute_batch("ALTER TABLE embeddings_new RENAME TO embeddings;")?;
     conn.execute(
         "INSERT OR REPLACE INTO meta (key, value) VALUES (?1, ?2)",
         params!["model_id", model_id],
-    )
-    .unwrap();
+    )?;
     conn.execute(
         "INSERT OR REPLACE INTO meta (key, value) VALUES (?1, ?2)",
         params!["schema_version", SCHEMA_VERSION.to_string()],
-    )
-    .unwrap();
-    conn.execute_batch("COMMIT;").unwrap();
+    )?;
+    conn.execute_batch("COMMIT;")?;
 
     eprintln!("Migration complete. Old embeddings retained in 'embeddings_old'.");
 
-    IndexResult {
+    Ok(IndexResult {
         embedded,
         deleted: 0,
         total,
         // Migration path: no walk happened, so no ids were resolved.
         duplicate_ids: Vec::new(),
         refused_ids: Vec::new(),
-    }
+    })
 }
 
 pub fn drop_old_embeddings(conn: &Connection) {
@@ -441,7 +438,7 @@ mod tests {
         // A fresh DB already has note_uuid from create_schema; migrating must
         // not blow up on the second definition, nor on a repeat run.
         let conn = Connection::open_in_memory().unwrap();
-        create_schema(&conn);
+        create_schema(&conn).unwrap();
         run_migrations(&conn).unwrap();
         run_migrations(&conn).unwrap();
         assert!(conn.prepare("SELECT note_uuid FROM notes LIMIT 0").is_ok());
