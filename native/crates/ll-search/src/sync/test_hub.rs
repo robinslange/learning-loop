@@ -5,9 +5,6 @@
 //! handshake. Which one a connection wants is decided by peeking at its
 //! first bytes rather than by running two listeners, because `ll join`
 //! derives both URLs from a single endpoint and they must share a port.
-//!
-//! The shared v4 mock in `tests/common/mod.rs` is a different thing and is
-//! not v5-aware; nothing here replaces it.
 
 use crate::b64;
 use std::net::SocketAddr;

@@ -6,8 +6,8 @@
 //! cycle that works must leave a *different* record, or an implementation
 //! that always writes `outcome: "error"` would pass the first half alone.
 //!
-//! The mock hub is inline and speaks v5. `tests/common/mod.rs` still speaks
-//! v4 and cannot complete this handshake.
+//! The mock hub is inline and speaks v5. `src/sync/test_hub.rs` is
+//! `#[cfg(test)]`, so an integration test cannot reach it.
 
 use std::net::SocketAddr;
 use std::path::Path;

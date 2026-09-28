@@ -39,10 +39,9 @@ const SEND_TIMEOUT: Duration = Duration::from_secs(60);
 /// could redden a test in another: the coupling was the process environment,
 /// not the code.
 ///
-/// Reading once puts every read before the first connection in the binaries
-/// that set these (`sync_recv_timeout.rs`, `sync_soak.rs`, both of which set
-/// the value at the top of their single test), which is the whole window the
-/// override needs.
+/// Reading once puts every read before the first connection in the binary
+/// that sets one (`sync_recv_timeout.rs`, which sets it at the top of its
+/// single test), which is the whole window the override needs.
 fn env_millis(var: &str, fallback: Duration) -> Duration {
     std::env::var(var)
         .ok()
