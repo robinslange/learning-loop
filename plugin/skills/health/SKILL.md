@@ -222,7 +222,7 @@ Run a dry run of the repairer, which writes nothing:
 ll-run normalise-frontmatter.mjs
 ```
 
-It covers the folders the atomic-note contract covers (0-inbox, 1-fleeting, 2-literature, 3-permanent) and ends with `N scanned, M would be repaired, K need a human`, followed by one line per note it cannot repair and why. Report M and K in both modes. In deep mode, also list the notes that need a human. If it exits non-zero it prints one line saying why and scans nothing: report that line in place of the counts, and skip the frontmatter fix in Step 9.
+It covers the folders the atomic-note contract covers (0-inbox, 1-fleeting, 2-literature, 3-permanent) and ends with `N scanned, M would be repaired, K need a human`, followed by one line per note it cannot repair and why. Report M and K in both modes. In deep mode, also list the notes that need a human. If it exits non-zero it scanned nothing: report what it printed in place of the counts, and skip the frontmatter fix in Step 9.
 
 A note first committed together with 99 or more others (a merged vault, a restored backup, a batch sync) and without a valid `date:` is one it cannot repair: that commit says when the notes arrived, not when they were written, so the repairer never guesses. Say so rather than suggesting a date.
 
