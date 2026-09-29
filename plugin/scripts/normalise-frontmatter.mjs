@@ -218,8 +218,11 @@ export function repair(raw, relPath, addDate) {
     }
   }
 
-  if (indexOf('date') === -1 || !DATE_RE.test(String(fm.date ?? ''))) {
-    if (indexOf('date') !== -1) drop(indexOf('date'));
+  // Read from the lines, not `fm`: a `created:` renamed above is not in `fm.date`.
+  const dateAt = indexOf('date');
+  const dateValue = dateAt === -1 ? '' : valueOf(dateAt).replace(/^(["'])(.*)\1$/, '$2');
+  if (!DATE_RE.test(dateValue)) {
+    if (dateAt !== -1) drop(dateAt);
     if (addDate) {
       append('date', addDate);
       changes.push(`date: ${addDate} (first commit)`);

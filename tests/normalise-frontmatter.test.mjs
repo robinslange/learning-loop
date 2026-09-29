@@ -12,6 +12,24 @@ const SCRIPT = new URL('../plugin/scripts/normalise-frontmatter.mjs', import.met
 
 const note = (fm, body = 'A thought of my own.\n') => `---\n${fm}\n---\n${body}`;
 
+test("an aliased date keeps the note's own value", () => {
+  const { changes, next } = repair(
+    note('tags: [a]\ncreated: 2026-01-02\nsource: synthesis'),
+    '3-permanent/a.md',
+    '2026-05-05',
+  );
+  assert.deepEqual(changes, ['created -> date: 2026-01-02']);
+  assert.match(next, /^date: 2026-01-02$/m);
+  assert.doesNotMatch(next, /^created:/m);
+});
+
+test('a quoted date is kept when the note is repaired for something else', () => {
+  const raw = note('source: synthesis\ntags: [a]\ndate: "2026-01-02"');
+  const { changes, next } = repair(raw, '3-permanent/a.md', '2026-05-05');
+  assert.deepEqual(changes, ['reordered to tags/date/source']);
+  assert.match(next, /^date: "2026-01-02"$/m);
+});
+
 test('a missing date is taken from the first commit', () => {
   const { next } = repair(note('tags: [a]\nsource: synthesis'), '3-permanent/a.md', '2026-03-04');
   assert.match(next, /^date: 2026-03-04$/m);
