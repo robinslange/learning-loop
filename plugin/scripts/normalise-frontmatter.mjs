@@ -274,7 +274,12 @@ export function repair(raw, relPath, addDate) {
   if (!DATE_RE.test(dateValue)) {
     if (addDate) {
       // Every date line goes, and the change names each, so none is lost unseen.
-      const replaced = groups.map((g, i) => (g.key === 'date' ? valueOf(i) : '')).filter(Boolean);
+      // A block list's value is on its item lines, not the key line.
+      const named = (g, i) =>
+        [valueOf(i), ...g.lines.slice(1).map((l) => l.trim().replace(/^-\s*/, ''))]
+          .filter(Boolean)
+          .join(' ');
+      const replaced = groups.map((g, i) => (g.key === 'date' ? named(g, i) : '')).filter(Boolean);
       for (let i; (i = indexOf('date')) !== -1; ) drop(i);
       append('date', addDate);
       const was = replaced.length ? `, replacing ${replaced.join(', ')}` : '';
