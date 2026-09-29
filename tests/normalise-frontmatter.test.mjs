@@ -265,6 +265,24 @@ test('a note in a subfolder of a contract folder is scanned, as the gate covers 
 });
 
 test(
+  'a symlink below a contract folder is not followed, so it cannot loop or leave the vault',
+  { skip: skipOnWindows('directory symlinks need elevation on win32') },
+  () => {
+    const vault = tempDir('ll-normalise-links-');
+    const outside = tempDir('ll-normalise-outside-');
+    mkdirSync(join(vault, '3-permanent/topic'), { recursive: true });
+    writeFileSync(join(vault, '3-permanent/topic/in.md'), note('tags: [a]\nsource: synthesis'));
+    writeFileSync(join(outside, 'secret.md'), note('tags: [a]\nsource: synthesis'));
+    symlinkSync('.', join(vault, '3-permanent/topic/self'));
+    symlinkSync(outside, join(vault, '3-permanent/ext'));
+
+    const out = dryRun(vault);
+    assert.match(out, /1 scanned, 1 would be repaired/);
+    assert.doesNotMatch(out, /self|ext|secret/);
+  },
+);
+
+test(
   'a contract folder that is a symlink is still scanned',
   { skip: skipOnWindows('directory symlinks need elevation on win32') },
   () => {
