@@ -131,12 +131,12 @@ function listNotes(vaultRoot) {
   for (const folder of folders) {
     let entries;
     try {
-      entries = readdirSync(join(vaultRoot, folder));
+      entries = readdirSync(join(vaultRoot, folder), { recursive: true });
     } catch {
       continue;
     }
     for (const name of entries) {
-      if (name.endsWith('.md')) notes.push(`${folder}/${name}`);
+      if (name.endsWith('.md')) notes.push(`${folder}/${name.replace(/\\/g, '/')}`);
     }
   }
   return notes.sort();
