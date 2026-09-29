@@ -17,16 +17,24 @@ import { execFileSync } from 'node:child_process';
 import { getVaultPath } from './lib/config.mjs';
 import { parseFrontmatter } from './lib/markdown-parse.mjs';
 import { hasFlag, flagValue } from './lib/cli-args.mjs';
+import { isMainModule } from './lib/is-main.mjs';
+import { gitEnv } from './lib/session-ledger.mjs';
+import { classifyVaultPath } from '../hooks/lib/common.mjs';
 import {
   ALIASES,
   DATE_RE,
+  SCHEMA_CLASSES,
   STATUS_VALUES,
   checkFrontmatter,
   hasBodyCitation,
   hasUngroundedFactualSignal,
 } from './lib/frontmatter-schema.mjs';
 
-const FOLDERS = ['0-inbox', '1-fleeting', '2-literature', '3-permanent'];
+// A commit that adds this many notes at once is an import: a merged vault, a
+// restored backup. Its date is when the notes arrived, not when they were
+// written, so those notes get no date from it and are left for a human.
+export const BULK_ADD = 100;
+
 const FM_SPLIT_RE = /^(---\r?\n)([\s\S]*?)(\r?\n---\r?\n?)/;
 
 // One `git log` walk instead of 5600 per-file invocations. --reverse puts the
@@ -34,7 +42,9 @@ const FM_SPLIT_RE = /^(---\r?\n)([\s\S]*?)(\r?\n---\r?\n?)/;
 // added it. --relative is load-bearing: the vault is usually a subdirectory of
 // its repo, and git otherwise reports repo-root-relative paths that never match
 // a vault-relative lookup, silently sending every note to the mtime fallback.
-function buildAddDateMap(vaultRoot) {
+//
+// A note first added by a bulk commit maps to null, not to that commit's date.
+export function buildAddDateMap(vaultRoot) {
   const map = new Map();
   let out;
   try {
@@ -49,22 +59,35 @@ function buildAddDateMap(vaultRoot) {
         '--format=@%ad',
         '--name-only',
       ],
-      { cwd: vaultRoot, encoding: 'utf-8', maxBuffer: 256 * 1024 * 1024 },
+      { cwd: vaultRoot, encoding: 'utf-8', maxBuffer: 256 * 1024 * 1024, env: gitEnv() },
     );
   } catch {
     return map;
   }
-  let current = null;
+  let date = null;
+  let added = [];
+  const flush = () => {
+    const bulk = added.filter((p) => p.endsWith('.md')).length >= BULK_ADD;
+    for (const p of added) if (!map.has(p)) map.set(p, bulk ? null : date);
+    added = [];
+  };
   for (const line of out.split('\n')) {
-    if (line.startsWith('@')) current = line.slice(1).trim();
-    else if (line && current && !map.has(line)) map.set(line, current);
+    if (line.startsWith('@')) {
+      flush();
+      date = line.slice(1).trim();
+    } else if (line && date) added.push(line);
   }
+  flush();
   return map;
 }
 
+// The folders the contract covers, as SCHEMA_CLASSES names them.
 function listNotes(vaultRoot) {
+  const folders = readdirSync(vaultRoot, { withFileTypes: true })
+    .filter((d) => d.isDirectory() && SCHEMA_CLASSES.has(classifyVaultPath(`${d.name}/`)))
+    .map((d) => d.name);
   const notes = [];
-  for (const folder of FOLDERS) {
+  for (const folder of folders) {
     let entries;
     try {
       entries = readdirSync(join(vaultRoot, folder));
@@ -135,7 +158,8 @@ function reorder(groups) {
     .map((x) => x.g);
 }
 
-function repair(raw, relPath, addDate) {
+// `addDate` is null for a note a bulk import added: see BULK_ADD.
+export function repair(raw, relPath, addDate) {
   const split = raw.match(FM_SPLIT_RE);
   if (!split) return { changes: [], unfixable: ['no frontmatter block'] };
 
@@ -200,7 +224,9 @@ function repair(raw, relPath, addDate) {
       append('date', addDate);
       changes.push(`date: ${addDate} (first commit)`);
     } else {
-      unfixable.push('no date and no git history');
+      unfixable.push(
+        'no date, and it came in with a bulk import, so its first commit is not when it was written',
+      );
     }
   }
 
@@ -225,41 +251,45 @@ function repair(raw, relPath, addDate) {
   return { changes, unfixable, next: split[1] + text + split[3] + body };
 }
 
-const args = process.argv.slice(2);
-const apply = hasFlag(args, '--apply');
-const only = flagValue(args, '--folder', null);
-const vaultRoot = getVaultPath();
-const addDates = buildAddDateMap(vaultRoot);
+function main(args) {
+  const apply = hasFlag(args, '--apply');
+  const only = flagValue(args, '--folder', null);
+  const vaultRoot = getVaultPath();
+  const addDates = buildAddDateMap(vaultRoot);
 
-let scanned = 0;
-let repaired = 0;
-const blocked = [];
+  let scanned = 0;
+  let repaired = 0;
+  const blocked = [];
 
-for (const rel of listNotes(vaultRoot)) {
-  if (only && !rel.startsWith(only)) continue;
-  const abs = join(vaultRoot, rel);
-  let raw;
-  try {
-    raw = readFileSync(abs, 'utf-8');
-  } catch {
-    continue;
+  for (const rel of listNotes(vaultRoot)) {
+    if (only && !rel.startsWith(only)) continue;
+    const abs = join(vaultRoot, rel);
+    let raw;
+    try {
+      raw = readFileSync(abs, 'utf-8');
+    } catch {
+      continue;
+    }
+    scanned++;
+
+    // Untracked by git: the file's own mtime is the best date there is.
+    const addDate = addDates.has(rel) ? addDates.get(rel) : isoDate(statSync(abs).mtime);
+    const { changes, unfixable, next } = repair(raw, rel, addDate);
+
+    if (unfixable.length > 0) blocked.push(`${rel}: ${unfixable.join(', ')}`);
+    if (changes.length === 0) continue;
+
+    repaired++;
+    console.log(`${rel}`);
+    for (const c of changes) console.log(`    ${c}`);
+    if (apply && next) writeFileSync(abs, next);
   }
-  scanned++;
 
-  const fallback = isoDate(statSync(abs).mtime);
-  const { changes, unfixable, next } = repair(raw, rel, addDates.get(rel) || fallback);
-
-  if (unfixable.length > 0) blocked.push(`${rel}: ${unfixable.join(', ')}`);
-  if (changes.length === 0) continue;
-
-  repaired++;
-  console.log(`${rel}`);
-  for (const c of changes) console.log(`    ${c}`);
-  if (apply && next) writeFileSync(abs, next);
+  console.log(
+    `\n${scanned} scanned, ${repaired} ${apply ? 'repaired' : 'would be repaired'}, ${blocked.length} need a human`,
+  );
+  for (const b of blocked) console.log(`  ${b}`);
+  if (!apply && repaired > 0) console.log(`\nRe-run with --apply to write.`);
 }
 
-console.log(
-  `\n${scanned} scanned, ${repaired} ${apply ? 'repaired' : 'would be repaired'}, ${blocked.length} need a human`,
-);
-for (const b of blocked) console.log(`  ${b}`);
-if (!apply && repaired > 0) console.log(`\nRe-run with --apply to write.`);
+if (isMainModule(import.meta.url)) main(process.argv.slice(2));
