@@ -214,6 +214,18 @@ recorded somewhere retrieval cannot see (a stub, a moved file, prose in a fix
 plan) rather than through `supersede-note.mjs`. `/doctor --full` reports the
 same count as the `invalidated-adoption` check.
 
+### Step 7.66: Check: Frontmatter Contract
+
+Run a dry run of the repairer, which writes nothing:
+
+```bash
+ll-run normalise-frontmatter.mjs
+```
+
+It covers the folders the atomic-note contract covers (0-inbox, 1-fleeting, 2-literature, 3-permanent) and ends with `N scanned, M would be repaired, K need a human`, followed by one line per note it cannot repair and why. Report M and K in both modes. In deep mode, also list the notes that need a human.
+
+A note that arrived in a bulk import (a merged vault, a restored backup) and has no `date:` is one it cannot repair: its first commit is when it arrived, not when it was written, so the repairer never guesses. Say so rather than suggesting a date.
+
 ### Step 7.7: Check: Federation
 
 Skip silently unless `PLUGIN_DATA/federation/config.json` or
@@ -257,13 +269,14 @@ Vault Health: YYYY-MM-DD
   Embeddings:      N notes not indexed
   Broken links:    N dead [[wikilinks]]
   Contradictions:  N cycles of mutually disputing notes
+  Frontmatter:     M notes repairable, K need a human
   Retrieval usage: N surfaced-then-ignored, U unevaluated, M never retrieved by search in Kd of logs
   Federation:      <one line per profile with a verdict, omitted entirely when healthy or unconfigured>
 
   Status: [total] issues [run /health --deep for full analysis]
 ```
 
-Omit the contradictions line when Step 7.4 was skipped or found none. Omit the federation line when Step 7.7 was skipped or every profile is healthy. Omit the retrieval-usage line when Step 7.6 was skipped for lack of telemetry. "Surfaced-then-ignored" means `/reflect` explicitly judged the note unused; "unevaluated" means no session ever judged it — see the Step 7.6 caveats.
+Omit the contradictions line when Step 7.4 was skipped or found none. Omit the frontmatter line when M and K are both 0. Omit the federation line when Step 7.7 was skipped or every profile is healthy. Omit the retrieval-usage line when Step 7.6 was skipped for lack of telemetry. "Surfaced-then-ignored" means `/reflect` explicitly judged the note unused; "unevaluated" means no session ever judged it — see the Step 7.6 caveats.
 
 The "run --deep" hint only appears in light mode. In deep mode, replace with a summary of findings.
 
@@ -278,12 +291,14 @@ If `--auto` flag is set:
 
 - **Ghost dupes:** Delete inbox copies silently using `Bash`: `rm {{VAULT}}/0-inbox/<filename>`
 - **Broken links:** Strip the `[[` and `]]` brackets from broken wikilinks using `Edit` tool, leaving the display text as plain text (e.g., `[[missing-note]]` becomes `missing-note`, `[[missing|displayed]]` becomes `displayed`)
+- **Frontmatter:** not an auto-fix, because it edits notes across the vault. Ask as below.
 - Report what was fixed
 
 If `--auto` flag is NOT set:
 
 - **Ghost dupes:** Ask "Delete N ghost duplicates from inbox? (y/n)": wait for approval, then delete
 - **Broken links:** Ask "Remove N broken wikilinks? (y/n)": wait for approval, then fix
+- **Frontmatter** (asked in `--auto` too): Ask "Repair frontmatter on M notes? (y/n)": wait for approval, then run `ll-run normalise-frontmatter.mjs --apply` and report its summary line. The K notes that need a human stay listed; never date one by hand from a guess
 - **Near-dupes, orphans, stale, embeddings:** Flag only with recommended next command (`/inbox`, `/verify`, `/deepen`, or "re-index in Obsidian")
 - **Retrieval usage:** Flag only, never auto-fix. Recommend `/deepen "<note>"` for surfaced-then-ignored notes worth sharpening, and archival (move to `_archive/`, ask first) for persistently-ignored notes. Never recommend anything from `surfaced_unevaluated` — the fix there is running `/reflect`, not touching the notes. For `never_surfaced` notes, do NOT recommend archiving based on retrieval telemetry alone — the injected channel under-records, so absence from search logs does not mean absence from sessions. Ask the user whether the note feels useful before suggesting archival.
 

@@ -13,8 +13,10 @@
 // Zero-dep by the same constraint as markdown-parse.mjs: hooks fire before
 // `npm install` runs during a plugin upgrade.
 
-// Folder classes whose notes are atomic and carry the contract. Project index
-// notes, maps and bookmarks are a different shape and are deliberately exempt.
+// Folder classes whose notes are atomic and carry the contract: 0-inbox,
+// 1-fleeting, 2-literature and 3-permanent. Project index notes (4-projects),
+// maps (5-maps), writing (6-writing) and bookmarks are a different shape and
+// are deliberately exempt. normalise-frontmatter.mjs reads its scope from here.
 export const SCHEMA_CLASSES = new Set(['inbox', 'fleeting', 'literature', 'permanent']);
 
 export const REQUIRED_KEYS = ['tags', 'date', 'source'];
