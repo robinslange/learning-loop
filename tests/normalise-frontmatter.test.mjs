@@ -1,14 +1,27 @@
-import { test } from 'node:test';
+import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { BULK_ADD, buildAddDateMap, repair } from '../plugin/scripts/normalise-frontmatter.mjs';
 import { fixtureGitEnv } from './helpers/git-fixture.mjs';
 import { strykerEnv } from './helpers/stryker-env.mjs';
 
-const SCRIPT = new URL('../plugin/scripts/normalise-frontmatter.mjs', import.meta.url).pathname;
+const SCRIPT = fileURLToPath(
+  new URL('../plugin/scripts/normalise-frontmatter.mjs', import.meta.url),
+);
+
+const temps = [];
+const tempDir = (prefix) => {
+  const dir = mkdtempSync(join(tmpdir(), prefix));
+  temps.push(dir);
+  return dir;
+};
+after(() => {
+  for (const dir of temps) rmSync(dir, { recursive: true, force: true });
+});
 
 const note = (fm, body = 'A thought of my own.\n') => `---\n${fm}\n---\n${body}`;
 
@@ -35,7 +48,7 @@ test('a missing date is taken from the first commit', () => {
   assert.match(next, /^date: 2026-03-04$/m);
 });
 
-test('a note from a bulk import is left for a human, not given the import date', () => {
+test('a note from a bulk commit is left for a human, not given that commit date', () => {
   const { changes, unfixable, next } = repair(
     note('tags: [a]\nsource: synthesis'),
     '3-permanent/a.md',
@@ -58,7 +71,7 @@ test('keys are put in template order, and a repaired note needs no second pass',
 });
 
 function gitRepo() {
-  const dir = mkdtempSync(join(tmpdir(), 'll-normalise-'));
+  const dir = tempDir('ll-normalise-');
   const env = fixtureGitEnv();
   const git = (args, date) =>
     execFileSync('git', ['-C', dir, ...args], {
@@ -77,14 +90,20 @@ function gitRepo() {
     git(['add', '-A']);
     git(['commit', '-q', '-m', 'add'], `${date}T12:00:00Z`);
   };
-  return { dir, commit };
+  const move = (from, to, date) => {
+    mkdirSync(join(dir, to, '..'), { recursive: true });
+    git(['mv', from, to]);
+    git(['commit', '-q', '-m', 'move'], `${date}T12:00:00Z`);
+  };
+  return { dir, commit, move };
 }
+
+const many = (n, prefix) => Array.from({ length: n }, (_, i) => `${prefix}-${i}.md`);
 
 test('notes a bulk commit added map to null, and the rest to their commit date', () => {
   const { dir, commit } = gitRepo();
   commit(['3-permanent/own.md', '0-inbox/fresh.md'], '2026-01-02');
-  const imported = Array.from({ length: BULK_ADD }, (_, i) => `3-permanent/imported-${i}.md`);
-  commit(imported, '2026-09-15');
+  commit(many(BULK_ADD, '3-permanent/imported'), '2026-09-15');
 
   const dates = buildAddDateMap(dir);
   assert.equal(dates.get('3-permanent/own.md'), '2026-01-02');
@@ -95,29 +114,54 @@ test('notes a bulk commit added map to null, and the rest to their commit date',
 
 test('a commit one note short of the bulk size still dates its notes', () => {
   const { dir, commit } = gitRepo();
-  const batch = Array.from({ length: BULK_ADD - 1 }, (_, i) => `3-permanent/n-${i}.md`);
-  commit(batch, '2026-04-01');
+  commit(many(BULK_ADD - 1, '3-permanent/n'), '2026-04-01');
   assert.equal(buildAddDateMap(dir).get('3-permanent/n-0.md'), '2026-04-01');
 });
 
-test('a dry run reports the contract folders only, and writes nothing', () => {
-  const { dir: vault, commit } = gitRepo();
-  commit(['3-permanent/own.md', '4-projects/p.md'], '2026-01-02');
-  const home = mkdtempSync(join(tmpdir(), 'll-normalise-home-'));
-  const pluginData = mkdtempSync(join(tmpdir(), 'll-normalise-pd-'));
-  const before = readFileSync(join(vault, '3-permanent/own.md'), 'utf8');
+test('a promoted note keeps the date it was first added, and a promoted import stays undated', () => {
+  const { dir, commit, move } = gitRepo();
+  commit(['0-inbox/idea.md'], '2026-01-02');
+  commit(many(BULK_ADD, '0-inbox/imported'), '2026-09-15');
+  move('0-inbox/idea.md', '3-permanent/idea.md', '2026-03-03');
+  move('0-inbox/imported-0.md', '3-permanent/imported-0.md', '2026-10-01');
 
-  const out = execFileSync(process.execPath, [SCRIPT], {
+  const dates = buildAddDateMap(dir);
+  assert.equal(dates.get('3-permanent/idea.md'), '2026-01-02');
+  assert.equal(dates.has('3-permanent/imported-0.md'), true);
+  assert.equal(dates.get('3-permanent/imported-0.md'), null);
+});
+
+test('a non-ASCII name is looked up by its real path, and counts toward a bulk commit', () => {
+  const { dir, commit } = gitRepo();
+  commit(['0-inbox/café.md'], '2026-01-02');
+  commit([...many(BULK_ADD - 1, '3-permanent/imported'), '3-permanent/naïve.md'], '2026-09-15');
+
+  const dates = buildAddDateMap(dir);
+  assert.equal(dates.get('0-inbox/café.md'), '2026-01-02');
+  assert.equal(dates.get('3-permanent/imported-0.md'), null);
+});
+
+function dryRun(vault) {
+  const home = tempDir('ll-normalise-home-');
+  return execFileSync(process.execPath, [SCRIPT], {
     encoding: 'utf8',
     env: {
       PATH: process.env.PATH,
       HOME: home,
       USERPROFILE: home,
-      CLAUDE_PLUGIN_DATA: pluginData,
+      CLAUDE_PLUGIN_DATA: tempDir('ll-normalise-pd-'),
       VAULT_PATH: vault,
       ...strykerEnv(),
     },
   });
+}
+
+test('a dry run reports the contract folders only, and writes nothing', () => {
+  const { dir: vault, commit } = gitRepo();
+  commit(['3-permanent/own.md', '4-projects/p.md'], '2026-01-02');
+  const before = readFileSync(join(vault, '3-permanent/own.md'), 'utf8');
+
+  const out = dryRun(vault);
 
   assert.match(out, /^3-permanent\/own\.md$/m);
   assert.match(out, /date: 2026-01-02 \(first commit\)/);
