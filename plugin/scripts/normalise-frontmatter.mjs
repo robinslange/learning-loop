@@ -245,7 +245,8 @@ export function repair(raw, relPath, addDate) {
 
   // Read from the lines, not `fm`: a `created:` renamed above is not in `fm.date`.
   const dateAt = indexOf('date');
-  const dateValue = dateAt === -1 ? '' : valueOf(dateAt).replace(/^(["'])(.*)\1$/, '$2');
+  // Unwrapped as leniently as the parser: a one-item list, and quotes on either end.
+  const dateValue = dateAt === -1 ? '' : valueOf(dateAt).replace(/^\[?["']?|["']?\]?$/g, '');
   if (!DATE_RE.test(dateValue)) {
     if (addDate) {
       if (dateAt !== -1) drop(dateAt);

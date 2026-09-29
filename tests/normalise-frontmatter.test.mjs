@@ -44,6 +44,14 @@ test('a quoted date is kept when the note is repaired for something else', () =>
   assert.match(next, /^date: "2026-01-02"$/m);
 });
 
+test('a date in a one-item list or with a stray quote is still read as a date', () => {
+  for (const value of ['[2026-01-02]', '"2026-01-02']) {
+    const raw = note(`source: synthesis\ntags: [a]\ndate: ${value}`);
+    const { changes } = repair(raw, '3-permanent/a.md', '2026-05-05');
+    assert.deepEqual(changes, ['reordered to tags/date/source'], value);
+  }
+});
+
 test('a missing date is taken from the first commit', () => {
   const { next } = repair(note('tags: [a]\nsource: synthesis'), '3-permanent/a.md', '2026-03-04');
   assert.match(next, /^date: 2026-03-04$/m);
