@@ -30,6 +30,9 @@ jobs:
         with:
           node-version: 22
 
+      - name: Install dependencies
+        run: npm ci
+
       - name: Install ygrep
         if: runner.os == 'Linux'
         env:
