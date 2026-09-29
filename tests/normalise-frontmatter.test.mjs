@@ -71,6 +71,14 @@ test('a malformed date is replaced, and the change says what it replaced', () =>
   assert.match(next, /^date: 2026-05-05$/m);
 });
 
+test('with two date lines, both go and the change line names both', () => {
+  const raw = note('tags: [a]\ndate: 2026-01-02\nsource: synthesis\ndate: bad');
+  const { changes, next } = repair(raw, '3-permanent/a.md', '2026-05-05');
+  assert.deepEqual(changes, ['date: 2026-05-05 (first commit, replacing 2026-01-02, bad)']);
+  assert.equal(next.match(/^date:/gm).length, 1);
+  assert.match(next, /^date: 2026-05-05$/m);
+});
+
 test('a missing date is taken from the first commit', () => {
   const { next } = repair(note('tags: [a]\nsource: synthesis'), '3-permanent/a.md', '2026-03-04');
   assert.match(next, /^date: 2026-03-04$/m);

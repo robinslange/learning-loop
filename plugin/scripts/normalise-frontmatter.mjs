@@ -269,13 +269,15 @@ export function repair(raw, relPath, addDate) {
   const current = parseFrontmatter(
     split[1] + groups.flatMap((g) => g.lines).join('\n') + split[3],
   ).fm;
-  const dateAt = indexOf('date');
   const dateValue = String(current.date ?? '');
   if (!DATE_RE.test(dateValue)) {
     if (addDate) {
-      if (dateAt !== -1) drop(dateAt);
+      // Every date line goes, and the change names each, so none is lost unseen.
+      const replaced = groups.map((g, i) => (g.key === 'date' ? valueOf(i) : '')).filter(Boolean);
+      for (let i; (i = indexOf('date')) !== -1; ) drop(i);
       append('date', addDate);
-      changes.push(`date: ${addDate} (first commit${dateValue ? `, replacing ${dateValue}` : ''})`);
+      const was = replaced.length ? `, replacing ${replaced.join(', ')}` : '';
+      changes.push(`date: ${addDate} (first commit${was})`);
     } else {
       // The line stays: a malformed date is still the only record of one.
       const found = dateValue ? `date ${dateValue} is not YYYY-MM-DD` : 'no date';
