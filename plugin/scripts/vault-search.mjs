@@ -97,7 +97,10 @@ function logRetrieval(command, query, results) {
   });
 }
 
+// No index yet (a fresh install, a vault never indexed) means no intentions,
+// not an error: session-start refreshes this in the background every session.
 function intentions(context) {
+  if (!DB_PATH || !existsSync(DB_PATH)) return [];
   try {
     ensureBinary();
     const args = ['intentions', DB_PATH];

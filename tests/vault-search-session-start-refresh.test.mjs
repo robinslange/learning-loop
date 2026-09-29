@@ -13,6 +13,7 @@ import {
   chmodSync,
   existsSync,
   readFileSync,
+  readdirSync,
   rmSync,
 } from 'node:fs';
 import { join } from 'node:path';
@@ -40,6 +41,14 @@ function createStubBinary(binDir, argvLog) {
   return stub;
 }
 
+// A vault whose index exists, so intentions has something to ask the binary.
+function vaultWithIndex(root) {
+  const vault = join(root, 'vault');
+  mkdirSync(join(vault, '.vault-search'), { recursive: true });
+  writeFileSync(join(vault, '.vault-search', 'vault-index.db'), '');
+  return vault;
+}
+
 test(
   'vault-search intentions --session-start-refresh writes intentions.json marker',
   { timeout: 12000, skip: skipOnWindows('shebang stub: #!/bin/sh stubs not executable on win32') },
@@ -52,6 +61,7 @@ test(
       mkdirSync(binDir, { recursive: true });
       const argvLog = join(tmpPluginData, 'argv.log');
       createStubBinary(binDir, argvLog);
+      const vault = vaultWithIndex(tmpPluginData);
 
       const result = spawnSync(
         process.execPath,
@@ -63,6 +73,7 @@ test(
             PATH: process.env.PATH,
             NODE_PATH: process.env.NODE_PATH || '',
             CLAUDE_PLUGIN_DATA: tmpPluginData,
+            VAULT_PATH: vault,
           },
         },
       );
@@ -94,6 +105,54 @@ test(
       assert.equal(argv[0], 'intentions');
       assert.equal(argv.length, 2, `expected [intentions, <db>]; got ${JSON.stringify(argv)}`);
       assert.deepEqual(parsed, [{ context: 'x', count: 1 }]);
+    } finally {
+      rmSync(tmpPluginData, { recursive: true, force: true });
+    }
+  },
+);
+
+// session-start runs this refresh in the background every session. A vault
+// that has never been indexed has no intentions, and must not log an error
+// each time it asks.
+test(
+  'with no index, the refresh writes an empty marker and logs nothing',
+  { timeout: 12000, skip: skipOnWindows('shebang stub: #!/bin/sh stubs not executable on win32') },
+  () => {
+    const tmpPluginData = mkdtempSync(join(tmpdir(), 'll-vssr-'));
+    try {
+      const binDir = join(tmpPluginData, 'bin');
+      mkdirSync(binDir, { recursive: true });
+      const argvLog = join(tmpPluginData, 'argv.log');
+      createStubBinary(binDir, argvLog);
+      const vault = join(tmpPluginData, 'vault');
+      mkdirSync(vault);
+
+      spawnSync(process.execPath, [VAULT_SEARCH, 'intentions', '--session-start-refresh'], {
+        encoding: 'utf8',
+        timeout: 10000,
+        env: {
+          PATH: process.env.PATH,
+          NODE_PATH: process.env.NODE_PATH || '',
+          CLAUDE_PLUGIN_DATA: tmpPluginData,
+          VAULT_PATH: vault,
+        },
+      });
+
+      const markerPath = join(tmpPluginData, 'session-start-cache', 'intentions.json');
+      assert.deepEqual(JSON.parse(readFileSync(markerPath, 'utf8')), []);
+      assert.ok(
+        !existsSync(argvLog),
+        'the binary must not be asked about an index that does not exist',
+      );
+      const logs = join(tmpPluginData, 'logs');
+      const errors = existsSync(logs)
+        ? readdirSync(logs)
+            .flatMap((f) => readFileSync(join(logs, f), 'utf8').trim().split('\n'))
+            .filter(Boolean)
+            .map((l) => JSON.parse(l))
+            .filter((row) => row.level === 'error')
+        : [];
+      assert.deepEqual(errors, []);
     } finally {
       rmSync(tmpPluginData, { recursive: true, force: true });
     }
