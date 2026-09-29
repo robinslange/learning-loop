@@ -222,7 +222,7 @@ Run a dry run of the repairer, which writes nothing:
 ll-run normalise-frontmatter.mjs
 ```
 
-It covers the folders the atomic-note contract covers (0-inbox, 1-fleeting, 2-literature, 3-permanent) and ends with `N scanned, M would be repaired, K need a human`, followed by one line per note it cannot repair and why. Report M and K in both modes. In deep mode, also list the notes that need a human.
+It covers the folders the atomic-note contract covers (0-inbox, 1-fleeting, 2-literature, 3-permanent) and ends with `N scanned, M would be repaired, K need a human`, followed by one line per note it cannot repair and why. Report M and K in both modes. In deep mode, also list the notes that need a human. If it exits non-zero it prints one line saying why and scans nothing: report that line in place of the counts, and skip the frontmatter fix in Step 9.
 
 A note first committed together with 99 or more others (a merged vault, a restored backup, a batch sync) and without a valid `date:` is one it cannot repair: that commit says when the notes arrived, not when they were written, so the repairer never guesses. Say so rather than suggesting a date.
 
@@ -276,7 +276,7 @@ Vault Health: YYYY-MM-DD
   Status: [total] issues [run /health --deep for full analysis]
 ```
 
-Omit the contradictions line when Step 7.4 was skipped or found none. Omit the frontmatter line when M and K are both 0. M and K count toward the Status total like any other line. Omit the federation line when Step 7.7 was skipped or every profile is healthy. Omit the retrieval-usage line when Step 7.6 was skipped for lack of telemetry. "Surfaced-then-ignored" means `/reflect` explicitly judged the note unused; "unevaluated" means no session ever judged it — see the Step 7.6 caveats.
+Omit the contradictions line when Step 7.4 was skipped or found none. Omit the frontmatter line when M and K are both 0. M and K are not added to the Status total: one note can be in both, and M includes notes that only need their keys reordered. Omit the federation line when Step 7.7 was skipped or every profile is healthy. Omit the retrieval-usage line when Step 7.6 was skipped for lack of telemetry. "Surfaced-then-ignored" means `/reflect` explicitly judged the note unused; "unevaluated" means no session ever judged it — see the Step 7.6 caveats.
 
 The "run --deep" hint only appears in light mode. In deep mode, replace with a summary of findings.
 

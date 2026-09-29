@@ -312,7 +312,14 @@ function main(args) {
   const apply = hasFlag(args, '--apply');
   const only = flagValue(args, '--folder', null);
   const vaultRoot = getVaultPath();
-  const addDates = buildAddDateMap(vaultRoot);
+  let addDates;
+  try {
+    addDates = buildAddDateMap(vaultRoot);
+  } catch (err) {
+    console.error(`normalise-frontmatter: ${err.message}; nothing was scanned`);
+    process.exitCode = 1;
+    return;
+  }
 
   let scanned = 0;
   let repaired = 0;
