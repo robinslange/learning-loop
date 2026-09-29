@@ -276,7 +276,7 @@ Vault Health: YYYY-MM-DD
   Status: [total] issues [run /health --deep for full analysis]
 ```
 
-Omit the contradictions line when Step 7.4 was skipped or found none. Omit the frontmatter line when M and K are both 0. Omit the federation line when Step 7.7 was skipped or every profile is healthy. Omit the retrieval-usage line when Step 7.6 was skipped for lack of telemetry. "Surfaced-then-ignored" means `/reflect` explicitly judged the note unused; "unevaluated" means no session ever judged it — see the Step 7.6 caveats.
+Omit the contradictions line when Step 7.4 was skipped or found none. Omit the frontmatter line when M and K are both 0. M and K count toward the Status total like any other line. Omit the federation line when Step 7.7 was skipped or every profile is healthy. Omit the retrieval-usage line when Step 7.6 was skipped for lack of telemetry. "Surfaced-then-ignored" means `/reflect` explicitly judged the note unused; "unevaluated" means no session ever judged it — see the Step 7.6 caveats.
 
 The "run --deep" hint only appears in light mode. In deep mode, replace with a summary of findings.
 
@@ -357,7 +357,7 @@ Return per-note: dimension scores + maturity tier (shallow/medium/deep) + specif
 
 ## Key Principles
 
-- **Fast by default.** Light mode should complete in seconds: no agent launches, and no note reading beyond filenames except the frontmatter dry run in Step 7.66, a script that reads every contract note in well under a second.
+- **Fast by default.** Light mode should complete in seconds: no agent launches, and no note reading beyond filenames except the frontmatter dry run in Step 7.66, a script that reads every contract note in about a second.
 - **Deep is thorough.** When the user asks for `--deep`, give them the full picture. Use note-scorer, read content, diff duplicates.
 - **Safe fixes only.** `--auto` only touches ghost dupes (inbox copy of promoted note) and broken links (references to nothing). Never auto-merge, auto-delete non-duplicate notes, or auto-promote.
 - **Route, don't replicate.** Health diagnoses: it doesn't do the work of `/verify`, `/inbox`, or `/deepen`. Recommend the right tool for each issue.
