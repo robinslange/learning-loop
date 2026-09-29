@@ -49,7 +49,6 @@ const FM_SPLIT_RE = /^(---\r?\n)([\s\S]*?)(\r?\n---\r?\n?)/;
 //
 // A note first added by a bulk commit maps to null, not to that commit's date.
 export function buildAddDateMap(vaultRoot) {
-  const map = new Map();
   let out;
   try {
     out = execFileSync(
@@ -63,6 +62,10 @@ export function buildAddDateMap(vaultRoot) {
         '--relative',
         '--date=short',
         '--format=%x01%ad',
+        // A user's log.showSignature or color.ui would put text between the
+        // records this reads.
+        '--no-show-signature',
+        '--no-color',
       ],
       {
         cwd: vaultRoot,
@@ -73,32 +76,45 @@ export function buildAddDateMap(vaultRoot) {
       },
     );
   } catch {
-    return map;
+    return new Map();
   }
+  return parseAddDates(out);
+}
+
+// Records are NUL-separated: \x01<date> opens a commit, then a status (A, M,
+// D, T, or R<score> with two paths) and its path(s). Anything else means the
+// output is not what this reads, and guessing past it would date notes wrong.
+export function parseAddDates(out) {
+  const map = new Map();
   let date = null;
   let added = [];
   let renamed = [];
   const flush = () => {
     const bulk = added.filter((p) => p.endsWith('.md')).length >= BULK_ADD;
     for (const p of added) if (!map.has(p)) map.set(p, bulk ? null : date);
-    for (const [from, to] of renamed) if (map.has(from)) map.set(to, map.get(from));
+    // A note that moved no longer lives at its old path; a new note made there later is a different note.
+    for (const [from, to] of renamed) {
+      if (!map.has(from)) continue;
+      map.set(to, map.get(from));
+      map.delete(from);
+    }
     added = [];
     renamed = [];
   };
-  // Records are NUL-separated: \x01<date> opens a commit, then a status
-  // (A, M, D, ... or R<score> with two paths) and its path(s).
   const tokens = out.split('\0');
   for (let i = 0; i < tokens.length; ) {
     const token = tokens[i++].replace(/^\n/, '');
     if (token.startsWith('\x01')) {
       flush();
       date = token.slice(1);
-    } else if (token.startsWith('R')) {
+    } else if (/^R\d*$/.test(token)) {
       renamed.push([tokens[i++], tokens[i++]]);
     } else if (token === 'A') {
       added.push(tokens[i++]);
-    } else if (token) {
+    } else if (/^[MDT]$/.test(token)) {
       i++;
+    } else if (token !== '') {
+      throw new Error(`unexpected git log output: ${JSON.stringify(token.slice(0, 40))}`);
     }
   }
   flush();
