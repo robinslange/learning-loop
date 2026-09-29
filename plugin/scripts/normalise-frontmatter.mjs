@@ -123,21 +123,26 @@ export function parseAddDates(out) {
 
 // The folders the contract covers, as SCHEMA_CLASSES names them. A name that
 // is not a directory fails the readdir below and is skipped there.
+//
+// Below the folder itself only real directories and files are walked: a
+// symlink there can loop, or lead out of the vault into files --apply
+// would then rewrite.
 function listNotes(vaultRoot) {
-  const folders = readdirSync(vaultRoot).filter((name) =>
-    SCHEMA_CLASSES.has(classifyVaultPath(`${name}/`)),
-  );
   const notes = [];
-  for (const folder of folders) {
+  const walk = (rel) => {
     let entries;
     try {
-      entries = readdirSync(join(vaultRoot, folder), { recursive: true });
+      entries = readdirSync(join(vaultRoot, rel), { withFileTypes: true });
     } catch {
-      continue;
+      return;
     }
-    for (const name of entries) {
-      if (name.endsWith('.md')) notes.push(`${folder}/${name.replace(/\\/g, '/')}`);
+    for (const e of entries) {
+      if (e.isDirectory()) walk(`${rel}/${e.name}`);
+      else if (e.isFile() && e.name.endsWith('.md')) notes.push(`${rel}/${e.name}`);
     }
+  };
+  for (const name of readdirSync(vaultRoot)) {
+    if (SCHEMA_CLASSES.has(classifyVaultPath(`${name}/`))) walk(name);
   }
   return notes.sort();
 }
