@@ -5,7 +5,12 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSyn
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { BULK_ADD, buildAddDateMap, repair } from '../plugin/scripts/normalise-frontmatter.mjs';
+import {
+  BULK_ADD,
+  buildAddDateMap,
+  parseAddDates,
+  repair,
+} from '../plugin/scripts/normalise-frontmatter.mjs';
 import { fixtureGitEnv } from './helpers/git-fixture.mjs';
 import { skipOnWindows } from './helpers/platform.mjs';
 import { strykerEnv } from './helpers/stryker-env.mjs';
@@ -163,6 +168,53 @@ test('a promoted note keeps the date it was first added, and a promoted import s
   assert.equal(dates.get('3-permanent/idea.md'), '2026-01-02');
   assert.equal(dates.has('3-permanent/imported-0.md'), true);
   assert.equal(dates.get('3-permanent/imported-0.md'), null);
+});
+
+// git log -z --name-status: each commit is \x01<date>\0, then \n before the first status.
+const log = (...commits) =>
+  commits.map(([date, ...entries]) => `\x01${date}\0\n${entries.join('\0')}\0`).join('');
+
+test('edits, deletions and type changes are read past, not taken as notes', () => {
+  const dates = parseAddDates(
+    log(
+      ['2020-01-01', 'A', '0-inbox/a.md'],
+      [
+        '2020-02-02',
+        'M',
+        '0-inbox/a.md',
+        'D',
+        '0-inbox/gone.md',
+        'T',
+        '0-inbox/l.md',
+        'A',
+        '0-inbox/b.md',
+      ],
+    ),
+  );
+  assert.deepEqual(
+    [...dates],
+    [
+      ['0-inbox/a.md', '2020-01-01'],
+      ['0-inbox/b.md', '2020-02-02'],
+    ],
+  );
+});
+
+test('output it does not recognise is refused, not guessed past', () => {
+  const signed = `No signature\n${log(['2020-01-01', 'A', '0-inbox/a.md'])}`;
+  assert.throws(() => parseAddDates(signed), /unexpected git log output/);
+});
+
+test('a note made at a path another note was promoted away from gets its own date', () => {
+  const dates = parseAddDates(
+    log(
+      ['2020-01-01', 'A', '0-inbox/x.md'],
+      ['2021-01-01', 'R100', '0-inbox/x.md', '3-permanent/x.md'],
+      ['2026-01-01', 'A', '0-inbox/x.md'],
+    ),
+  );
+  assert.equal(dates.get('3-permanent/x.md'), '2020-01-01');
+  assert.equal(dates.get('0-inbox/x.md'), '2026-01-01');
 });
 
 test('a non-ASCII name is looked up by its real path, and counts toward a bulk commit', () => {
