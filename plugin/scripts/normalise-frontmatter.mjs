@@ -37,11 +37,15 @@ export const BULK_ADD = 100;
 
 const FM_SPLIT_RE = /^(---\r?\n)([\s\S]*?)(\r?\n---\r?\n?)/;
 
-// One `git log` walk instead of 5600 per-file invocations. --reverse puts the
-// oldest commit first, so the first time a path appears is the commit that
-// added it. --relative is load-bearing: the vault is usually a subdirectory of
-// its repo, and git otherwise reports repo-root-relative paths that never match
-// a vault-relative lookup, silently sending every note to the mtime fallback.
+// One `git log` walk instead of 5600 per-file invocations, oldest commit
+// first, mapping each note's current path to the date it was first added.
+// --relative is load-bearing: the vault is usually a subdirectory of its repo,
+// and git otherwise reports repo-root-relative paths that never match a
+// vault-relative lookup, silently sending every note to the mtime fallback.
+//
+// Renames carry the date to the new path, because promotion moves notes and a
+// moved note was written when it was first added. -z keeps paths raw, so a
+// non-ASCII name matches its file instead of git's quoted escape.
 //
 // A note first added by a bulk commit maps to null, not to that commit's date.
 export function buildAddDateMap(vaultRoot) {
@@ -53,29 +57,49 @@ export function buildAddDateMap(vaultRoot) {
       [
         'log',
         '--reverse',
-        '--diff-filter=A',
+        '-z',
+        '-M',
+        '--name-status',
         '--relative',
         '--date=short',
-        '--format=@%ad',
-        '--name-only',
+        '--format=%x01%ad',
       ],
-      { cwd: vaultRoot, encoding: 'utf-8', maxBuffer: 256 * 1024 * 1024, env: gitEnv() },
+      {
+        cwd: vaultRoot,
+        encoding: 'utf-8',
+        maxBuffer: 256 * 1024 * 1024,
+        env: gitEnv(),
+        stdio: ['ignore', 'pipe', 'ignore'],
+      },
     );
   } catch {
     return map;
   }
   let date = null;
   let added = [];
+  let renamed = [];
   const flush = () => {
     const bulk = added.filter((p) => p.endsWith('.md')).length >= BULK_ADD;
     for (const p of added) if (!map.has(p)) map.set(p, bulk ? null : date);
+    for (const [from, to] of renamed) if (map.has(from)) map.set(to, map.get(from));
     added = [];
+    renamed = [];
   };
-  for (const line of out.split('\n')) {
-    if (line.startsWith('@')) {
+  // Records are NUL-separated: \x01<date> opens a commit, then a status
+  // (A, M, D, ... or R<score> with two paths) and its path(s).
+  const tokens = out.split('\0');
+  for (let i = 0; i < tokens.length; ) {
+    const token = tokens[i++].replace(/^\n/, '');
+    if (token.startsWith('\x01')) {
       flush();
-      date = line.slice(1).trim();
-    } else if (line && date) added.push(line);
+      date = token.slice(1);
+    } else if (token.startsWith('R')) {
+      renamed.push([tokens[i++], tokens[i++]]);
+    } else if (token === 'A') {
+      added.push(tokens[i++]);
+    } else if (token) {
+      i++;
+    }
   }
   flush();
   return map;
