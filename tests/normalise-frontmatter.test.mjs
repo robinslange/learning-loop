@@ -1,7 +1,15 @@
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { execFileSync, spawnSync } from 'node:child_process';
+import {
+  chmodSync,
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -235,12 +243,12 @@ test('a non-ASCII name is looked up by its real path, and counts toward a bulk c
   assert.equal(dates.get('3-permanent/imported-0.md'), null);
 });
 
-function dryRun(vault) {
+function runScript(vault, path = process.env.PATH) {
   const home = tempDir('ll-normalise-home-');
-  return execFileSync(process.execPath, [SCRIPT], {
+  return spawnSync(process.execPath, [SCRIPT], {
     encoding: 'utf8',
     env: {
-      PATH: process.env.PATH,
+      PATH: path,
       HOME: home,
       USERPROFILE: home,
       CLAUDE_PLUGIN_DATA: tempDir('ll-normalise-pd-'),
@@ -248,6 +256,12 @@ function dryRun(vault) {
       ...strykerEnv(),
     },
   });
+}
+
+function dryRun(vault) {
+  const r = runScript(vault);
+  assert.equal(r.status, 0, r.stderr);
+  return r.stdout;
 }
 
 test('a dry run reports the contract folders only, and writes nothing', () => {
@@ -300,5 +314,46 @@ test(
     symlinkSync(join(vault, 'real-permanent'), join(vault, '3-permanent'));
 
     assert.match(dryRun(vault), /1 scanned, 1 would be repaired/);
+  },
+);
+
+test(
+  'a note that is a symlink to a file is still scanned',
+  { skip: skipOnWindows('symlinks need elevation on win32') },
+  () => {
+    const vault = tempDir('ll-normalise-filelink-');
+    mkdirSync(join(vault, '3-permanent'));
+    mkdirSync(join(vault, 'shared'));
+    writeFileSync(join(vault, 'shared/real.md'), note('tags: [a]\nsource: synthesis'));
+    symlinkSync(join(vault, 'shared/real.md'), join(vault, '3-permanent/linked.md'));
+
+    assert.match(dryRun(vault), /^3-permanent\/linked\.md$/m);
+  },
+);
+
+test('a vault that is not there is one line on stderr, not a stack trace', () => {
+  const r = runScript(join(tempDir('ll-normalise-gone-'), 'missing'));
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /^normalise-frontmatter: .*; nothing was scanned$/m);
+  assert.doesNotMatch(r.stderr, /^\s+at /m, 'no stack trace');
+});
+
+test(
+  'git output the walk does not recognise is one line on stderr, and nothing is scanned',
+  { skip: skipOnWindows('shebang stub: #!/bin/sh git is not executable on win32') },
+  () => {
+    const { dir: vault, commit } = gitRepo();
+    commit(['3-permanent/own.md'], '2026-01-02');
+    const bin = tempDir('ll-normalise-fakegit-');
+    writeFileSync(join(bin, 'git'), "#!/bin/sh\nprintf 'garbage\\0'\n");
+    chmodSync(join(bin, 'git'), 0o755);
+
+    const r = runScript(vault, `${bin}:${process.env.PATH}`);
+    assert.equal(r.status, 1);
+    assert.equal(r.stdout, '');
+    assert.match(
+      r.stderr,
+      /^normalise-frontmatter: unexpected git log output: "garbage"; nothing was scanned$/m,
+    );
   },
 );

@@ -124,9 +124,10 @@ export function parseAddDates(out) {
 // The folders the contract covers, as SCHEMA_CLASSES names them. A name that
 // is not a directory fails the readdir below and is skipped there.
 //
-// Below the folder itself only real directories and files are walked: a
-// symlink there can loop, or lead out of the vault into files --apply
-// would then rewrite.
+// Below the folder itself only real directories are descended into: a
+// directory link can loop, or lead out of the vault into files --apply would
+// then rewrite. Any other .md entry is read, as before: on Windows a cloud-sync
+// placeholder file is a reparse point, which is not isFile().
 function listNotes(vaultRoot) {
   const notes = [];
   const walk = (rel) => {
@@ -138,7 +139,7 @@ function listNotes(vaultRoot) {
     }
     for (const e of entries) {
       if (e.isDirectory()) walk(`${rel}/${e.name}`);
-      else if (e.isFile() && e.name.endsWith('.md')) notes.push(`${rel}/${e.name}`);
+      else if (e.name.endsWith('.md')) notes.push(`${rel}/${e.name}`);
     }
   };
   for (const name of readdirSync(vaultRoot)) {
@@ -313,8 +314,11 @@ function main(args) {
   const only = flagValue(args, '--folder', null);
   const vaultRoot = getVaultPath();
   let addDates;
+  let notes;
   try {
+    if (!vaultRoot) throw new Error('no vault path is configured');
     addDates = buildAddDateMap(vaultRoot);
+    notes = listNotes(vaultRoot);
   } catch (err) {
     console.error(`normalise-frontmatter: ${err.message}; nothing was scanned`);
     process.exitCode = 1;
@@ -325,7 +329,7 @@ function main(args) {
   let repaired = 0;
   const blocked = [];
 
-  for (const rel of listNotes(vaultRoot)) {
+  for (const rel of notes) {
     if (only && !rel.startsWith(only)) continue;
     const abs = join(vaultRoot, rel);
     let raw;
