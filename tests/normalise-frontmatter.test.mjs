@@ -52,6 +52,20 @@ test('a date in a one-item list or with a stray quote is still read as a date', 
   }
 });
 
+test('a date written as a block list is kept, as the gate reads it', () => {
+  const raw = note('source: synthesis\ntags: [a]\ndate:\n  - 2026-01-02');
+  const { changes, next } = repair(raw, '3-permanent/a.md', '2026-05-05');
+  assert.deepEqual(changes, ['reordered to tags/date/source']);
+  assert.match(next, /^date:\n {2}- 2026-01-02$/m);
+});
+
+test('a malformed date is replaced, and the change says what it replaced', () => {
+  const raw = note('tags: [a]\ndate: [2026-01-02\nsource: synthesis');
+  const { changes, next } = repair(raw, '3-permanent/a.md', '2026-05-05');
+  assert.deepEqual(changes, ['date: 2026-05-05 (first commit, replacing [2026-01-02)']);
+  assert.match(next, /^date: 2026-05-05$/m);
+});
+
 test('a missing date is taken from the first commit', () => {
   const { next } = repair(note('tags: [a]\nsource: synthesis'), '3-permanent/a.md', '2026-03-04');
   assert.match(next, /^date: 2026-03-04$/m);
