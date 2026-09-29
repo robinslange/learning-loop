@@ -243,18 +243,21 @@ export function repair(raw, relPath, addDate) {
     }
   }
 
-  // Read from the lines, not `fm`: a `created:` renamed above is not in `fm.date`.
+  // Judged as the gate parses it, from the lines as they stand after the
+  // renames above: a `created:` renamed to `date:` is not in `fm`.
+  const current = parseFrontmatter(
+    split[1] + groups.flatMap((g) => g.lines).join('\n') + split[3],
+  ).fm;
   const dateAt = indexOf('date');
-  // Unwrapped as leniently as the parser: a one-item list, and quotes on either end.
-  const dateValue = dateAt === -1 ? '' : valueOf(dateAt).replace(/^\[?["']?|["']?\]?$/g, '');
+  const dateValue = String(current.date ?? '');
   if (!DATE_RE.test(dateValue)) {
     if (addDate) {
       if (dateAt !== -1) drop(dateAt);
       append('date', addDate);
-      changes.push(`date: ${addDate} (first commit)`);
+      changes.push(`date: ${addDate} (first commit${dateValue ? `, replacing ${dateValue}` : ''})`);
     } else {
       // The line stays: a malformed date is still the only record of one.
-      const found = dateAt === -1 ? 'no date' : `date ${dateValue} is not YYYY-MM-DD`;
+      const found = dateValue ? `date ${dateValue} is not YYYY-MM-DD` : 'no date';
       unfixable.push(
         `${found}, and it was first committed with ${BULK_ADD - 1}+ other notes at once, so that commit's date is not when it was written`,
       );
