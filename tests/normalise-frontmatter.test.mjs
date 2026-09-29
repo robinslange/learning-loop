@@ -256,6 +256,14 @@ test('a dry run reports the contract folders only, and writes nothing', () => {
   assert.equal(readFileSync(join(vault, '3-permanent/own.md'), 'utf8'), before);
 });
 
+test('a note in a subfolder of a contract folder is scanned, as the gate covers it', () => {
+  const { dir: vault, commit } = gitRepo();
+  commit(['3-permanent/topic/deep.md'], '2026-01-02');
+  const out = dryRun(vault);
+  assert.match(out, /^3-permanent\/topic\/deep\.md$/m);
+  assert.match(out, /1 scanned, 1 would be repaired/);
+});
+
 test(
   'a contract folder that is a symlink is still scanned',
   { skip: skipOnWindows('directory symlinks need elevation on win32') },
