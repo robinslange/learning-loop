@@ -30,9 +30,9 @@ import {
   hasUngroundedFactualSignal,
 } from './lib/frontmatter-schema.mjs';
 
-// A commit that adds this many notes at once is an import: a merged vault, a
-// restored backup. Its date is when the notes arrived, not when they were
-// written, so those notes get no date from it and are left for a human.
+// A commit that adds this many notes at once says when they arrived, not when
+// they were written: a merged vault, a restored backup, a batch sync. Those
+// notes get no date from it and are left for a human.
 export const BULK_ADD = 100;
 
 const FM_SPLIT_RE = /^(---\r?\n)([\s\S]*?)(\r?\n---\r?\n?)/;
@@ -105,11 +105,12 @@ export function buildAddDateMap(vaultRoot) {
   return map;
 }
 
-// The folders the contract covers, as SCHEMA_CLASSES names them.
+// The folders the contract covers, as SCHEMA_CLASSES names them. A name that
+// is not a directory fails the readdir below and is skipped there.
 function listNotes(vaultRoot) {
-  const folders = readdirSync(vaultRoot, { withFileTypes: true })
-    .filter((d) => d.isDirectory() && SCHEMA_CLASSES.has(classifyVaultPath(`${d.name}/`)))
-    .map((d) => d.name);
+  const folders = readdirSync(vaultRoot).filter((name) =>
+    SCHEMA_CLASSES.has(classifyVaultPath(`${name}/`)),
+  );
   const notes = [];
   for (const folder of folders) {
     let entries;
@@ -246,13 +247,15 @@ export function repair(raw, relPath, addDate) {
   const dateAt = indexOf('date');
   const dateValue = dateAt === -1 ? '' : valueOf(dateAt).replace(/^(["'])(.*)\1$/, '$2');
   if (!DATE_RE.test(dateValue)) {
-    if (dateAt !== -1) drop(dateAt);
     if (addDate) {
+      if (dateAt !== -1) drop(dateAt);
       append('date', addDate);
       changes.push(`date: ${addDate} (first commit)`);
     } else {
+      // The line stays: a malformed date is still the only record of one.
+      const found = dateAt === -1 ? 'no date' : `date ${dateValue} is not YYYY-MM-DD`;
       unfixable.push(
-        'no date, and it came in with a bulk import, so its first commit is not when it was written',
+        `${found}, and it was first committed with ${BULK_ADD - 1}+ other notes at once, so that commit's date is not when it was written`,
       );
     }
   }

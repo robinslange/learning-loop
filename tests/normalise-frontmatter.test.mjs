@@ -1,12 +1,13 @@
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { BULK_ADD, buildAddDateMap, repair } from '../plugin/scripts/normalise-frontmatter.mjs';
 import { fixtureGitEnv } from './helpers/git-fixture.mjs';
+import { skipOnWindows } from './helpers/platform.mjs';
 import { strykerEnv } from './helpers/stryker-env.mjs';
 
 const SCRIPT = fileURLToPath(
@@ -56,7 +57,18 @@ test('a note from a bulk commit is left for a human, not given that commit date'
   );
   assert.deepEqual(changes, []);
   assert.equal(next, undefined);
-  assert.match(unfixable.join(), /bulk import/);
+  assert.match(unfixable.join(), /^no date, and it was first committed with 99\+ other notes/);
+});
+
+test("a bulk note's malformed date line survives a repair made for something else", () => {
+  const { changes, unfixable, next } = repair(
+    note('tags: [a]\ncreated: 2023/05/01'),
+    '3-permanent/a.md',
+    null,
+  );
+  assert.ok(changes.includes('created -> date: 2023/05/01'), changes.join());
+  assert.match(next, /^date: 2023\/05\/01$/m, 'the only record of a date must not be dropped');
+  assert.match(unfixable.join(), /^date 2023\/05\/01 is not YYYY-MM-DD/);
 });
 
 test('keys are put in template order, and a repaired note needs no second pass', () => {
@@ -169,3 +181,16 @@ test('a dry run reports the contract folders only, and writes nothing', () => {
   assert.match(out, /1 scanned, 1 would be repaired, 0 need a human/);
   assert.equal(readFileSync(join(vault, '3-permanent/own.md'), 'utf8'), before);
 });
+
+test(
+  'a contract folder that is a symlink is still scanned',
+  { skip: skipOnWindows('directory symlinks need elevation on win32') },
+  () => {
+    const vault = tempDir('ll-normalise-sym-');
+    mkdirSync(join(vault, 'real-permanent'));
+    writeFileSync(join(vault, 'real-permanent/own.md'), note('tags: [a]\nsource: synthesis'));
+    symlinkSync(join(vault, 'real-permanent'), join(vault, '3-permanent'));
+
+    assert.match(dryRun(vault), /1 scanned, 1 would be repaired/);
+  },
+);

@@ -224,7 +224,7 @@ ll-run normalise-frontmatter.mjs
 
 It covers the folders the atomic-note contract covers (0-inbox, 1-fleeting, 2-literature, 3-permanent) and ends with `N scanned, M would be repaired, K need a human`, followed by one line per note it cannot repair and why. Report M and K in both modes. In deep mode, also list the notes that need a human.
 
-A note that arrived in a bulk import (a merged vault, a restored backup) and has no `date:` is one it cannot repair: its first commit is when it arrived, not when it was written, so the repairer never guesses. Say so rather than suggesting a date.
+A note first committed together with 99 or more others (a merged vault, a restored backup, a batch sync) and without a valid `date:` is one it cannot repair: that commit says when the notes arrived, not when they were written, so the repairer never guesses. Say so rather than suggesting a date.
 
 ### Step 7.7: Check: Federation
 
@@ -298,7 +298,7 @@ If `--auto` flag is NOT set:
 
 - **Ghost dupes:** Ask "Delete N ghost duplicates from inbox? (y/n)": wait for approval, then delete
 - **Broken links:** Ask "Remove N broken wikilinks? (y/n)": wait for approval, then fix
-- **Frontmatter** (asked in `--auto` too): Ask "Repair frontmatter on M notes? (y/n)": wait for approval, then run `ll-run normalise-frontmatter.mjs --apply` and report its summary line. The K notes that need a human stay listed; never date one by hand from a guess
+- **Frontmatter** (asked in `--auto` too, and only when M > 0): Ask "Repair frontmatter on M notes? (y/n)": wait for approval, then run `ll-run normalise-frontmatter.mjs --apply` and report its summary line. The K notes that need a human stay listed; never date one by hand from a guess
 - **Near-dupes, orphans, stale, embeddings:** Flag only with recommended next command (`/inbox`, `/verify`, `/deepen`, or "re-index in Obsidian")
 - **Retrieval usage:** Flag only, never auto-fix. Recommend `/deepen "<note>"` for surfaced-then-ignored notes worth sharpening, and archival (move to `_archive/`, ask first) for persistently-ignored notes. Never recommend anything from `surfaced_unevaluated` — the fix there is running `/reflect`, not touching the notes. For `never_surfaced` notes, do NOT recommend archiving based on retrieval telemetry alone — the injected channel under-records, so absence from search logs does not mean absence from sessions. Ask the user whether the note feels useful before suggesting archival.
 
@@ -307,7 +307,7 @@ If `--auto` flag is NOT set:
 Output a one-line summary of actions taken:
 
 ```
-Fixed: N ghost dupes removed, N broken links cleaned. Remaining: N issues: see recommendations above.
+Fixed: N ghost dupes removed, N broken links cleaned, N frontmatter blocks repaired. Remaining: N issues: see recommendations above.
 ```
 
 If nothing was fixed (no `--auto`, user declined, or nothing fixable):
@@ -357,7 +357,7 @@ Return per-note: dimension scores + maturity tier (shallow/medium/deep) + specif
 
 ## Key Principles
 
-- **Fast by default.** Light mode should complete in seconds: no agent launches, no note reading beyond filenames.
+- **Fast by default.** Light mode should complete in seconds: no agent launches, and no note reading beyond filenames except the frontmatter dry run in Step 7.66, a script that reads every contract note in well under a second.
 - **Deep is thorough.** When the user asks for `--deep`, give them the full picture. Use note-scorer, read content, diff duplicates.
 - **Safe fixes only.** `--auto` only touches ghost dupes (inbox copy of promoted note) and broken links (references to nothing). Never auto-merge, auto-delete non-duplicate notes, or auto-promote.
 - **Route, don't replicate.** Health diagnoses: it doesn't do the work of `/verify`, `/inbox`, or `/deepen`. Recommend the right tool for each issue.
