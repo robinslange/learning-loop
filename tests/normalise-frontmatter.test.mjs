@@ -337,6 +337,34 @@ test(
   },
 );
 
+test(
+  'a note that links to a file outside the vault is not read, so --apply cannot write through it',
+  { skip: skipOnWindows('symlinks need elevation on win32') },
+  () => {
+    const vault = tempDir('ll-normalise-outlink-');
+    const outside = tempDir('ll-normalise-outside-');
+    const original = note('tags: [a]\ncreated: 2020-01-01');
+    writeFileSync(join(outside, 'secret.md'), original);
+    mkdirSync(join(vault, '3-permanent/sub'), { recursive: true });
+    symlinkSync(join(outside, 'secret.md'), join(vault, '3-permanent/sub/linked.md'));
+    const home = tempDir('ll-normalise-home-');
+
+    const r = spawnSync(process.execPath, [SCRIPT, '--apply'], {
+      encoding: 'utf8',
+      env: {
+        PATH: process.env.PATH,
+        HOME: home,
+        USERPROFILE: home,
+        CLAUDE_PLUGIN_DATA: tempDir('ll-normalise-pd-'),
+        VAULT_PATH: vault,
+        ...strykerEnv(),
+      },
+    });
+    assert.match(r.stdout, /0 scanned/);
+    assert.equal(readFileSync(join(outside, 'secret.md'), 'utf8'), original);
+  },
+);
+
 test('a vault that is not there is one line on stderr, not a stack trace', () => {
   const r = runScript(join(tempDir('ll-normalise-gone-'), 'missing'));
   assert.equal(r.status, 1);

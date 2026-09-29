@@ -11,8 +11,8 @@
 // map. Reserialising would rewrite quoting and key order across thousands of
 // notes and bury the real diff.
 
-import { readFileSync, writeFileSync, readdirSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { readFileSync, writeFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
+import { join, sep } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { getVaultPath } from './lib/config.mjs';
 import { parseFrontmatter } from './lib/markdown-parse.mjs';
@@ -124,13 +124,24 @@ export function parseAddDates(out) {
 // The folders the contract covers, as SCHEMA_CLASSES names them. A name that
 // is not a directory fails the readdir below and is skipped there.
 //
-// Below the folder itself only real directories are descended into: a
-// directory link can loop, or lead out of the vault into files --apply would
-// then rewrite. Any other .md entry is read, as before: on Windows a cloud-sync
-// placeholder file is a reparse point, which is not isFile().
+// Below the folder itself only real directories are descended into, since a
+// directory link can loop. A note that is a link is read only when it resolves
+// inside the vault or inside the folder's own real root: --apply writes
+// through links, and must never write outside them. Other .md entries are
+// read without asking their type, because on Windows a cloud-sync placeholder
+// file is a reparse point rather than a plain file.
 function listNotes(vaultRoot) {
   const notes = [];
-  const walk = (rel) => {
+  const within = (path, roots) => {
+    try {
+      const real = realpathSync(path);
+      return roots.some((root) => real === root || real.startsWith(root + sep));
+    } catch {
+      return false;
+    }
+  };
+  const vaultReal = realpathSync(vaultRoot);
+  const walk = (rel, roots) => {
     let entries;
     try {
       entries = readdirSync(join(vaultRoot, rel), { withFileTypes: true });
@@ -138,12 +149,21 @@ function listNotes(vaultRoot) {
       return;
     }
     for (const e of entries) {
-      if (e.isDirectory()) walk(`${rel}/${e.name}`);
-      else if (e.name.endsWith('.md')) notes.push(`${rel}/${e.name}`);
+      const path = `${rel}/${e.name}`;
+      if (e.isDirectory()) walk(path, roots);
+      else if (!e.name.endsWith('.md')) continue;
+      else if (!e.isSymbolicLink() || within(join(vaultRoot, path), roots)) notes.push(path);
     }
   };
   for (const name of readdirSync(vaultRoot)) {
-    if (SCHEMA_CLASSES.has(classifyVaultPath(`${name}/`))) walk(name);
+    if (!SCHEMA_CLASSES.has(classifyVaultPath(`${name}/`))) continue;
+    let folderReal;
+    try {
+      folderReal = realpathSync(join(vaultRoot, name));
+    } catch {
+      continue;
+    }
+    walk(name, [vaultReal, folderReal]);
   }
   return notes.sort();
 }
