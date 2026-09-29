@@ -365,6 +365,21 @@ test(
   },
 );
 
+test(
+  'inside a contract folder linked from elsewhere, a note linking within that folder is read',
+  { skip: skipOnWindows('symlinks need elevation on win32') },
+  () => {
+    const vault = tempDir('ll-normalise-linkedroot-');
+    const perm = tempDir('ll-normalise-perm-');
+    mkdirSync(join(perm, 'sub'));
+    writeFileSync(join(perm, 'sub/note.md'), note('tags: [a]\nsource: synthesis'));
+    symlinkSync(join(perm, 'sub/note.md'), join(perm, 'alias.md'));
+    symlinkSync(perm, join(vault, '3-permanent'));
+
+    assert.match(dryRun(vault), /^3-permanent\/alias\.md$/m);
+  },
+);
+
 test('a vault that is not there is one line on stderr, not a stack trace', () => {
   const r = runScript(join(tempDir('ll-normalise-gone-'), 'missing'));
   assert.equal(r.status, 1);
