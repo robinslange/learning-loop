@@ -30,6 +30,8 @@ jobs:
         with:
           node-version: 22
 
+      # The network suites import msw through tests/helpers. That the plugin
+      # itself needs no install is held by the bare-node job below.
       - name: Install dependencies
         run: npm ci
 
@@ -78,6 +80,31 @@ jobs:
       - name: Run tests
         timeout-minutes: 10
         run: npm test
+
+  # The plugin runs on the node a user already has: it has no dependencies to
+  # install, so nothing it loads may come from node_modules. This job runs every
+  # suite except the MSW-backed ones on a checkout that installs nothing. A
+  # plugin module or test that imports a package fails here with
+  # ERR_MODULE_NOT_FOUND. The fix is to move the test to a job that installs
+  # what it needs, not to add an install here.
+  bare-node:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Run the suites that need no install
+        timeout-minutes: 10
+        run: |
+          set -euo pipefail
+          test ! -e node_modules
+          suites=$(find tests -name '*.test.mjs' | xargs grep -LE 'helpers/(msw|ollama-mock)\.mjs' | sort)
+          echo "$(echo "$suites" | wc -l) suites"
+          node --test $suites
 
   cargo:
     runs-on: ubuntu-latest
