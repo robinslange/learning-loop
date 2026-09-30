@@ -6,7 +6,15 @@
 // SessionStart pulled the code out from under every session still running the
 // previous version and forced a reload in all of them.
 
-import { readdirSync, readFileSync, mkdirSync, existsSync, statSync, unlinkSync } from 'node:fs';
+import {
+  readdirSync,
+  readFileSync,
+  mkdirSync,
+  existsSync,
+  statSync,
+  unlinkSync,
+  rmSync,
+} from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { HookConfig } from '../../scripts/lib/hook-config.mjs';
@@ -52,13 +60,15 @@ export async function run(ctx) {
     logError('session-start.shim-installer', err);
   }
 
-  // Stale-artifact sweep in the live plugin-data dir. Two leftovers accumulate
+  // Stale-artifact sweep in the live plugin-data dir. Three leftovers accumulate
   // in the *current* version's plugin-data:
   //   1. bin/ll-search.*-bak — orphaned binary backups (~290M each) from the
   //      old delta-patch updater. That code path is gone, but installs that
   //      passed through it still carry the backups; nothing ever removed them.
   //   2. convergence/*.json older than the TTL — regenerable discovery/verify
   //      session telemetry. The knowledge it produced already lives in the vault.
+  //   3. ingest-provenance.jsonl — /ingest's run log from before it moved onto
+  //      the provenance events stream. Nothing writes or reads it any more.
   // Best-effort: any failure is logged and skipped, never blocks session-start.
   try {
     const pluginData = getPluginData();
@@ -91,6 +101,8 @@ export async function run(ctx) {
           err: err?.code,
         });
       }
+
+      rmSync(DATA_FILES.legacyIngestProvenance(pluginData), { force: true });
     }
   } catch (err) {
     logError('session-start.stale-artifact-sweep', err);

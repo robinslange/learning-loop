@@ -30,6 +30,7 @@ const PERSISTED = {
   'DATA_FILES.harvestDenylist': '.harvest-denylist',
   'DATA_FILES.harvestedLog': '.harvested-log',
   'DATA_FILES.legacyWatchPid': 'watch.pid',
+  'DATA_FILES.legacyIngestProvenance': 'ingest-provenance.jsonl',
   'DATA_PATHS.bin': 'bin',
   'DATA_PATHS.convergence': 'convergence',
   'DATA_PATHS.librarian': 'librarian',

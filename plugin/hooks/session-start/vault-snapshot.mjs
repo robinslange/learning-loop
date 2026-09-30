@@ -134,11 +134,12 @@ export async function run(ctx) {
   //   (c) tmp session-label files older than 7 days. NEVER the live
   //       learning-loop-session-id fallback;
   //   (d) librarian/queue.jsonl.bak.* backups older than 7 days;
-  //   (e) retrieval/<prefix>-YYYY-MM.jsonl AND logs/log-YYYY-MM.jsonl logs
-  //       older than the cutoff month, measured by age across all prefixes
-  //       rather than counted per prefix, so a prefix nobody writes any more
-  //       is not pinned forever. The current month is always inside the
-  //       cutoff. provenance/ is untouched: its consumers read full history.
+  //   (e) retrieval/<prefix>-YYYY-MM.jsonl, logs/log-YYYY-MM.jsonl and
+  //       provenance/events-YYYY-MM.jsonl older than the cutoff month,
+  //       measured by age across all prefixes rather than counted per prefix,
+  //       so a prefix nobody writes any more is not pinned forever. The
+  //       current month is always inside the cutoff. provenance/ gets a
+  //       longer window than the other two, see PROVENANCE_LOG_KEEP_MONTHS.
   function sweepDir(dir, match, cutoffMs) {
     let names;
     try {
@@ -158,13 +159,13 @@ export async function run(ctx) {
     }
   }
 
-  // <prefix>-YYYY-MM.jsonl retention, shared by retrieval/ and logs/: drop
-  // anything older than a single cutoff month, shared by every prefix. The
-  // cutoff is derived from the filename's YYYY-MM suffix, never from mtime or
-  // file content, because a month bucket is written to (and its mtime bumped)
-  // all month long and mtime cannot tell a live current-month file from a
-  // stale one. YYYY-MM sorts lexically = chronologically, so string
-  // comparison is enough.
+  // <prefix>-YYYY-MM.jsonl retention, shared by retrieval/, logs/ and
+  // provenance/: drop anything older than a single cutoff month, shared by
+  // every prefix in the directory. The cutoff is derived from the filename's
+  // YYYY-MM suffix, never from mtime or file content, because a month bucket
+  // is written to (and its mtime bumped) all month long and mtime cannot tell
+  // a live current-month file from a stale one. YYYY-MM sorts lexically =
+  // chronologically, so string comparison is enough.
   //
   // This was previously keep-the-newest-N-per-prefix, which is a count rather
   // than an age. A prefix that stops being written never grows past its own
@@ -184,9 +185,8 @@ export async function run(ctx) {
   // prefix at the same three calendar months, but the epoch provides no safety
   // here and must not be cited as though it did. If the precision baseline
   // needs a longer horizon than retention, that is a conflict to resolve
-  // deliberately, not one to assume away. provenance/ is a different directory
-  // entirely and this function never touches it.
-  function sweepRetrievalLogs(dir, keepMonths) {
+  // deliberately, not one to assume away.
+  function sweepMonthlyLogs(dir, keepMonths) {
     let names;
     try {
       names = readdirSync(dir);
@@ -201,7 +201,7 @@ export async function run(ctx) {
       try {
         rmSync(join(dir, f), { force: true });
       } catch (err) {
-        if (err?.code !== 'ENOENT') logError('session-start.vault-snapshot.retrievalLogSweep', err);
+        if (err?.code !== 'ENOENT') logError('session-start.vault-snapshot.monthlyLogSweep', err);
       }
     }
   }
@@ -229,11 +229,12 @@ export async function run(ctx) {
         (f) => /^queue\.jsonl\.bak\..+$/.test(f),
         Date.now() - HookConfig.LIBRARIAN_QUEUE_BAK_TTL_MS,
       );
-      sweepRetrievalLogs(
-        DATA_PATHS.retrieval(ctx.pluginData),
-        HookConfig.RETRIEVAL_LOG_KEEP_MONTHS,
+      sweepMonthlyLogs(DATA_PATHS.retrieval(ctx.pluginData), HookConfig.RETRIEVAL_LOG_KEEP_MONTHS);
+      sweepMonthlyLogs(DATA_PATHS.logs(ctx.pluginData), HookConfig.RETRIEVAL_LOG_KEEP_MONTHS);
+      sweepMonthlyLogs(
+        DATA_PATHS.provenance(ctx.pluginData),
+        HookConfig.PROVENANCE_LOG_KEEP_MONTHS,
       );
-      sweepRetrievalLogs(DATA_PATHS.logs(ctx.pluginData), HookConfig.RETRIEVAL_LOG_KEEP_MONTHS);
     }
     sweepDir(ctx.tmp, (f) => /^claude-session-label-.+\.txt$/.test(f), weekCutoff);
     if (sweepMarker) writeMarker(sweepMarker, { ts: new Date().toISOString() });

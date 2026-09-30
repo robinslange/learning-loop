@@ -4,10 +4,11 @@
 
 import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs';
+import { mkdirSync, writeFileSync, utimesSync, existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomBytes } from 'node:crypto';
+import { HookConfig } from '../plugin/scripts/lib/hook-config.mjs';
 
 const runId = randomBytes(4).toString('hex');
 const TEMP_ROOT = join(tmpdir(), 'll-queue-' + runId);
@@ -144,6 +145,39 @@ describe('librarian-queue', () => {
     queue.expireStaleItems('/tmp/nonexistent-vault');
     const items = queue.readQueue();
     assert.equal(items[0].status, 'approved');
+  });
+
+  it('expireStaleItems keeps pending items and resolved ones created within LIBRARIAN_QUEUE_TTL_MS', () => {
+    const DAY = 24 * 60 * 60 * 1000;
+    const ttl = HookConfig.LIBRARIAN_QUEUE_TTL_MS;
+    const vault = join(TEMP_ROOT, 'vault');
+    mkdirSync(vault, { recursive: true });
+    const live = join(vault, 'live.md');
+    writeFileSync(live, '# live\n');
+    const past = new Date(Date.now() - DAY);
+    utimesSync(live, past, past);
+    const ago = (ms) => new Date(Date.now() - ms).toISOString();
+    const add = (id, status, created_at, target = 'missing.md') =>
+      queue.appendItem({ id, task: 'a', status, created_at, target });
+    add('expired-past-ttl', 'expired', ago(ttl + DAY));
+    add('expired-within-ttl', 'expired', ago(ttl - DAY));
+    add('expired-bad-date', 'expired', 'not a date');
+    add('approved-past-ttl', 'approved', ago(ttl + DAY));
+    add('approved-within-ttl', 'approved', ago(ttl - DAY));
+    add('pending-past-ttl', 'pending', ago(ttl + DAY));
+    add('pending-live', 'pending', ago(0), 'live.md');
+    // No age, so never stale and never past the window: it waits for review.
+    add('pending-bad-date', 'pending', 'not a date', 'live.md');
+    queue.expireStaleItems(vault);
+    assert.deepEqual(
+      queue.readQueue().map((i) => [i.id, i.status]),
+      [
+        ['expired-within-ttl', 'expired'],
+        ['approved-within-ttl', 'approved'],
+        ['pending-live', 'pending'],
+        ['pending-bad-date', 'pending'],
+      ],
+    );
   });
 
   it('resetState removes the state file', () => {

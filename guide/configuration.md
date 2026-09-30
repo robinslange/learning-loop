@@ -247,7 +247,7 @@ With no `provider` block (the default), calls go to local ollama using `model` +
 
 The librarian spawns as a child process of the watcher (started via `ll-watch`). It runs continuously, picking random unvisited notes and dispatching multiple tasks per note. Mechanical: staleness regex. Ollama tool-use loop: link investigation for orphans. Ollama structured-output classifiers: voice gate (topic-style titles in inbox/fleeting notes), tag suggestion (under-tagged notes with vocabulary-bounded picks from the vault's existing tags), duplicate detection (3-way enum against three nearest neighbours with body context). Each task writes its observations to `PLUGIN_DATA/librarian/queue.jsonl` with a distinct `task` field (`link_suggestion`, `voice_flag`, `tag_suggestion`, `duplicate_flag`, `staleness_suspect`). A separate `state.json` tracks visited notes and resets after a full pass.
 
-Review queued observations with `/health --librarian`. The librarian observes; humans and Claude act.
+Review queued observations with `/health --librarian`. The librarian observes; humans and Claude act. Pending items stay in the queue until reviewed or expired (after 30 days, or when the target note changes). Reviewed and expired items older than 90 days are dropped whenever expiry runs: when the pending queue is full, and at the end of `/health --librarian`.
 
 **Requirements:** ollama installed, 16GB+ system RAM, and the tier model pulled (`ollama pull gemma4:e2b` on 16–32GB, `ollama pull gemma3:12b` on 32GB+). Resident footprint is ~7.2GB (e2b) / ~8.9GB (12b). `keep_alive` (default `30m`) controls how long ollama keeps the model loaded after idle.
 
@@ -267,7 +267,7 @@ node scripts/install-cache-health.mjs
 
 ## Provenance
 
-Every vault write, edit, agent spawn and skill invocation logs to `provenance/events-YYYY-MM.jsonl`. Reads are not recorded here — the provenance module has no `Read` branch. The `/health` command reads these logs to show session activity patterns.
+Every vault write, edit, agent spawn and skill invocation logs to `provenance/events-YYYY-MM.jsonl`. Reads are not recorded here — the provenance module has no `Read` branch. The `/health` command reads these logs to show session activity patterns. Session start deletes months older than a year, so reports cover the last 12 months.
 
 Most events do not name the skill that caused them directly (a hook writing a note has no notion of "skill"), so `emitProvenance` derives `skill` when a caller omits it: the PostToolUse hook records the most recently invoked `Skill` tool for the session in a marker, and any later event from that session picks it up if it does not already carry one, including `agent-result`. A dispatched subagent has no notion of skill either, but the session that spawned it does. The marker survives for 8 hours, so a session's last skill remains the best attribution until the next `Skill` call. `session-summary` and `session-start` are hook-owned rather than skill-caused, so they never gain a derived `skill`.
 
