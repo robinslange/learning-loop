@@ -139,7 +139,8 @@ describe('stampSupersession replaces an existing superseded_by: instead of appen
   });
 
   it('a block-list superseded_by: goes with its items, leaving no orphan under the key above', () => {
-    const raw = '---\ntags: [a]\nsuperseded_by:\n  - 3-permanent/a.md\n- 3-permanent/b.md\n---\nBody.\n';
+    const raw =
+      '---\ntags: [a]\nsuperseded_by:\n  - 3-permanent/a.md\n- 3-permanent/b.md\n---\nBody.\n';
     const { next } = stampSupersession(raw, {
       date: '2026-09-22',
       replacementPath: '3-permanent/new.md',

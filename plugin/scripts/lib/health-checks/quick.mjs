@@ -9,6 +9,7 @@ import {
   DATA_PATHS,
   FEDERATION_PATHS,
   SHIM_NAMES,
+  VAULT_PATHS,
   binaryFileName,
   daemonSocketSupported,
   shimFileName,
@@ -318,7 +319,7 @@ export function checkSearchIndexExists({ vaultRoot } = {}) {
   if (!vaultRoot) {
     return c.fail('vault path not available', 'Fix vault-path first');
   }
-  const p = join(vaultRoot, '.vault-search/vault-index.db');
+  const p = VAULT_PATHS.index(vaultRoot);
   if (!existsSync(p)) {
     return c.fail(
       'no index — run vault-search.mjs index to build',

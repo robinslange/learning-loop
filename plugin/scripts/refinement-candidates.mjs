@@ -25,6 +25,7 @@ import { spawnSync } from 'node:child_process';
 import { ortSpawnEnv, binaryPath } from './lib/binary.mjs';
 import { logError } from './lib/log.mjs';
 import { getVaultPath } from './lib/config.mjs';
+import { VAULT_PATHS } from './lib/paths.mjs';
 import { hasFlag, flagValue } from './lib/cli-args.mjs';
 import { HookConfig } from './lib/hook-config.mjs';
 
@@ -87,7 +88,7 @@ async function buildCandidates(newNotePaths, opts = {}) {
     );
     process.exit(2);
   }
-  const dbPath = resolve(vaultRoot, '.vault-search/vault-index.db');
+  const dbPath = VAULT_PATHS.index(vaultRoot);
   const bin = resolveBinary();
 
   // The new-notes marker is append-only (hooks/modules/reflect-track.mjs), so a

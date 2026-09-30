@@ -21,7 +21,7 @@ import { emitJson } from './lib/io.mjs';
 import { safeLoad } from '../scripts/lib/safe-load.mjs';
 import { withLock } from '../scripts/lib/file-lock.mjs';
 import { env } from '../scripts/lib/env.mjs';
-import { DATA_PATHS } from '../scripts/lib/paths.mjs';
+import { DATA_PATHS, VAULT_PATHS } from '../scripts/lib/paths.mjs';
 import { HookConfig } from '../scripts/lib/hook-config.mjs';
 import { logError } from '../scripts/lib/log.mjs';
 import { readVaultProjectIndexSync, listProjectSlugs } from '../scripts/route-project-artefact.mjs';
@@ -314,7 +314,7 @@ async function inject({ session_id, prompt, messages, label }) {
     logShadow({ type: 'gate-fail-no-vault', gate: { passed: false, error: 'no_vault_path' } });
     process.exit(0);
   }
-  const vaultDbPath = join(vaultRoot, '.vault-search', 'vault-index.db');
+  const vaultDbPath = VAULT_PATHS.index(vaultRoot);
 
   const raceCapMs = env.LEARNING_LOOP_INJECTION_RACE_CAP_MS ?? HookConfig.INJECTION_RACE_CAP_MS;
   const results = await runBackendsWithRaceCap({ query, soloQuery, vaultDbPath, raceCapMs });

@@ -21,7 +21,7 @@ import { getPluginData, getVaultPath, getConfig } from './lib/config.mjs';
 import { pluginVersion, INSTALL_KEY, PLUGIN_NAME, MARKETPLACE_NAME } from './lib/plugin-meta.mjs';
 import { isProcessAlive } from './lib/file-lock.mjs';
 import { env, isOffline } from './lib/env.mjs';
-import { DATA_FILES, binaryFileName } from './lib/paths.mjs';
+import { DATA_FILES, VAULT_PATHS, binaryFileName } from './lib/paths.mjs';
 import { listVaultNotes } from './lib/vault-walk.mjs';
 import { fileURLToPath } from 'node:url';
 import { isMainModule } from './lib/is-main.mjs';
@@ -248,7 +248,7 @@ export async function runFullChecks(ctx = {}) {
     }
   }
 
-  const pidfilePath = c.vaultRoot ? join(c.vaultRoot, '.vault-search/watch.pid') : null;
+  const pidfilePath = c.vaultRoot ? VAULT_PATHS.watchPid(c.vaultRoot) : null;
   const pidfileExists = pidfilePath ? existsSync(pidfilePath) : false;
   let pid = null;
   let pidIsAlive = false;

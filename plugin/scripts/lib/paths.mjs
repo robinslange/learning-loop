@@ -1,3 +1,4 @@
+import { existsSync } from 'fs';
 import { sep, resolve, join, relative, isAbsolute } from 'path';
 import { tmpdir, homedir } from 'os';
 import { env } from './env.mjs';
@@ -187,10 +188,29 @@ export function daemonSocketSupported(platform = process.platform) {
   return platform !== 'win32';
 }
 
+// Everything the search stack keeps beside the vault it indexes. Spelled once
+// here because these paths cross the JS/Rust boundary and every caller derived
+// them by hand: the index alone had three spellings (join with two segments,
+// join with one, and resolve).
+export const VAULT_PATHS = {
+  dir: (vaultRoot) => join(vaultRoot, '.vault-search'),
+  index: (vaultRoot) => join(vaultRoot, '.vault-search', 'vault-index.db'),
+  watchPid: (vaultRoot) => join(vaultRoot, '.vault-search', 'watch.pid'),
+};
+
+// A read-side query needs an index that exists. A vault that has never been
+// indexed is an expected state, not a fault, so callers skip quietly rather
+// than reporting the binary's "database file does not exist" as an error.
+export function hasVaultIndex(vaultRoot) {
+  return Boolean(vaultRoot) && existsSync(VAULT_PATHS.index(vaultRoot));
+}
+
 export const DATA_FILES = {
   edgesDb: (pd) => join(pd, 'edges.db'),
   dupScanSocket: (pd) => join(pd, 'nli.sock'), // legacy filename — now serves duplicate-scan only
   binVersion: (pd) => join(pd, 'bin', '.version'),
   harvestDenylist: (pd) => join(pd, '.harvest-denylist'),
   harvestedLog: (pd) => join(pd, '.harvested-log'),
+  // Pre-vault-scoped location; watch-daemon migrates off it. See VAULT_PATHS.watchPid.
+  legacyWatchPid: (pd) => join(pd, 'watch.pid'),
 };

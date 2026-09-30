@@ -19,6 +19,7 @@ import {
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { skipOnWindows } from './helpers/platform.mjs';
+import { VAULT_PATHS } from '../plugin/scripts/lib/paths.mjs';
 
 const VAULT_SEARCH = fileURLToPath(new URL('../plugin/scripts/vault-search.mjs', import.meta.url));
 
@@ -44,8 +45,8 @@ function createStubBinary(binDir, argvLog) {
 // A vault whose index exists, so intentions has something to ask the binary.
 function vaultWithIndex(root) {
   const vault = join(root, 'vault');
-  mkdirSync(join(vault, '.vault-search'), { recursive: true });
-  writeFileSync(join(vault, '.vault-search', 'vault-index.db'), '');
+  mkdirSync(VAULT_PATHS.dir(vault), { recursive: true });
+  writeFileSync(VAULT_PATHS.index(vault), '');
   return vault;
 }
 
