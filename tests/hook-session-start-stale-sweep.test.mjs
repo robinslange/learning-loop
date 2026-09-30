@@ -8,7 +8,8 @@
 // (7d), edges.db.<pid>.tmp orphans (1h), tmp per-session/legacy markers (7d,
 // never the live learning-loop-session-id fallback), plus retrieval log AND
 // logs/log-YYYY-MM.jsonl month-pruning (drop months older than the
-// RETRIEVAL_LOG_KEEP_MONTHS cutoff, by age rather than per-prefix count) and
+// RETRIEVAL_LOG_KEEP_MONTHS cutoff, by age rather than per-prefix count),
+// provenance/events-YYYY-MM.jsonl pruning on PROVENANCE_LOG_KEEP_MONTHS, and
 // librarian queue.jsonl.bak.* reaping (7d TTL).
 //
 // Fixtures use matching installed/running versions so the binary-update block
@@ -136,6 +137,17 @@ test('sweep: deletes convergence files older than the TTL, keeps fresh ones', as
     await runCacheCleanup(fx.ctx);
     assert.equal(existsSync(stale), false, 'stale convergence file must be deleted');
     assert.equal(existsSync(fresh), true, 'fresh convergence file must survive');
+  });
+});
+
+test('sweep: removes the ingest-provenance.jsonl nothing writes any more', async () => {
+  const fx = makeFixture();
+  const legacy = join(fx.ctx.pluginData, 'ingest-provenance.jsonl');
+  writeFileSync(legacy, '{}\n');
+
+  await withSandbox(fx, async () => {
+    await runCacheCleanup(fx.ctx);
+    assert.equal(existsSync(legacy), false);
   });
 });
 
@@ -272,10 +284,10 @@ test('sweep: retrieval logs older than the RETRIEVAL_LOG_KEEP_MONTHS cutoff are 
       writeFileSync(join(retrievalDir, `${prefix}-${month}.jsonl`), '{}\n');
     }
   }
-  // provenance/ must never be touched by this sweep.
+  // provenance/ has its own, longer window: retrieval's must not reach it.
   const provenanceDir = join(fx.ctx.pluginData, 'provenance');
   mkdirSync(provenanceDir, { recursive: true });
-  writeFileSync(join(provenanceDir, `history-${months[0]}.jsonl`), '{}\n');
+  writeFileSync(join(provenanceDir, `events-${months[0]}.jsonl`), '{}\n');
 
   const isolatedTmp = mkdtempSync(join(realpathSync(tmpdir()), 'll-sweep-retention-tmp-'));
   const baseCtx = {
@@ -314,8 +326,8 @@ test('sweep: retrieval logs older than the RETRIEVAL_LOG_KEEP_MONTHS cutoff are 
       'the current month is never below the cutoff',
     );
     assert.ok(
-      existsSync(join(provenanceDir, `history-${months[0]}.jsonl`)),
-      'provenance/ is never touched by the retrieval-log retention sweep',
+      existsSync(join(provenanceDir, `events-${months[0]}.jsonl`)),
+      'provenance/ is swept on its own window, not RETRIEVAL_LOG_KEEP_MONTHS',
     );
   });
 
@@ -353,6 +365,46 @@ test('sweep: logs/log-YYYY-MM.jsonl is pruned with the same RETRIEVAL_LOG_KEEP_M
       existsSync(join(logsDir, `log-${currentMonth}.jsonl`)),
       'the current month is never below the cutoff',
     );
+  });
+
+  rmSync(isolatedTmp, { recursive: true, force: true });
+});
+
+test('sweep: provenance/events-YYYY-MM.jsonl is pruned past PROVENANCE_LOG_KEEP_MONTHS, and nothing else in provenance/ is', async () => {
+  const fx = makeFixture();
+  const provenanceDir = join(fx.ctx.pluginData, 'provenance');
+  mkdirSync(provenanceDir, { recursive: true });
+
+  // Keeping N months means the current month and the N-1 before it. Both
+  // sides of that edge are fixtures, so a window off by one either way fails.
+  const keepMonths = HookConfig.PROVENANCE_LOG_KEEP_MONTHS;
+  const firstPruned = monthOffset(keepMonths);
+  const oldestKept = monthOffset(keepMonths - 1);
+  const current = monthOffset(0);
+  for (const month of [firstPruned, oldestKept, current]) {
+    writeFileSync(join(provenanceDir, `events-${month}.jsonl`), '{}\n');
+  }
+  writeFileSync(join(provenanceDir, 'learned-patterns.md'), '# learned\n');
+  writeFileSync(join(provenanceDir, 'retired-patterns.md'), '# retired\n');
+
+  const isolatedTmp = mkdtempSync(join(realpathSync(tmpdir()), 'll-sweep-provenance-tmp-'));
+  const baseCtx = {
+    ...fx.ctx,
+    tmp: isolatedTmp,
+    projectDir: null,
+    home: join(fx.sandbox, 'memdir'),
+    payload: { session_id: 'provenance-retention-test-sid' },
+  };
+
+  await withSandbox(fx, async () => {
+    await run({ ...baseCtx });
+
+    assert.deepEqual(readdirSync(provenanceDir).sort(), [
+      `events-${oldestKept}.jsonl`,
+      `events-${current}.jsonl`,
+      'learned-patterns.md',
+      'retired-patterns.md',
+    ]);
   });
 
   rmSync(isolatedTmp, { recursive: true, force: true });

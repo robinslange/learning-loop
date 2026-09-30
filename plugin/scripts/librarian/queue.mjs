@@ -22,6 +22,7 @@ import { logError } from '../lib/log.mjs';
 import { DATA_PATHS } from '../lib/paths.mjs';
 import { appendJsonlLine } from '../lib/jsonl.mjs';
 import { writeFileAtomic } from '../lib/write-atomic.mjs';
+import { HookConfig } from '../lib/hook-config.mjs';
 
 function librarianDir() {
   const pd = getPluginData();
@@ -107,8 +108,23 @@ export function expireStaleItems(vaultPath) {
       }
       return item;
     });
+    // The queue keeps what is still pending and whatever was created within
+    // LIBRARIAN_QUEUE_TTL_MS. It used to keep every item ever queued, mostly
+    // expired ones. One window for every resolved status is what keeps the
+    // OTel conversion counts honest: dropping only expired items would leave
+    // approvals counted for all time against expiries counted for 90 days.
+    // Pending items are never dropped, because nobody has reviewed them yet.
+    // Dedupe only reads pending and acknowledged items, and the review flow
+    // never acknowledges a task that dedupes, so nothing dropped here is
+    // queued again because of it. A resolved item with an unparseable
+    // created_at is dropped rather than pinned.
+    const kept = items.filter(
+      (item) =>
+        item.status === 'pending' ||
+        now - Date.parse(item.created_at) <= HookConfig.LIBRARIAN_QUEUE_TTL_MS,
+    );
     ensureDir();
-    writeFileAtomic(queuePath(), items.map((item) => JSON.stringify(item)).join('\n') + '\n');
+    writeFileAtomic(queuePath(), kept.map((item) => JSON.stringify(item)).join('\n') + '\n');
   });
 }
 

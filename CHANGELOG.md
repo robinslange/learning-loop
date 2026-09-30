@@ -4,6 +4,13 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+### Changed
+
+- **Provenance events expire after a year, and librarian queue items after 90 days (#22).** They were the two largest things in plugin data that grew without limit: `provenance/events-YYYY-MM.jsonl` at 18MB and `librarian/queue.jsonl` at 11MB.
+  - The session-start sweep now prunes `provenance/<prefix>-YYYY-MM.jsonl` (today only `events-`) with the filename-month cutoff that `retrieval/` and `logs/` use, on its own 12-month `PROVENANCE_LOG_KEEP_MONTHS`. It is longer than retrieval's three months because `provenance-report` and the federation summary `provenance-consolidate` writes read the stream as history; both now cover the last year rather than everything. `learned-patterns.md`, `retired-patterns.md` and the current month are never removed. The OTel reducers see a swept month as a counter reset, as they already do for `retrieval/`.
+  - The librarian queue kept every item ever queued, and expiry only flipped a status, so 8.7MB of the live file was expired items. When expiry rewrites the queue it now drops every reviewed or expired item created more than 90 days ago (`LIBRARIAN_QUEUE_TTL_MS`). Pending items stay until someone reviews them or they expire. One window for every resolved status keeps the queue's OTel gauges comparable: approvals and expiries cover the same 90 days. On the live queue the first pass drops 16,599 of 33,668 lines, 6.0MB. Expiry runs when the pending queue reaches its cap and at the end of `/health --librarian`, so an install where neither happens keeps its old items. Dedupe only checks pending and acknowledged items, and the review flow acknowledges only voice flags, which don't dedupe, so nothing is suggested again because of it.
+  - Session start removes `ingest-provenance.jsonl`, which nothing has written or read since #93.
+
 ### Fixed
 
 - **The librarian queue's OTel counts are gauges.** `ll.librarian.queue_by_task`, `_status`, `_expired_reason` and `_task_status` count what the queue holds now, and expiry moves items from pending to expired in place, so the pending count fell every time it ran. Exported as cumulative counters, each fall read as a counter reset. They are now gauges, like `queue_depth`. Their series change type, so a panel that applied `rate()` or `increase()` to them needs updating. The score and pending-lag histograms still describe the current queue under OTLP's cumulative temporality, which has no gauge form, so they can also fall.

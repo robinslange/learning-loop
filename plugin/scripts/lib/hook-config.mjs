@@ -59,10 +59,20 @@ export const HookConfig = Object.freeze({
   // librarian/queue.jsonl.bak.* backups (crash-safety copies taken before a
   // queue rewrite) older than this are reaped by the same TTL sweep.
   LIBRARIAN_QUEUE_BAK_TTL_MS: 604_800_000, // 7 days
+  // Resolved librarian/queue.jsonl items (reviewed or expired) created longer
+  // ago than this are dropped when expiry rewrites the queue; pending ones are
+  // kept. The OTel librarian gauges count what remains, so this is also their
+  // window.
+  LIBRARIAN_QUEUE_TTL_MS: 7_776_000_000, // 90 days
   // retrieval/<prefix>-YYYY-MM.jsonl: how many months back the cutoff sits,
   // by filename month, not mtime. One cutoff for every prefix, so a prefix
   // that stops being written drains instead of pinning its last few files.
   RETRIEVAL_LOG_KEEP_MONTHS: 3,
+  // provenance/events-YYYY-MM.jsonl, on the same filename-month cutoff. Longer
+  // than retrieval because provenance-report and the federation summary that
+  // provenance-consolidate writes read the whole stream as history. A year is
+  // about 35MB at the 2026 average and 75MB at its busiest month's rate.
+  PROVENANCE_LOG_KEEP_MONTHS: 12,
   // watch.log is the daemon's stdout/stderr, appended to for the life of the
   // install. Capped at daemon start, keeping the newest half.
   WATCH_LOG_MAX_BYTES: 4_194_304, // 4 MiB

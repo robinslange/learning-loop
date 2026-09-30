@@ -57,9 +57,11 @@ export function reduceLibrarian({ pluginData, timeUnixMs }) {
   if (records.length === 0) return [];
 
   // What the queue holds now, not what it has ever held: expiry turns a
-  // pending item into an expired one in place, so these counts can fall.
-  // They are gauges for that reason; as cumulative counters every fall read
-  // as a counter reset.
+  // pending item into an expired one in place, and expiry's rewrite drops
+  // resolved items created before LIBRARIAN_QUEUE_TTL_MS, so any of these
+  // counts can fall. They are gauges for that reason; as cumulative counters
+  // every fall read as a counter reset. Every resolved status shares that one
+  // window, so the statuses of a task compare like with like.
   //
   // The task x status cross-product is what reveals a task type that never
   // converts: a consumer can filter task=voice_flag and see every status

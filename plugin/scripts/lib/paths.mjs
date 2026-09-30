@@ -213,4 +213,7 @@ export const DATA_FILES = {
   harvestedLog: (pd) => join(pd, '.harvested-log'),
   // Pre-vault-scoped location; watch-daemon migrates off it. See VAULT_PATHS.watchPid.
   legacyWatchPid: (pd) => join(pd, 'watch.pid'),
+  // /ingest's run log before it moved onto the provenance events stream (#93).
+  // Nothing writes or reads it; cache-cleanup removes an install's old copy.
+  legacyIngestProvenance: (pd) => join(pd, 'ingest-provenance.jsonl'),
 };
