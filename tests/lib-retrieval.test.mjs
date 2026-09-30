@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, rmSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { writeRetrieval } from '../plugin/scripts/lib/retrieval.mjs';
+import { writeRetrieval, monthStr } from '../plugin/scripts/lib/retrieval.mjs';
 
 test('writeRetrieval emits record with all mandatory fields', () => {
   const sb = mkdtempSync(join(tmpdir(), 'll-retrieval-'));
@@ -16,7 +16,7 @@ test('writeRetrieval emits record with all mandatory fields', () => {
       results: [{ path: 'a.md' }, { path: 'peer:x/b.md' }],
       meta: { federated: false },
     });
-    const month = new Date().toISOString().slice(0, 7);
+    const month = monthStr();
     const file = join(sb, 'retrieval', `queries-${month}.jsonl`);
     assert.ok(existsSync(file), 'queries file should exist');
     const line = readFileSync(file, 'utf8').trim();
@@ -47,7 +47,7 @@ test('writeRetrieval handles non-array results gracefully', () => {
       results: null,
       meta: { file: 'mem.md' },
     });
-    const month = new Date().toISOString().slice(0, 7);
+    const month = monthStr();
     const record = JSON.parse(
       readFileSync(join(sb, 'retrieval', `reads-${month}.jsonl`), 'utf8').trim(),
     );
@@ -86,7 +86,7 @@ test('writeRetrieval top_paths uses note_a fallback when path absent', () => {
       query: 'q',
       results: [{ note_a: 'x.md', note_b: 'y.md' }, { path: 'z.md' }],
     });
-    const month = new Date().toISOString().slice(0, 7);
+    const month = monthStr();
     const record = JSON.parse(
       readFileSync(join(sb, 'retrieval', `queries-${month}.jsonl`), 'utf8').trim(),
     );
@@ -110,7 +110,7 @@ test('writeRetrieval counts peer rows via derived origin (peer: prefix retained 
         { path: 'peer:thomas_kirk/b.md' },
       ],
     });
-    const month = new Date().toISOString().slice(0, 7);
+    const month = monthStr();
     const record = JSON.parse(
       readFileSync(join(sb, 'retrieval', `queries-${month}.jsonl`), 'utf8').trim(),
     );
