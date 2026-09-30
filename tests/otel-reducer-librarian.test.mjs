@@ -287,3 +287,34 @@ test('output serializes through buildOtlpPayload without throwing', () => {
     rmSync(pluginData, { recursive: true, force: true });
   }
 });
+
+// Expiry rewrites a pending item as expired in place, so the pending bucket
+// falls every time it runs. A cumulative monotonic sum that falls reads as a
+// counter reset, so the queue's contents go out as gauges.
+test('queue composition is exported as gauges, never as a monotonic sum', () => {
+  const { pluginData, librarianDir } = makePluginData();
+  try {
+    writeQueue(librarianDir, [
+      record({ task: 'voice_flag', status: 'expired', expired_reason: 'stale' }),
+      record({ task: 'tag_suggestion', status: 'pending', expired_reason: undefined }),
+    ]);
+
+    const metrics = reduceLibrarian({ pluginData, timeUnixMs: Date.now() });
+    const payload = buildOtlpPayload(metrics);
+    const queueBy = payload.resourceMetrics[0].scopeMetrics[0].metrics.filter((m) =>
+      m.name.startsWith('ll.librarian.queue_by_'),
+    );
+    assert.deepEqual([...new Set(queueBy.map((m) => m.name))].sort(), [
+      'll.librarian.queue_by_expired_reason',
+      'll.librarian.queue_by_status',
+      'll.librarian.queue_by_task',
+      'll.librarian.queue_by_task_status',
+    ]);
+    for (const m of queueBy) {
+      assert.ok(m.gauge, `${m.name} must be a gauge`);
+      assert.equal(m.sum, undefined, `${m.name} must not be a sum`);
+    }
+  } finally {
+    rmSync(pluginData, { recursive: true, force: true });
+  }
+});
