@@ -10,6 +10,7 @@ import { join } from 'node:path';
 import { DATA_PATHS } from './paths.mjs';
 import { appendJsonlLine } from './jsonl.mjs';
 import { logError } from './log.mjs';
+import { monthStr } from './retrieval.mjs';
 import { sessionSurfaced, loadNoteUsageEvents } from './retrieval-usage.mjs';
 import { probeTranscriptUsage } from './usage-probe.mjs';
 
@@ -63,7 +64,7 @@ export function runUsageProbe({ pluginData, sessionId, transcriptPath } = {}) {
     });
     if (found.length === 0) return 0;
 
-    const file = join(DATA_PATHS.provenance(pluginData), `events-${monthStamp()}.jsonl`);
+    const file = join(DATA_PATHS.provenance(pluginData), `events-${monthStr()}.jsonl`);
     const surfacedVia = new Map(surfaced.map((s) => [s.path, s.via]));
     let written = 0;
     for (const { path, signals } of found) {
@@ -88,8 +89,4 @@ export function runUsageProbe({ pluginData, sessionId, transcriptPath } = {}) {
     logError('usage-probe-run', err);
     return 0;
   }
-}
-
-function monthStamp() {
-  return new Date().toISOString().slice(0, 7);
 }
