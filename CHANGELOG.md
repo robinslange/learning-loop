@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+### Fixed
+
+- **The usage probe files its events under the local month.** It named its provenance file by the UTC month, while every other writer on the events stream uses the local one. East of UTC, a probe that ran in the first hours of a month wrote into the previous month's file.
+
 ## v2.3.0
 
 ### Changed

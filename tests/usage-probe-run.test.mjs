@@ -7,7 +7,10 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { pathToFileURL } from 'node:url';
 import { runUsageProbe } from '../plugin/scripts/lib/usage-probe-run.mjs';
+import { strykerEnv } from './helpers/stryker-env.mjs';
 
 const SID = 'sess-probe';
 
@@ -204,5 +207,50 @@ test('finds engagement that happened early in a long session', () => {
     assert.equal(events(pd)[0].target, '3-permanent/alpha.md');
   } finally {
     rmSync(pd, { recursive: true, force: true });
+  }
+});
+
+// The events stream is bucketed by LOCAL month (provenance.mjs, and the
+// retention cutoff in vault-snapshot.mjs follows the writer). A probe that
+// named its bucket in UTC split one stream across two calendars. Run in its
+// own process so TZ applies from the first Date use; on a UTC runner the two
+// calendars agree and the test would pass against the defect.
+test('buckets its events by local month, the calendar the stream and its retention use', () => {
+  const { pd, transcriptPath } = setup({
+    queries: [surfacedQuery(['3-permanent/alpha.md'])],
+    transcript: readOf('3-permanent/alpha.md'),
+  });
+  const home = mkdtempSync(join(tmpdir(), 'll-probe-run-home-'));
+  try {
+    const runUrl = pathToFileURL(
+      join(import.meta.dirname, '..', 'plugin/scripts/lib/usage-probe-run.mjs'),
+    ).href;
+    // Sep 30 12:00Z is already Oct 1 in Auckland.
+    const script = `
+      import { mock } from 'node:test';
+      mock.timers.enable({ apis: ['Date'], now: Date.UTC(2026, 8, 30, 12, 0) });
+      const { runUsageProbe } = await import('${runUrl}');
+      console.log(runUsageProbe(${JSON.stringify({ pluginData: pd, sessionId: SID, transcriptPath })}));
+    `;
+    const r = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
+      env: {
+        PATH: process.env.PATH,
+        HOME: home,
+        USERPROFILE: home,
+        CLAUDE_PLUGIN_DATA: pd,
+        TZ: 'Pacific/Auckland',
+        ...strykerEnv(),
+      },
+      encoding: 'utf-8',
+    });
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(r.stdout.trim(), '1');
+    assert.deepEqual(
+      readdirSync(join(pd, 'provenance')).filter((f) => f.startsWith('events-')),
+      ['events-2026-10.jsonl'],
+    );
+  } finally {
+    rmSync(pd, { recursive: true, force: true });
+    rmSync(home, { recursive: true, force: true });
   }
 });
