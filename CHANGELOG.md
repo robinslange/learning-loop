@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+## v2.3.0
+
 ### Changed
 
 - **`/health` reports frontmatter the contract can repair, and asks before repairing it (#98).** It runs `normalise-frontmatter.mjs` as a dry run and shows how many notes it would repair and how many need a human. Applying is asked for in every mode, `--auto` included, because it edits notes across the vault. A note first committed with 99 or more others (a merged vault, a restored backup, a batch sync) is left for a human instead of being dated to the day it arrived, and a malformed date line on such a note is kept rather than dropped. The contract covers 0-inbox through 3-permanent; `SCHEMA_CLASSES` now says so and names 4-projects, 5-maps and 6-writing as exempt, and the repairer takes its folders from there.
