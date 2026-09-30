@@ -8,7 +8,7 @@ import { hasBinary, run } from './lib/binary.mjs';
 import { warnOnce } from './lib/warn-once.mjs';
 import { logError } from './lib/log.mjs';
 import { writeRetrieval } from './lib/retrieval.mjs';
-import { FEDERATION_PATHS } from './lib/paths.mjs';
+import { FEDERATION_PATHS, hasVaultIndex } from './lib/paths.mjs';
 import { wrapRetrieval } from './lib/origin-envelope.mjs';
 import { hasFlag, flagValue } from './lib/cli-args.mjs';
 
@@ -100,7 +100,11 @@ function logRetrieval(command, query, results) {
 // No index yet (a fresh install, a vault never indexed) means no intentions,
 // not an error: session-start refreshes this in the background every session.
 function intentions(context) {
-  if (!DB_PATH || !existsSync(DB_PATH)) return [];
+  // A vault nobody has indexed yet has no intentions to report. That is an
+  // expected state, not a fault, so it never reaches the catch below: the
+  // binary's "database file does not exist" would otherwise be logged as an
+  // error on every session start before the first index.
+  if (!hasVaultIndex(VAULT_PATH)) return [];
   try {
     ensureBinary();
     const args = ['intentions', DB_PATH];

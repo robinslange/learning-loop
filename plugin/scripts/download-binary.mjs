@@ -19,7 +19,7 @@ import { getPluginData, getVaultPath } from './lib/config.mjs';
 import { env, isOffline } from './lib/env.mjs';
 import { logError } from './lib/log.mjs';
 import { safeLoad } from './lib/safe-load.mjs';
-import { DATA_FILES, binaryFileName } from './lib/paths.mjs';
+import { DATA_FILES, VAULT_PATHS, binaryFileName } from './lib/paths.mjs';
 import { verifyArtifact, isAllowedRedirect } from './lib/artifact-verify.mjs';
 import { semverCmp, isPlainSemver } from './lib/semver.mjs';
 import { isMainModule } from './lib/is-main.mjs';
@@ -150,14 +150,15 @@ export async function download(url, dest, { _httpsModule, _httpModule } = {}) {
   });
 }
 
-// The pid the watch daemon's own pidfile (<vault>/.vault-search/watch.pid,
-// the same one watch.mjs reads) names, if that pid is currently alive. A
+// The pid the watch daemon's own pidfile (<vault>/.vault-search/watch.pid via
+// VAULT_PATHS.watchPid, the same one watch.mjs reads) names, if that pid is
+// currently alive. A
 // stale or absent pidfile returns null: there is nothing running to restart.
 export function watchDaemonPid(vault) {
   if (!vault) return null;
   let raw;
   try {
-    raw = readFileSync(join(vault, '.vault-search', 'watch.pid'), 'utf8').trim();
+    raw = readFileSync(VAULT_PATHS.watchPid(vault), 'utf8').trim();
   } catch {
     return null;
   }

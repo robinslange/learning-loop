@@ -16,7 +16,12 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { basename, join, relative, sep } from 'node:path';
-import { DATA_FILES, DATA_PATHS, FEDERATION_PATHS } from '../plugin/scripts/lib/paths.mjs';
+import {
+  DATA_FILES,
+  DATA_PATHS,
+  FEDERATION_PATHS,
+  VAULT_PATHS,
+} from '../plugin/scripts/lib/paths.mjs';
 
 const PERSISTED = {
   'DATA_FILES.edgesDb': 'edges.db',
@@ -24,6 +29,7 @@ const PERSISTED = {
   'DATA_FILES.binVersion': 'bin/.version',
   'DATA_FILES.harvestDenylist': '.harvest-denylist',
   'DATA_FILES.harvestedLog': '.harvested-log',
+  'DATA_FILES.legacyWatchPid': 'watch.pid',
   'DATA_PATHS.bin': 'bin',
   'DATA_PATHS.convergence': 'convergence',
   'DATA_PATHS.librarian': 'librarian',
@@ -84,6 +90,12 @@ const SHARED = [
   ['FEDERATION_PATHS.readableVaults', FEDERATION_PATHS.readableVaults(pd), 'sync/config.rs'],
   ['FEDERATION_PATHS.vaultRegistry', FEDERATION_PATHS.vaultRegistry(pd), 'sync/registry.rs'],
   ['DATA_FILES.dupScanSocket', DATA_FILES.dupScanSocket(pd), 'sync/watch.rs'],
+  // The daemon's pre-vault-scoped pidfile: main.rs falls back to
+  // config_dir.join("watch.pid") when no --pid-file is given.
+  ['DATA_FILES.legacyWatchPid', DATA_FILES.legacyWatchPid(pd), 'main.rs'],
+  // The vault-side directory both sides derive: watch.rs joins ".vault-search"
+  // onto the vault path exactly as VAULT_PATHS.dir does.
+  ['VAULT_PATHS.dir', VAULT_PATHS.dir(join(sep, 'vault')), 'sync/watch.rs'],
 ];
 
 for (const [helper, path, rustFile] of SHARED) {

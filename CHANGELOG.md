@@ -23,6 +23,15 @@ All notable changes to this project are documented here. The format is based on 
 - **The seven research subcommands are left out of release builds (#109).** `benchmark`, `migrate`, `tune-prf`, `eval-prf`, `tune-weights`, `lane-diag` and `sessions` had no caller in the plugin or the bench. They build with `cargo build -p ll-search --features research`, and CI tests that build. `eval-funnel` stays, since the bench quality gate runs it.
 - **The Rust tree is formatted by rustfmt (#53).** One commit formats the whole workspace with the default configuration, and CI and lefthook fail on unformatted Rust.
 
+- **`VAULT_PATHS` is the only speller of `<vault>/.vault-search/` under `plugin/` (#140).** The index, the watch
+  pidfile and the directory itself were derived by hand at thirteen call sites across ten files,
+  and the copies had drifted: the index appeared as a two-segment `join`, as a one-segment `join`,
+  and as a `resolve` of the latter. `hasVaultIndex` replaces the readiness guard that
+  `watch-daemon.mjs`, `pre-write-check.js` and `intentions()` had each written their own version
+  of. `DATA_FILES` gains `legacyWatchPid`, and the Rust parity table covers it and `VAULT_PATHS.dir`,
+  which `main.rs` and `sync/watch.rs` build on their own side. A sweep test fails on the next file
+  under `plugin/` to spell `.vault-search`, `vault-index.db` or `watch.pid` outside `paths.mjs`.
+
 ### Removed
 
 - **Settled bench studies (#96).** The cross-encoder gate A/B scripts and their replay baselines, the closed tail study, and five unread funnel snapshots are deleted. `gate-replay` keeps only its RRF half. `injection-precision.mjs` is a developer tool, so it moves from `plugin/scripts/` to `bench/`.

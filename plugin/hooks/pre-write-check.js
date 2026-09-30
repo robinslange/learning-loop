@@ -20,6 +20,7 @@ import {
 } from '../scripts/lib/frontmatter-schema.mjs';
 import { HookConfig, preWriteFailMode, librarianEnabled } from '../scripts/lib/hook-config.mjs';
 import { getConfig, getPluginData, getVaultPath } from '../scripts/lib/config.mjs';
+import { VAULT_PATHS, hasVaultIndex } from '../scripts/lib/paths.mjs';
 import { pendingItems, appendItem, newItemId } from '../scripts/librarian/queue.mjs';
 import { env, coerceNumber } from '../scripts/lib/env.mjs';
 import { ortSpawnEnv } from '../scripts/lib/binary.mjs';
@@ -355,8 +356,8 @@ export function checkDuplicateFlagQueue(relPath, items) {
 
 async function checkDuplicateNote(filePath, title, vaultRoot) {
   const pluginData = getPluginData();
-  const dbPath = join(vaultRoot, '.vault-search', 'vault-index.db');
-  if (!existsSync(dbPath)) return null;
+  if (!hasVaultIndex(vaultRoot)) return null;
+  const dbPath = VAULT_PATHS.index(vaultRoot);
 
   const relPath = vaultRelPath(filePath, vaultRoot);
   const libEnabled = librarianEnabled(getConfig());

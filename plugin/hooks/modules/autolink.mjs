@@ -14,6 +14,7 @@ import { HookConfig } from '../../scripts/lib/hook-config.mjs';
 import { env, coerceNumber } from '../../scripts/lib/env.mjs';
 import { ortSpawnEnv } from '../../scripts/lib/binary.mjs';
 import { logError } from '../../scripts/lib/log.mjs';
+import { VAULT_PATHS } from '../../scripts/lib/paths.mjs';
 
 const SIMILARITY_THRESHOLD = 0.65;
 const MAX_AUTO_LINKS = 3;
@@ -31,7 +32,7 @@ export async function runAutolink(ctx) {
 
   const sourceName = basename(filePath, '.md');
   const relativePath = filePath.slice(vaultRoot.length + 1);
-  const dbPath = join(vaultRoot, '.vault-search', 'vault-index.db');
+  const dbPath = VAULT_PATHS.index(vaultRoot);
 
   let content;
   if (tool === 'Write') {

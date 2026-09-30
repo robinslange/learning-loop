@@ -14,7 +14,7 @@ import {
   syncSleep,
 } from '../../scripts/lib/file-lock.mjs';
 import { MARKER_PATHS } from '../../scripts/lib/marker-cache.mjs';
-import { DATA_FILES } from '../../scripts/lib/paths.mjs';
+import { DATA_FILES, VAULT_PATHS, hasVaultIndex } from '../../scripts/lib/paths.mjs';
 
 export async function run(ctx) {
   const { pluginDir, pluginData, vaultRoot } = ctx;
@@ -22,20 +22,20 @@ export async function run(ctx) {
   const { findBinary: findBinaryShared, spawnDetached } = await import('../lib/common.mjs');
   const binary = findBinaryShared();
 
-  const DB_PATH = join(vaultRoot, '.vault-search', 'vault-index.db');
-  if (!binary || !existsSync(DB_PATH) || !pluginData) return;
+  if (!binary || !hasVaultIndex(vaultRoot) || !pluginData) return;
+  const DB_PATH = VAULT_PATHS.index(vaultRoot);
 
   // Lock lives next to the vault index it protects, not next to the plugin
   // install. Two installations (e.g. real + test sandbox) pointing at the same
   // vault must share one daemon, not spawn one each.
-  const lockDir = join(vaultRoot, '.vault-search');
-  const pidPath = join(lockDir, 'watch.pid');
+  const lockDir = VAULT_PATHS.dir(vaultRoot);
+  const pidPath = VAULT_PATHS.watchPid(vaultRoot);
   const fingerprintPath = join(lockDir, 'watch.fingerprint');
 
   // One-shot migration: older builds wrote watch.pid into <plugin-data>/.
   // Any daemon still running off the legacy pidfile must be SIGTERMed or it
   // will coexist with the new per-vault daemon and double-write the index.
-  const legacyPidPath = join(pluginData, 'watch.pid');
+  const legacyPidPath = DATA_FILES.legacyWatchPid(pluginData);
   const legacyVersionPath = join(pluginData, 'watch.version');
   try {
     const raw = readFileSync(legacyPidPath, 'utf8').trim();

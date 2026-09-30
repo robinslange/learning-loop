@@ -15,7 +15,7 @@ import { existsSync, openSync, readFileSync, unlinkSync } from 'fs';
 import { setTimeout as delay } from 'timers/promises';
 import { dirname, join } from 'path';
 import { getPluginRoot, getPluginData, getVaultPath } from './lib/config.mjs';
-import { binaryFileName } from './lib/paths.mjs';
+import { VAULT_PATHS, binaryFileName } from './lib/paths.mjs';
 import { ortSpawnEnv } from './lib/binary.mjs';
 import { logError } from './lib/log.mjs';
 import { capLogFile } from './lib/log-rotate.mjs';
@@ -75,8 +75,8 @@ if (!existsSync(bin)) {
   process.exit(1);
 }
 
-const db = join(vault, '.vault-search', 'vault-index.db');
-const pidFile = join(vault, '.vault-search', 'watch.pid');
+const db = VAULT_PATHS.index(vault);
+const pidFile = VAULT_PATHS.watchPid(vault);
 const librarianScript = join(pluginRoot, 'scripts', 'librarian.mjs');
 
 // ── stop: kill running watcher ──
