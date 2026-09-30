@@ -20,6 +20,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { runHook } from './helpers/hook-runner.mjs';
 import { skipOnWindows } from './helpers/platform.mjs';
+import { monthStr } from '../plugin/scripts/lib/retrieval.mjs';
 
 const SKIP = skipOnWindows('shebang stub + chmod semantics: not supported on win32');
 
@@ -69,7 +70,7 @@ function readAutolinkErrors(pluginDataDir) {
   const lines = [];
   const dir = join(pluginDataDir, 'logs');
   if (!existsSync(dir)) return lines;
-  const f = 'log-' + new Date().toISOString().slice(0, 7) + '.jsonl';
+  const f = 'log-' + monthStr() + '.jsonl';
   const p = join(dir, f);
   if (!existsSync(p)) return lines;
   for (const line of readFileSync(p, 'utf8')
