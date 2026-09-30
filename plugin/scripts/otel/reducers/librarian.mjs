@@ -5,7 +5,7 @@
 // and the counts are the whole argument for exporting them. 92% of queued
 // items expire, and of 2,686 voice_flag suggestions measured, zero were ever
 // approved. That is invisible today because nothing reads this file; the
-// task x status cross-product counter below is what makes it visible.
+// task x status cross-product gauge below is what makes it visible.
 //
 // The librarian is optional and off by default, so the file is commonly
 // absent: readRecords already no-ops cleanly on a missing file, same as
@@ -56,39 +56,23 @@ export function reduceLibrarian({ pluginData, timeUnixMs }) {
   const startTimeUnixMs = earliestTimestamp(records, timeUnixMs, 'created_at');
   if (records.length === 0) return [];
 
-  const metrics = [
-    ...countBy(records, {
-      name: 'librarian.queue_by_task',
+  // What the queue holds now, not what it has ever held: expiry turns a
+  // pending item into an expired one in place, so these counts can fall.
+  // They are gauges for that reason; as cumulative counters every fall read
+  // as a counter reset.
+  //
+  // The task x status cross-product is what reveals a task type that never
+  // converts: a consumer can filter task=voice_flag and see every status
+  // bucket it is in, or notice the approved bucket is simply absent.
+  const metrics = [['task'], ['status'], ['expired_reason'], ['task', 'status']].flatMap((by) =>
+    countBy(records, {
+      name: `librarian.queue_by_${by.join('_')}`,
       stream: STREAM,
-      by: ['task'],
+      by,
       timeUnixMs,
       startTimeUnixMs,
-    }),
-    ...countBy(records, {
-      name: 'librarian.queue_by_status',
-      stream: STREAM,
-      by: ['status'],
-      timeUnixMs,
-      startTimeUnixMs,
-    }),
-    ...countBy(records, {
-      name: 'librarian.queue_by_expired_reason',
-      stream: STREAM,
-      by: ['expired_reason'],
-      timeUnixMs,
-      startTimeUnixMs,
-    }),
-    // The cross-product is what reveals a task type that never converts: a
-    // consumer can filter task=voice_flag and see every status bucket it
-    // has ever landed in, or notice the approved bucket is simply absent.
-    ...countBy(records, {
-      name: 'librarian.queue_by_task_status',
-      stream: STREAM,
-      by: ['task', 'status'],
-      timeUnixMs,
-      startTimeUnixMs,
-    }),
-  ];
+    }).map((m) => ({ ...m, type: 'gauge' })),
+  );
 
   const pending = records.filter((r) => r.status === 'pending');
   metrics.push({

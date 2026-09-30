@@ -6,6 +6,7 @@ All notable changes to this project are documented here. The format is based on 
 
 ### Fixed
 
+- **The librarian queue's OTel counts are gauges.** `ll.librarian.queue_by_task`, `_status`, `_expired_reason` and `_task_status` count what the queue holds now, and expiry moves items from pending to expired in place, so the pending count fell every time it ran. Exported as cumulative counters, each fall read as a counter reset. They are now gauges, like `queue_depth`. Their series change type, so a panel that applied `rate()` or `increase()` to them needs updating. The score and pending-lag histograms still describe the current queue under OTLP's cumulative temporality, which has no gauge form, so they can also fall.
 - **The usage probe files its events under the local month.** It named its provenance file by the UTC month, while every other writer on the events stream uses the local one. East of UTC, a probe that ran in the first hours of a month wrote into the previous month's file.
 
 ## v2.3.0
