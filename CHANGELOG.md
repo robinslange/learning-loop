@@ -19,6 +19,10 @@ All notable changes to this project are documented here. The format is based on 
   - `edges-cli` loses `review`, `review-count`, `confirm` and `reject`, and `add --confidence` takes `high` or `low`.
   - The edge-database writers take a `file-lock` handle directly instead of going through a module-level wrapper. The sole-justification queries share one definition, and the traversal exclusion is spelled once.
 
+### Removed
+
+- **`nli-cleanup.mjs` (#97).** `openEdgeDb` now does its database half on every install: it deletes `source_graph = 'nli'` edges and drops `viz_meta` and `nli_frontmatter_tags`, so the queries no longer exclude `'nli'`. The script was run once on the maintainer's vault, where it stripped `nli-contradicts` and `has-contradiction` from 837 notes. A vault elsewhere that still carries those keys keeps them. Nothing reads them, but Obsidian draws their wikilinks in the graph and backlinks, so you may want to delete them yourself.
+
 ### Fixed
 
 - **The librarian queue's OTel counts are gauges.** `ll.librarian.queue_by_task`, `_status`, `_expired_reason` and `_task_status` count what the queue holds now, and expiry moves items from pending to expired in place, so the pending count fell every time it ran. Exported as cumulative counters, each fall read as a counter reset. They are now gauges, like `queue_depth`. Their series change type, so a panel that applied `rate()` or `increase()` to them needs updating. The score and pending-lag histograms still describe the current queue under OTLP's cumulative temporality, which has no gauge form, so they can also fall.

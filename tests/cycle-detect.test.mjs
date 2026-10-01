@@ -6,7 +6,7 @@ test('finds a 3-cycle with one contradiction', () => {
   const edges = [
     { fromPath: 'a.md', toPath: 'b.md', edgeType: 'supports', sourceGraph: 'local' },
     { fromPath: 'b.md', toPath: 'c.md', edgeType: 'supports', sourceGraph: 'local' },
-    { fromPath: 'c.md', toPath: 'a.md', edgeType: 'challenges_rebuttal', sourceGraph: 'nli' },
+    { fromPath: 'c.md', toPath: 'a.md', edgeType: 'challenges_rebuttal', sourceGraph: 'local' },
   ];
   const cycles = findContradictionCycles(edges, { maxDepth: 4 });
   assert.equal(cycles.length, 1);
@@ -41,7 +41,7 @@ test('respects maxDepth', () => {
     { fromPath: 'b.md', toPath: 'c.md', edgeType: 'supports', sourceGraph: 'local' },
     { fromPath: 'c.md', toPath: 'd.md', edgeType: 'supports', sourceGraph: 'local' },
     { fromPath: 'd.md', toPath: 'e.md', edgeType: 'supports', sourceGraph: 'local' },
-    { fromPath: 'e.md', toPath: 'a.md', edgeType: 'challenges_rebuttal', sourceGraph: 'nli' },
+    { fromPath: 'e.md', toPath: 'a.md', edgeType: 'challenges_rebuttal', sourceGraph: 'local' },
   ];
   assert.equal(findContradictionCycles(edges, { maxDepth: 3 }).length, 0);
   assert.equal(findContradictionCycles(edges, { maxDepth: 5 }).length, 1);
@@ -50,7 +50,7 @@ test('respects maxDepth', () => {
 test('deduplicates rotations of the same cycle', () => {
   const edges = [
     { fromPath: 'a.md', toPath: 'b.md', edgeType: 'supports', sourceGraph: 'local' },
-    { fromPath: 'b.md', toPath: 'c.md', edgeType: 'challenges_rebuttal', sourceGraph: 'nli' },
+    { fromPath: 'b.md', toPath: 'c.md', edgeType: 'challenges_rebuttal', sourceGraph: 'local' },
     { fromPath: 'c.md', toPath: 'a.md', edgeType: 'supports', sourceGraph: 'local' },
   ];
   const cycles = findContradictionCycles(edges, { maxDepth: 4 });
@@ -72,7 +72,7 @@ test('handles dense clique without combinatorial blowup', () => {
         fromPath: `n${i}.md`,
         toPath: `n${j}.md`,
         edgeType: 'challenges_rebuttal',
-        sourceGraph: 'nli',
+        sourceGraph: 'local',
       });
     }
   }
@@ -95,7 +95,7 @@ test('ignores self-loops (cycle length 1 < minDepth of 2)', () => {
   // itself is a contradiction. A self-loop is not a meaningful cycle for the
   // cycle viz / contradiction surface.
   const edges = [
-    { fromPath: 'a.md', toPath: 'a.md', edgeType: 'challenges_rebuttal', sourceGraph: 'nli' },
+    { fromPath: 'a.md', toPath: 'a.md', edgeType: 'challenges_rebuttal', sourceGraph: 'local' },
   ];
   const cycles = findContradictionCycles(edges, { maxDepth: 4 });
   assert.equal(cycles.length, 0);
@@ -106,7 +106,7 @@ test('mutual 2-cycle: a<->b produces exactly ONE cycle, not two', () => {
   // starting at a, once at b). canonicalCycleKey rotates so the lex-min node
   // leads; both rotations collapse to the same key.
   const edges = [
-    { fromPath: 'a.md', toPath: 'b.md', edgeType: 'challenges_rebuttal', sourceGraph: 'nli' },
+    { fromPath: 'a.md', toPath: 'b.md', edgeType: 'challenges_rebuttal', sourceGraph: 'local' },
     { fromPath: 'b.md', toPath: 'a.md', edgeType: 'supports', sourceGraph: 'local' },
   ];
   const cycles = findContradictionCycles(edges, { maxDepth: 4 });
@@ -121,7 +121,7 @@ test('multi-edge same direction does not multiply cycle count', () => {
   // single key so the output stays at one cycle.
   const edges = [
     { fromPath: 'a.md', toPath: 'b.md', edgeType: 'challenges_rebuttal', sourceGraph: 'local' },
-    { fromPath: 'a.md', toPath: 'b.md', edgeType: 'supports', sourceGraph: 'nli' },
+    { fromPath: 'a.md', toPath: 'b.md', edgeType: 'supports', sourceGraph: 'local' },
     { fromPath: 'b.md', toPath: 'a.md', edgeType: 'challenges_rebuttal', sourceGraph: 'local' },
   ];
   const cycles = findContradictionCycles(edges, { maxDepth: 4 });
@@ -136,10 +136,10 @@ test('disconnected components each surface their own cycle', () => {
   const edges = [
     { fromPath: 'a.md', toPath: 'b.md', edgeType: 'supports', sourceGraph: 'local' },
     { fromPath: 'b.md', toPath: 'c.md', edgeType: 'supports', sourceGraph: 'local' },
-    { fromPath: 'c.md', toPath: 'a.md', edgeType: 'challenges_rebuttal', sourceGraph: 'nli' },
+    { fromPath: 'c.md', toPath: 'a.md', edgeType: 'challenges_rebuttal', sourceGraph: 'local' },
     { fromPath: 'x.md', toPath: 'y.md', edgeType: 'supports', sourceGraph: 'local' },
     { fromPath: 'y.md', toPath: 'z.md', edgeType: 'supports', sourceGraph: 'local' },
-    { fromPath: 'z.md', toPath: 'x.md', edgeType: 'challenges_rebuttal', sourceGraph: 'nli' },
+    { fromPath: 'z.md', toPath: 'x.md', edgeType: 'challenges_rebuttal', sourceGraph: 'local' },
   ];
   const cycles = findContradictionCycles(edges, { maxDepth: 4 });
   assert.equal(cycles.length, 2);

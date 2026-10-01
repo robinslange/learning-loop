@@ -15,14 +15,14 @@ test('addEdge persists confidence_score when provided', async () => {
       toPath: 'a/2.md',
       edgeType: 'challenges_rebuttal',
       confidence: 'low',
-      sourceGraph: 'nli',
+      sourceGraph: 'local',
       directionFlipped: 0,
       confidenceScore: 0.967,
     });
     saveDb(db, dbPath);
     const rows = db.exec('SELECT source_graph, confidence_score FROM edges')[0].values;
     assert.equal(rows.length, 1);
-    assert.equal(rows[0][0], 'nli');
+    assert.equal(rows[0][0], 'local');
     assert.ok(Math.abs(rows[0][1] - 0.967) < 1e-6);
     db.close();
   } finally {

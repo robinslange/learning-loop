@@ -3,8 +3,8 @@
 // supersede path stamp a note's frontmatter but never move or overwrite it,
 // so its outgoing edges keep participating in live graph traversal unless
 // something marks them archived. archiveOutgoingEdges is that something --
-// it marks rather than deletes (never touching an edge already archived,
-// nli, or comention), so getDownstream stops counting the retired note's
+// it marks rather than deletes (never touching an edge already archived or
+// comention), so getDownstream stops counting the retired note's
 // outgoing edges live while the edge rows themselves survive for history.
 
 import { test } from 'node:test';
@@ -60,15 +60,8 @@ test('archiveOutgoingEdges leaves incoming edges (to_path) untouched', async (t)
   assert.equal(rows[0].source_graph, 'local');
 });
 
-test("archiveOutgoingEdges never touches an edge already nli or comention (mirrors removeOutgoingEdges' filter)", async (t) => {
+test('archiveOutgoingEdges never touches a comention edge', async (t) => {
   const db = await freshDb(t);
-  addEdge(db, {
-    fromPath: 'a.md',
-    toPath: 'b.md',
-    edgeType: 'supports',
-    confidence: 'low',
-    sourceGraph: 'nli',
-  });
   addEdge(db, {
     fromPath: 'a.md',
     toPath: 'c.md',
@@ -81,7 +74,6 @@ test("archiveOutgoingEdges never touches an edge already nli or comention (mirro
 
   const rows = getEdgesFrom(db, 'a.md');
   const byTarget = Object.fromEntries(rows.map((r) => [r.to_path, r.source_graph]));
-  assert.equal(byTarget['b.md'], 'nli', 'an nli edge must stay nli, not become archived');
   assert.equal(byTarget['c.md'], 'comention', 'a comention edge must stay comention');
 });
 

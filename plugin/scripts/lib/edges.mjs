@@ -65,6 +65,12 @@ export async function openEdgeDb(dbPath) {
   if (!cols.includes('confidence_score')) {
     db.run('ALTER TABLE edges ADD COLUMN confidence_score REAL');
   }
+  // Left over from the removed NLI contradiction detector (12% precision):
+  // its edges and the two tables it kept. Nothing reads any of them. They go
+  // first, so the medium dedupe below never counts one as a pair's edge.
+  db.run("DELETE FROM edges WHERE source_graph = 'nli'");
+  db.run('DROP TABLE IF EXISTS viz_meta');
+  db.run('DROP TABLE IF EXISTS nli_frontmatter_tags');
   // A 'medium' row comes from an older classifier with a second, weaker verb
   // tier that nothing ever reviewed. The row keeps no record of its verb, so
   // it maps by type. Undermining and rebuttal rows become 'high': most are
@@ -99,9 +105,6 @@ export async function openEdgeDb(dbPath) {
 // source_graph value space:
 //   'local'    — edge inferred from a write/edit on this machine (default)
 //   'archived' — edge preserved across an archive flow; removeOutgoingEdges skips these
-//   'nli'      — legacy: written by the removed NLI contradiction subsystem. Still
-//                excluded from traversal queries so pre-cleanup DBs behave; deleted
-//                by scripts/nli-cleanup.mjs
 //   'comention' — low-confidence associative edge from a resolved wikilink with no
 //                argumentative verb nearby (edge-classifier co-mention tier). Gives
 //                the graph breadth for ranking; excluded from impact traversal so
@@ -156,19 +159,17 @@ export function removeOutgoingEdges(db, notePath) {
 }
 
 // The edges a traversal follows: argued local ones. 'archived' rows are a
-// retired note's history, 'comention' rows are breadth for ranking, and 'nli'
-// rows are left over from the removed contradiction detector. Takes the
-// table alias, because most queries join edges to itself or to a CTE with the
-// same columns.
-const traversable = (t) => `${t}.source_graph NOT IN ('archived', 'nli', 'comention')`;
+// retired note's history and 'comention' rows are breadth for ranking. Takes
+// the table alias, because most queries join edges to itself or to a CTE with
+// the same columns.
+const traversable = (t) => `${t}.source_graph NOT IN ('archived', 'comention')`;
 
 // Marks a note's outgoing edges source_graph='archived' rather than deleting
 // them: a supersedeNoteFile-driven retirement leaves the note in place, so
 // its edges should stop counting in the traversals (getDownstream and the
 // symmetric walk exclude 'archived') without losing the history the
 // sole-justification queries still trace. Only traversable rows are
-// relabelled: an already-archived, advisory or breadth-only edge stays what
-// it is.
+// relabelled: an already-archived or breadth-only edge stays what it is.
 export function archiveOutgoingEdges(db, notePath) {
   db.run(
     `UPDATE edges SET source_graph = 'archived' WHERE from_path = ? AND ${traversable('edges')}`,
@@ -216,20 +217,18 @@ export function getDownstream(db, notePath, maxDepth = 10) {
 // which of the root's edges are candidates: its outgoing ones, or for the
 // symmetric form its incoming ones too. Unlike the traversals, archived edges
 // count: impact maps for a rewrite or correction must still see a retired
-// note's justifications. Legacy nli rows never count as justification.
+// note's justifications.
 function soleJustificationDependents(db, notePath, rootMatch) {
   const sql = `
     SELECT e.id, e.from_path, e.to_path, e.edge_type, e.confidence, e.source_graph, e.direction_flipped, e.created_at
     FROM edges e
     WHERE ${rootMatch}
       AND e.edge_type IN ('evidence_for', 'supports')
-      AND e.source_graph != 'nli'
       AND NOT EXISTS (
         SELECT 1 FROM edges other
         WHERE other.to_path = e.to_path
           AND other.from_path != e.from_path
           AND other.edge_type IN ('evidence_for', 'supports')
-          AND other.source_graph != 'nli'
       )
   `;
   return rowsToObjects(db.exec(sql, [notePath]));
