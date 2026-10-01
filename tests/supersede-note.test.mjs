@@ -8,7 +8,7 @@
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
@@ -52,9 +52,14 @@ describe('supersedeNoteFile (disk write against a temp vault)', () => {
         oldPath,
         '---\ntags: [a]\ndate: 2026-01-01\nsource: synthesis\n---\n\nOld claim, still on disk.\n',
       );
+      // vaultPath and pluginData default to the real install's, resolved at
+      // import; left out, this test archived edges in the developer's live
+      // edges.db.
       const result = await supersedeNoteFile(oldPath, {
         date: '2026-09-22',
         replacementPath: 'new-note.md',
+        vaultPath: vault,
+        pluginData: join(vault, 'plugin-data'),
       });
       assert.equal(result.changed, true);
       const { fm, body } = parseFrontmatter(readFileSync(oldPath, 'utf-8'));
@@ -250,6 +255,37 @@ describe('supersedeNoteFile archives outgoing edges best-effort', () => {
       reopened.close();
       assert.equal(rows.length, 1);
       assert.equal(rows[0].source_graph, 'archived');
+    } finally {
+      rmSync(vault, { recursive: true, force: true });
+      rmSync(pluginData, { recursive: true, force: true });
+    }
+  });
+
+  it('leaves edges.db untouched when the note has no edges to archive', async () => {
+    // saveDb rewrites the whole graph through a rename, so an unconditional
+    // save replaced the file (new inode) even when nothing changed.
+    const { openEdgeDb, addEdge, saveDb } = await import('../plugin/scripts/lib/edges.mjs');
+    const vault = mkdtempSync(join(tmpdir(), 'll-supersede-edges-'));
+    const pluginData = mkdtempSync(join(tmpdir(), 'll-supersede-edges-pd-'));
+    try {
+      const oldPath = join(vault, 'old-note.md');
+      writeFileSync(oldPath, '---\ntags: [a]\n---\n\nOld claim.\n');
+      const dbPath = join(pluginData, 'edges.db');
+      const db = await openEdgeDb(dbPath);
+      addEdge(db, { fromPath: 'unrelated.md', toPath: 'other.md', edgeType: 'supports' });
+      saveDb(db, dbPath);
+      db.close();
+      const before = { ino: statSync(dbPath).ino, bytes: readFileSync(dbPath) };
+
+      const result = await supersedeNoteFile(oldPath, {
+        date: '2026-09-22',
+        replacementPath: 'new-note.md',
+        vaultPath: vault,
+        pluginData,
+      });
+      assert.equal(result.edgesArchived, 0);
+      assert.equal(statSync(dbPath).ino, before.ino, 'edges.db must not be replaced');
+      assert.ok(readFileSync(dbPath).equals(before.bytes), 'edges.db must not change');
     } finally {
       rmSync(vault, { recursive: true, force: true });
       rmSync(pluginData, { recursive: true, force: true });

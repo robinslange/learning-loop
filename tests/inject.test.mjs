@@ -871,6 +871,8 @@ describe('enrichVaultHits', () => {
     const { changed } = await supersedeNoteFile(join(vault, 'superseded-live.md'), {
       date: '2026-09-22',
       replacementPath: 'new-note.md',
+      vaultPath: vault,
+      pluginData: join(vault, 'plugin-data'),
     });
     assert.equal(changed, true);
     const out = enrichVaultHits(
