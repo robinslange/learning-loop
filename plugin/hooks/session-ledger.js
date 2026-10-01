@@ -31,8 +31,22 @@ import {
 } from '../scripts/lib/session-ledger.mjs';
 import { getVaultPath, getConfig, getPluginData } from '../scripts/lib/config.mjs';
 import { writeFileAtomic } from '../scripts/lib/write-atomic.mjs';
+import { parseFrontmatter } from '../scripts/lib/markdown-parse.mjs';
 
 const STALE_TMP_MS = 60 * 60 * 1000;
+
+// The `id:` already in the note at `path`, or null on its first flush.
+function existingId(path) {
+  let text;
+  try {
+    text = readFileSync(path, 'utf8');
+  } catch (err) {
+    if (err?.code !== 'ENOENT') logError('session-ledger.readId', err, { path });
+    return null;
+  }
+  const id = parseFrontmatter(text).fm.id;
+  return typeof id === 'string' && id !== '' ? id : null;
+}
 
 // If Claude Code kills the hook between writeFileSync(tmp) and renameSync,
 // the temp file is orphaned: indexers skip it (not .md) and nothing else
@@ -225,6 +239,9 @@ try {
       // is always truthy on this session's first flush (computed just now
       // from git.head) and would wrongly read as a fallback.
       rangeFellBack: Boolean(latest?.started_head) && git.commitsSource === 'since',
+      // The indexer gives every note an `id:`; a rewrite that dropped it would
+      // be handed a fresh one on every flush.
+      id: existingId(abs),
     }),
   );
   wrote = true;

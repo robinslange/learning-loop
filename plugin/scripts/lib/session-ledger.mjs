@@ -332,6 +332,7 @@ export function renderLedger({
   summary,
   harness,
   rangeFellBack = false,
+  id = null,
 }) {
   const title = `Session ledger: ${label || 'session'} (${date})`;
   const fm = [
@@ -347,6 +348,7 @@ export function renderLedger({
     `status: ${isSessionEnd ? 'ended' : 'open'}`,
   ];
   if (isSessionEnd) fm.push(`ended_reason: ${summary.end_reason}`);
+  if (id) fm.push(`id: ${id}`);
   fm.push('---', '');
 
   const sections = [];

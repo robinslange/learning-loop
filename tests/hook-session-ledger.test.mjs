@@ -547,3 +547,45 @@ test('the projects map renames the folder', () => {
   assert.deepEqual(marker, { project: 'curated-name' });
   r.cleanup();
 });
+
+test('a flush that rewrites the ledger keeps the id the indexer gave it', () => {
+  // ll-search's indexer writes an `id:` into any note without one. A rewrite
+  // that dropped it would make the indexer mint a new id on every flush, so
+  // anything keyed by note id would see a new note each time.
+  const sid = randomUUID();
+  const pinned = `4-projects/my-repo/ledger/2020-01-01-plugin-hooks-${sid.slice(0, 8)}.md`;
+  const id = '0199a3c2-7f41-7c3e-9b1a-5d2e8f4a6c10';
+  let ctx;
+  const r = runHook(HOOK, {
+    env: { TMPDIR: TMP, LL_LEDGER_GIT_BUDGET_MS: GIT_BUDGET_MS },
+    seed: (pluginDataDir, sandboxRoot) => {
+      const vault = makeVault(sandboxRoot);
+      const repo = makeRepo(sandboxRoot);
+      seedConfig(pluginDataDir, vault);
+      mkdirSync(join(pluginDataDir, 'markers'), { recursive: true });
+      writeFileSync(
+        join(pluginDataDir, 'markers', `ledger-${sid}.json`),
+        JSON.stringify({ path: pinned, started_ts: '2020-01-01T00:00:00.000Z' }),
+      );
+      mkdirSync(join(vault, '4-projects', 'my-repo', 'ledger'), { recursive: true });
+      writeFileSync(
+        join(vault, pinned),
+        `---\ntitle: "Session ledger: old (2020-01-01)"\ntags: [ledger, "my-repo"]\nstatus: open\nid: ${id}\n---\n\nold body\n`,
+      );
+      ctx = { vault, repo };
+    },
+    stdin: (sandboxRoot) => ({
+      session_id: sid,
+      hook_event_name: 'Stop',
+      cwd: ctx.repo,
+      transcript_path: transcript(sandboxRoot, { prompts: 2, editPath: join(ctx.repo, 'a.txt') }),
+      last_assistant_message: 'rewritten',
+      stop_hook_active: false,
+    }),
+  });
+  assert.equal(r.exitCode, 0, r.stderr);
+  const text = readFileSync(join(ctx.vault, pinned), 'utf8');
+  assert.ok(!text.includes('old body'), 'the note was rewritten');
+  assert.deepEqual(text.match(/^id: .*$/gm), [`id: ${id}`]);
+  r.cleanup();
+});
