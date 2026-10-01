@@ -19,6 +19,10 @@ All notable changes to this project are documented here. The format is based on 
   - `edges-cli` loses `review`, `review-count`, `confirm` and `reject`, and `add --confidence` takes `high` or `low`.
   - The edge-database writers take a `file-lock` handle directly instead of going through a module-level wrapper. The sole-justification queries share one definition, and the traversal exclusion is spelled once.
 
+### Removed
+
+- **`nli-cleanup.mjs` (#97).** `openEdgeDb` now does its database half on every install: it deletes `source_graph = 'nli'` edges and drops `viz_meta` and `nli_frontmatter_tags`, so the queries no longer exclude `'nli'`. The script was run once on the maintainer's vault, where it stripped `nli-contradicts` and `has-contradiction` from 837 notes. A vault elsewhere that still carries those keys keeps them. Nothing reads them, but Obsidian draws their wikilinks in the graph and backlinks, so you may want to delete them yourself.
+
 ### Fixed
 
 - **A session ledger keeps its note id across flushes.** The ledger hook rewrites its note on every Stop and SessionEnd, and the rewrite dropped the `id:` the indexer had added, so the indexer gave the note a new id each time. Anything keyed by note id (federation, an external mirror of the vault) saw every flush as a new note plus a deleted one. The hook now reads the id from the note it is replacing and writes it back.

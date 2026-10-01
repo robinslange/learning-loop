@@ -149,7 +149,7 @@ test('openEdgeDb is a no-op on db that already has confidence_score', async () =
       );
     `);
     seed.run(
-      "INSERT INTO edges (from_path, to_path, edge_type, confidence, source_graph, direction_flipped, confidence_score) VALUES ('x.md', 'y.md', 'nli_supports', 'low', 'nli', 0, 0.93)",
+      "INSERT INTO edges (from_path, to_path, edge_type, confidence, source_graph, direction_flipped, confidence_score) VALUES ('x.md', 'y.md', 'supports', 'low', 'local', 0, 0.93)",
     );
     writeFileSync(dbPath, Buffer.from(seed.export()));
     seed.close();
