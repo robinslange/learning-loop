@@ -17,7 +17,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runEdgeInfer } from '../plugin/hooks/modules/edge-infer.mjs';
-import { acquireLock, releaseLock } from '../plugin/scripts/lib/edges.mjs';
 
 const VAULT = fileURLToPath(new URL('./fixtures/vault-small', import.meta.url));
 const NOTE_REL = '0-inbox/rebuttal-note.md';
@@ -68,18 +67,7 @@ test('runEdgeInfer releases the edges.db lock when openEdgeDb throws', async () 
     // be released. Swallow the throw so we can assert on lock state.
     await runEdgeInfer(ctx).catch(() => {});
 
-    // The leak is observable two ways: the on-disk lockfile must be gone, and
-    // the module-scoped single-holder state must be free (a fresh acquire wins).
     assert.equal(existsSync(lockPath), false, 'edges.db.lock must not be left behind');
-
-    // Point the lock at a clean sibling path (edges.db here is a directory).
-    const probePath = join(dir, 'probe.db');
-    assert.equal(
-      acquireLock(probePath),
-      true,
-      'lock holder state was released, so a fresh acquire succeeds',
-    );
-    releaseLock(probePath);
   } finally {
     if (savedPluginData === undefined) delete process.env.CLAUDE_PLUGIN_DATA;
     else process.env.CLAUDE_PLUGIN_DATA = savedPluginData;

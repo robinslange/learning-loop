@@ -19,7 +19,7 @@ describe('edge-classifier verb-position direction', () => {
     assert.equal(result.flip, true);
   });
 
-  it('flips for em-dash verb-after pattern at medium confidence', () => {
+  it('flips for an em-dash counterpoint marker after the link', () => {
     const ctx = '[[target]] — counter-evidence: the proposed mechanism does not replicate.';
     const result = classifyLink(ctx, 'target');
     assert.equal(result.flip, true);

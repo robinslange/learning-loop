@@ -1,16 +1,13 @@
 #!/usr/bin/env node
 
-import { join, basename } from 'path';
-import { readFileSync } from 'fs';
-import { PLUGIN_DATA, VAULT_PATH } from './lib/constants.mjs';
+import { PLUGIN_DATA } from './lib/constants.mjs';
 import { DATA_FILES } from './lib/paths.mjs';
-import { stripFrontmatter } from './lib/markdown-parse.mjs';
 import { findContradictionCycles } from './lib/cycle-detect.mjs';
+import { acquireLock, releaseLock } from './lib/file-lock.mjs';
 import {
   openEdgeDb,
   addEdge,
   removeEdge,
-  removeEdgesByNote,
   archiveOutgoingEdges,
   getEdgesFrom,
   getEdgesTo,
@@ -19,16 +16,11 @@ import {
   getSoleJustificationDependents,
   getSoleJustificationDependentsSymmetric,
   getContradictionGraphEdges,
-  getPendingReview,
-  confirmEdge,
-  rejectEdge,
   saveDb,
   addSupersession,
   removeSupersession,
   listSupersessions,
   findMatchingSupersessions,
-  acquireLock,
-  releaseLock,
 } from './lib/edges.mjs';
 
 const DB_FILE = DATA_FILES.edgesDb(PLUGIN_DATA);
@@ -38,21 +30,17 @@ const cmd = args[0];
 const HELP_TEXT = `edges-cli.mjs <command> [args...]
 
 Commands:
-  add <from> <to> <type> [--confidence high|medium|low] [--source-graph local] [--direction-flipped 0|1]
+  add <from> <to> <type> [--confidence high|low] [--source-graph local] [--direction-flipped 0|1]
   remove <id>
   archive-outgoing <note-path>    Mark a note's outgoing edges source_graph=archived
   list <note-path>
   downstream <note-path> [--max-depth 10] [--symmetric]
   sole-dependents <note-path> [--symmetric]
   cycles [--max-depth 4]
-  review                          Show pending edges with source-note context
-  review-count
   super-add <pattern> [--replacement <note-path>] [--reason <text>] [--date YYYY-MM-DD]
   super-list
   super-check <query>
   super-remove <id>
-  confirm <id> [--type new-type]
-  reject <id>
   stats
 `;
 
@@ -71,64 +59,35 @@ function out(data) {
   console.log(JSON.stringify(data, null, 2));
 }
 
-function extractEdgeContext(fromPath, toTarget) {
-  try {
-    const fullPath = join(VAULT_PATH, fromPath);
-    const content = readFileSync(fullPath, 'utf-8');
-    const body = stripFrontmatter(content);
-    const linkRe = new RegExp(
-      `\\[\\[${toTarget.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:\\|[^\\]]+)?\\]\\]`,
-    );
-    const m = linkRe.exec(body);
-    if (!m) return null;
-    const start = Math.max(0, m.index - 100);
-    const end = Math.min(body.length, m.index + m[0].length + 100);
-    return body.slice(start, end).replace(/\n/g, ' ').trim();
-  } catch {
-    return null;
-  }
-}
-
 function usage() {
   out({
     error: 'Unknown command',
     commands: [
-      'add <from> <to> <type> [--confidence high|medium|low] [--source-graph local] [--direction-flipped 0|1]',
+      'add <from> <to> <type> [--confidence high|low] [--source-graph local] [--direction-flipped 0|1]',
       'remove <id>',
       'archive-outgoing <note-path>',
       'list <note-path>',
       'downstream <note-path> [--max-depth 10] [--symmetric]',
       'sole-dependents <note-path> [--symmetric]',
       'cycles [--max-depth 4]',
-      'review (shows context from source notes)',
-      'review-count',
       'super-add <pattern> [--replacement <note-path>] [--reason <text>] [--date YYYY-MM-DD]',
       'super-list',
       'super-check <query>',
       'super-remove <id>',
-      'confirm <id> [--type new-type]',
-      'reject <id>',
       'stats',
     ],
   });
   process.exit(1);
 }
 
-const WRITE_COMMANDS = [
-  'add',
-  'remove',
-  'archive-outgoing',
-  'confirm',
-  'reject',
-  'super-add',
-  'super-remove',
-];
+const WRITE_COMMANDS = ['add', 'remove', 'archive-outgoing', 'super-add', 'super-remove'];
 
 async function main() {
   if (!cmd) usage();
 
-  const isWriteCommand = WRITE_COMMANDS.includes(cmd);
-  if (isWriteCommand && !acquireLock(DB_FILE)) {
+  const writes = WRITE_COMMANDS.includes(cmd);
+  const lock = writes ? acquireLock(DB_FILE) : null;
+  if (writes && !lock) {
     console.error('edges: another writer holds the lock; retry shortly');
     process.exit(1);
   }
@@ -245,48 +204,6 @@ async function main() {
         break;
       }
 
-      case 'review': {
-        const pending = getPendingReview(db);
-        const enriched = pending.map((edge) => {
-          const ctx = extractEdgeContext(edge.from_path, edge.to_path);
-          return ctx ? { ...edge, context: ctx } : edge;
-        });
-        out({ pending_count: pending.length, edges: enriched });
-        break;
-      }
-
-      case 'review-count': {
-        const countResult = db.exec("SELECT COUNT(*) FROM edges WHERE confidence = 'medium'");
-        const count = countResult.length ? countResult[0].values[0][0] : 0;
-        out({ pending_count: count });
-        break;
-      }
-
-      case 'confirm': {
-        const id = parseInt(args[1], 10);
-        if (isNaN(id)) {
-          out({ error: 'Usage: confirm <id> [--type new-type]' });
-          process.exit(1);
-        }
-        const newType = parseFlag('--type', null);
-        confirmEdge(db, id, newType);
-        saveDb(db, DB_FILE);
-        out({ ok: true, confirmed: id });
-        break;
-      }
-
-      case 'reject': {
-        const id = parseInt(args[1], 10);
-        if (isNaN(id)) {
-          out({ error: 'Usage: reject <id>' });
-          process.exit(1);
-        }
-        rejectEdge(db, id);
-        saveDb(db, DB_FILE);
-        out({ ok: true, rejected: id });
-        break;
-      }
-
       case 'super-add': {
         const pattern = args[1];
         if (!pattern) {
@@ -379,7 +296,7 @@ async function main() {
     }
   } finally {
     if (db) db.close();
-    if (isWriteCommand) releaseLock(DB_FILE);
+    releaseLock(lock);
   }
 }
 

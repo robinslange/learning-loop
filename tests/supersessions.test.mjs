@@ -65,6 +65,24 @@ describe('supersessions lib', () => {
     assert.match(items[0].superseded_date, /^\d{4}-\d{2}-\d{2}$/);
   });
 
+  it('keeps a supplied superseded date and stamps today when none is given', async () => {
+    const db = await openEdgeDb(DB_PATH);
+    addSupersession(db, { oldPatternQuery: 'dated pattern query', supersededDate: '2025-03-04' });
+    addSupersession(db, { oldPatternQuery: 'undated pattern query' });
+    // `edges-cli super-add --date "$D"` with an empty $D passes ''.
+    addSupersession(db, { oldPatternQuery: 'blank dated pattern query', supersededDate: '' });
+    const [today] = db.exec("SELECT date('now')")[0].values[0];
+    const byQuery = Object.fromEntries(
+      listSupersessions(db).map((s) => [s.old_pattern_query, s.superseded_date]),
+    );
+    db.close();
+    assert.deepEqual(byQuery, {
+      'dated pattern query': '2025-03-04',
+      'undated pattern query': today,
+      'blank dated pattern query': today,
+    });
+  });
+
   it('rejects empty pattern', async () => {
     const db = await openEdgeDb(DB_PATH);
     assert.throws(() => addSupersession(db, { oldPatternQuery: '' }));
