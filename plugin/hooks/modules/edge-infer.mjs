@@ -8,14 +8,8 @@ import { isVaultNote, vaultRelPath } from '../lib/common.mjs';
 import { buildVaultIndexFromSnapshot } from '../lib/snapshot.mjs';
 import { logError } from '../../scripts/lib/log.mjs';
 import { splitRawFrontmatter } from '../../scripts/lib/markdown-parse.mjs';
-import {
-  openEdgeDb,
-  addEdge,
-  removeOutgoingEdges,
-  saveDb,
-  acquireLock,
-  releaseLock,
-} from '../../scripts/lib/edges.mjs';
+import { openEdgeDb, addEdge, removeOutgoingEdges, saveDb } from '../../scripts/lib/edges.mjs';
+import { acquireLock, releaseLock } from '../../scripts/lib/file-lock.mjs';
 import { classifyNoteEdges, makeResolver } from '../../scripts/lib/edge-classifier.mjs';
 import { DATA_FILES } from '../../scripts/lib/paths.mjs';
 import { getPluginData } from '../../scripts/lib/config.mjs';
@@ -196,7 +190,8 @@ export async function runEdgeInfer(ctx) {
 
   if (edges.length === 0) return;
 
-  if (!acquireLock(dbPath)) {
+  const lock = acquireLock(dbPath);
+  if (!lock) {
     logError(
       'edge-infer.acquireLock',
       new Error(`failed to acquire ${dbPath} after retries; edge work for ${sourceRel} skipped`),
@@ -221,7 +216,7 @@ export async function runEdgeInfer(ctx) {
     saveDb(db, dbPath);
   } finally {
     db?.close();
-    releaseLock(dbPath);
+    releaseLock(lock);
   }
 
   const highConfidenceEdges = edges.filter((e) => e.confidence === 'high' && !e.flip);

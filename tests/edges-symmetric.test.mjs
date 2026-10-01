@@ -9,7 +9,9 @@ import {
   addEdge,
   saveDb,
   getDownstreamSymmetric,
+  getSoleJustificationDependents,
   getSoleJustificationDependentsSymmetric,
+  getEdgesTo,
 } from '../plugin/scripts/lib/edges.mjs';
 
 const PLUGIN_DATA = join(
@@ -95,5 +97,32 @@ describe('symmetric edge queries', () => {
     assert.equal(dependents.length, 1);
     assert.equal(dependents[0].from_path, 'a.md');
     assert.equal(dependents[0].to_path, 'b.md');
+  });
+
+  it('getSoleJustificationDependentsSymmetric returns both directions at once, and the plain form only the outgoing one', async () => {
+    const db = await openEdgeDb(DB_PATH);
+    addEdge(db, { fromPath: 'a.md', toPath: 'b.md', edgeType: 'supports' });
+    addEdge(db, { fromPath: 'b.md', toPath: 'c.md', edgeType: 'evidence_for' });
+    addEdge(db, { fromPath: 'z.md', toPath: 'c.md', edgeType: 'evidence_for' });
+    addEdge(db, { fromPath: 'b.md', toPath: 'd.md', edgeType: 'evidence_for' });
+
+    const pairs = (rows) => rows.map((r) => `${r.from_path}>${r.to_path}`).sort();
+    const symmetric = pairs(getSoleJustificationDependentsSymmetric(db, 'b.md'));
+    const outgoing = pairs(getSoleJustificationDependents(db, 'b.md'));
+    db.close();
+
+    // a>b: b is the target and a its only justifier. b>d: b is d's only
+    // justifier. b>c is not sole, because z backs c too.
+    assert.deepEqual(symmetric, ['a.md>b.md', 'b.md>d.md']);
+    assert.deepEqual(outgoing, ['b.md>d.md']);
+  });
+
+  it('getEdgesTo returns the incoming edges and none of the outgoing ones', async () => {
+    const db = await openEdgeDb(DB_PATH);
+    addEdge(db, { fromPath: 'a.md', toPath: 'b.md', edgeType: 'supports' });
+    addEdge(db, { fromPath: 'b.md', toPath: 'c.md', edgeType: 'supports' });
+    const incoming = getEdgesTo(db, 'b.md').map((r) => `${r.from_path}>${r.to_path}`);
+    db.close();
+    assert.deepEqual(incoming, ['a.md>b.md']);
   });
 });

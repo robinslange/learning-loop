@@ -17,13 +17,8 @@ import { relative } from 'node:path';
 import { parseFrontmatter } from './lib/markdown-parse.mjs';
 import { flagValue } from './lib/cli-args.mjs';
 import { isMainModule } from './lib/is-main.mjs';
-import {
-  openEdgeDb,
-  archiveOutgoingEdges,
-  saveDb,
-  acquireLock,
-  releaseLock,
-} from './lib/edges.mjs';
+import { openEdgeDb, archiveOutgoingEdges, saveDb } from './lib/edges.mjs';
+import { acquireLock, releaseLock } from './lib/file-lock.mjs';
 import { DATA_FILES } from './lib/paths.mjs';
 import { logError } from './lib/log.mjs';
 import { VAULT_PATH, PLUGIN_DATA } from './lib/constants.mjs';
@@ -101,7 +96,8 @@ async function archiveNoteEdges(filePath, vaultPath, pluginData) {
   // edge-infer, which fires on the replacement note's write just before a
   // supersession, and whichever saves last erases the other's edges. Not a
   // hook, so it can wait longer for the lock than edge-infer does.
-  if (!acquireLock(dbPath, 40, 50)) {
+  const lock = acquireLock(dbPath, { retries: 40, retryDelayMs: 50 });
+  if (!lock) {
     logError(
       'supersede-note.archiveNoteEdges',
       new Error(`failed to acquire ${dbPath}; edges of ${relPath} left live`),
@@ -120,7 +116,7 @@ async function archiveNoteEdges(filePath, vaultPath, pluginData) {
     return 0;
   } finally {
     db?.close();
-    releaseLock(dbPath);
+    releaseLock(lock);
   }
 }
 

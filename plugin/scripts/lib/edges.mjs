@@ -1,44 +1,8 @@
 import { readFileSync, existsSync, mkdirSync, statSync } from 'fs';
 import { dirname } from 'path';
 import { initSQL } from './sqljs.mjs';
-import { acquireLock as _acquireFileLock, releaseLock as _releaseFileLock } from './file-lock.mjs';
 import { logError } from './log.mjs';
 import { writeFileAtomic } from './write-atomic.mjs';
-
-// Path-keyed lock wrapper. Preserves the existing acquireLock(dbPath) /
-// releaseLock(dbPath) public contract used by edge-infer.mjs and edges-cli.mjs
-// while delegating the actual O_EXCL + stale-recovery machinery to lib/file-lock.
-// Module-scoped handle keeps both calls path-keyed (callers don't pass handles
-// around). Single-holder by design: re-acquire while held returns false.
-let _heldHandle = null;
-let _heldPath = null;
-
-export function acquireLock(dbPath, retries = 3, delayMs = 50) {
-  if (_heldHandle !== null) return false;
-  const handle = _acquireFileLock(dbPath, { retries, retryDelayMs: delayMs });
-  if (!handle) return false;
-  _heldHandle = handle;
-  _heldPath = dbPath;
-  return true;
-}
-
-export function releaseLock(dbPath) {
-  if (_heldHandle === null) return;
-  if (dbPath !== _heldPath) {
-    // Caller bug: tried to release a lock we don't hold. Surface it
-    // instead of silently swallowing — exactly the silent-failure shape
-    // Phase 3 set out to fix. We still don't release the held lock,
-    // because doing so could free a lock the caller doesn't know exists.
-    logError('edges.releaseLock.pathMismatch', new Error('path mismatch'), {
-      requested: dbPath,
-      held: _heldPath,
-    });
-    return;
-  }
-  _releaseFileLock(_heldHandle);
-  _heldHandle = null;
-  _heldPath = null;
-}
 
 const VALID_TYPES = [
   'evidence_for',
@@ -50,7 +14,7 @@ const VALID_TYPES = [
   'associative',
 ];
 
-const VALID_CONFIDENCE = ['high', 'medium', 'low'];
+const VALID_CONFIDENCE = ['high', 'low'];
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS edges (
@@ -101,6 +65,34 @@ export async function openEdgeDb(dbPath) {
   if (!cols.includes('confidence_score')) {
     db.run('ALTER TABLE edges ADD COLUMN confidence_score REAL');
   }
+  // A 'medium' row comes from an older classifier with a second, weaker verb
+  // tier that nothing ever reviewed. The row keeps no record of its verb, so
+  // it maps by type. Undermining and rebuttal rows become 'high': most are
+  // counterpoints ("challenges", "counters", "counterpoint"), though a few were
+  // "tension with" or "questions whether", which today's classifier leaves
+  // unclassified; those settle when their note is next written. The rest
+  // become one associative edge per (from, to) pair, and none where the pair
+  // already has another edge. An archived row stays archived, and is only
+  // compared with archived rows: a retired note's history must not stand in
+  // for the pair's live edge.
+  db.run(`
+    UPDATE edges SET confidence = 'high'
+    WHERE confidence = 'medium' AND edge_type IN ('challenges_undermining', 'challenges_rebuttal')
+  `);
+  db.run(`
+    DELETE FROM edges WHERE confidence = 'medium' AND EXISTS (
+      SELECT 1 FROM edges other
+      WHERE other.from_path = edges.from_path AND other.to_path = edges.to_path
+        AND (other.source_graph = 'archived') = (edges.source_graph = 'archived')
+        AND (other.confidence != 'medium' OR other.id < edges.id)
+    )
+  `);
+  db.run(`
+    UPDATE edges
+    SET edge_type = 'associative', confidence = 'low', direction_flipped = 0,
+      source_graph = CASE source_graph WHEN 'archived' THEN 'archived' ELSE 'comention' END
+    WHERE confidence = 'medium'
+  `);
   return db;
 }
 
@@ -163,17 +155,23 @@ export function removeOutgoingEdges(db, notePath) {
   db.run("DELETE FROM edges WHERE from_path = ? AND source_graph != 'archived'", [notePath]);
 }
 
+// The edges a traversal follows: argued local ones. 'archived' rows are a
+// retired note's history, 'comention' rows are breadth for ranking, and 'nli'
+// rows are left over from the removed contradiction detector. Takes the
+// table alias, because most queries join edges to itself or to a CTE with the
+// same columns.
+const traversable = (t) => `${t}.source_graph NOT IN ('archived', 'nli', 'comention')`;
+
 // Marks a note's outgoing edges source_graph='archived' rather than deleting
 // them: a supersedeNoteFile-driven retirement leaves the note in place, so
-// its edges should stop counting as live justification (getDownstream /
-// getSoleJustificationDependents exclude 'archived') without losing the
-// history getSoleJustificationDependentsSymmetric still traces. Mirrors
-// removeOutgoingEdges' don't-touch-already-special-rows filter, widened to
-// also skip nli/comention rows (an advisory or breadth-only edge should not
-// be relabelled archived just because its source note was retired).
+// its edges should stop counting in the traversals (getDownstream and the
+// symmetric walk exclude 'archived') without losing the history the
+// sole-justification queries still trace. Only traversable rows are
+// relabelled: an already-archived, advisory or breadth-only edge stays what
+// it is.
 export function archiveOutgoingEdges(db, notePath) {
   db.run(
-    "UPDATE edges SET source_graph = 'archived' WHERE from_path = ? AND source_graph NOT IN ('archived', 'nli', 'comention')",
+    `UPDATE edges SET source_graph = 'archived' WHERE from_path = ? AND ${traversable('edges')}`,
     [notePath],
   );
 }
@@ -202,36 +200,47 @@ export function getDownstream(db, notePath, maxDepth = 10) {
   const sql = `
     WITH RECURSIVE downstream(id, from_path, to_path, edge_type, confidence, source_graph, direction_flipped, created_at, depth) AS (
       SELECT id, from_path, to_path, edge_type, confidence, source_graph, direction_flipped, created_at, 1
-      FROM edges WHERE from_path = ? AND source_graph NOT IN ('archived', 'nli', 'comention')
+      FROM edges root WHERE from_path = ? AND ${traversable('root')}
       UNION
       SELECT e.id, e.from_path, e.to_path, e.edge_type, e.confidence, e.source_graph, e.direction_flipped, e.created_at, d.depth + 1
       FROM edges e
       JOIN downstream d ON e.from_path = d.to_path
-      WHERE d.depth < ? AND e.source_graph NOT IN ('archived', 'nli', 'comention')
+      WHERE d.depth < ? AND ${traversable('e')}
     )
     SELECT DISTINCT * FROM downstream ORDER BY depth, to_path
   `;
   return rowsToObjects(db.exec(sql, [notePath, maxDepth]));
 }
 
-export function getSoleJustificationDependents(db, notePath) {
-  // Explicit `source_graph != 'nli'` guard: legacy NLI rows may still exist in
-  // pre-cleanup DBs and must never count as real justification.
+// A justifying edge whose target no other note justifies. `rootMatch` picks
+// which of the root's edges are candidates: its outgoing ones, or for the
+// symmetric form its incoming ones too. Unlike the traversals, archived edges
+// count: impact maps for a rewrite or correction must still see a retired
+// note's justifications. Legacy nli rows never count as justification.
+function soleJustificationDependents(db, notePath, rootMatch) {
   const sql = `
     SELECT e.id, e.from_path, e.to_path, e.edge_type, e.confidence, e.source_graph, e.direction_flipped, e.created_at
     FROM edges e
-    WHERE e.from_path = ?
+    WHERE ${rootMatch}
       AND e.edge_type IN ('evidence_for', 'supports')
       AND e.source_graph != 'nli'
       AND NOT EXISTS (
         SELECT 1 FROM edges other
         WHERE other.to_path = e.to_path
+          AND other.from_path != e.from_path
           AND other.edge_type IN ('evidence_for', 'supports')
           AND other.source_graph != 'nli'
-          AND other.from_path != ?
       )
   `;
-  return rowsToObjects(db.exec(sql, [notePath, notePath]));
+  return rowsToObjects(db.exec(sql, [notePath]));
+}
+
+export function getSoleJustificationDependents(db, notePath) {
+  return soleJustificationDependents(db, notePath, 'e.from_path = ?');
+}
+
+export function getSoleJustificationDependentsSymmetric(db, notePath) {
+  return soleJustificationDependents(db, notePath, '? IN (e.from_path, e.to_path)');
 }
 
 export function getDownstreamSymmetric(db, notePath, maxDepth = 10) {
@@ -244,7 +253,7 @@ export function getDownstreamSymmetric(db, notePath, maxDepth = 10) {
         r.depth + 1
       FROM edges e
       JOIN reachable r ON (e.from_path = r.node OR e.to_path = r.node)
-      WHERE r.depth < ? AND e.source_graph NOT IN ('archived', 'nli', 'comention')
+      WHERE r.depth < ? AND ${traversable('e')}
     )
     SELECT node, MIN(depth) AS depth
     FROM reachable
@@ -255,50 +264,11 @@ export function getDownstreamSymmetric(db, notePath, maxDepth = 10) {
   return rowsToObjects(db.exec(sql, [notePath, maxDepth, notePath]));
 }
 
-// Unlike getDownstreamSymmetric, this function INCLUDES archived edges.
-// Sole-dependent analysis for rewrite/correction impact maps must consider
-// historical justifications — an archived note may still have sole-dependent
-// relationships worth preserving in the impact map.
-export function getSoleJustificationDependentsSymmetric(db, notePath) {
-  // Same defense-in-depth filter as getSoleJustificationDependents: explicit
-  // source_graph != 'nli' alongside the edge_type whitelist.
-  const sql = `
-    SELECT e.id, e.from_path, e.to_path, e.edge_type, e.confidence, e.source_graph, e.direction_flipped, e.created_at
-    FROM edges e
-    WHERE e.from_path = ?
-      AND e.edge_type IN ('evidence_for', 'supports')
-      AND e.source_graph != 'nli'
-      AND NOT EXISTS (
-        SELECT 1 FROM edges other
-        WHERE other.to_path = e.to_path
-          AND other.from_path != e.from_path
-          AND other.edge_type IN ('evidence_for', 'supports')
-          AND other.source_graph != 'nli'
-      )
-    UNION
-    SELECT e.id, e.from_path, e.to_path, e.edge_type, e.confidence, e.source_graph, e.direction_flipped, e.created_at
-    FROM edges e
-    WHERE e.to_path = ?
-      AND e.edge_type IN ('evidence_for', 'supports')
-      AND e.source_graph != 'nli'
-      AND NOT EXISTS (
-        SELECT 1 FROM edges other
-        WHERE other.to_path = e.to_path
-          AND other.from_path != e.from_path
-          AND other.edge_type IN ('evidence_for', 'supports')
-          AND other.source_graph != 'nli'
-      )
-  `;
-  return rowsToObjects(db.exec(sql, [notePath, notePath]));
-}
-
 // Edge rows shaped for cycle-detect (camelCase from/to/type plus id). Same
 // eligibility filter as the recursive traversals: argued local edges only.
 export function getContradictionGraphEdges(db) {
   const rows = rowsToObjects(
-    db.exec(
-      "SELECT id, from_path, to_path, edge_type FROM edges WHERE source_graph NOT IN ('archived', 'nli', 'comention')",
-    ),
+    db.exec(`SELECT id, from_path, to_path, edge_type FROM edges e WHERE ${traversable('e')}`),
   );
   return rows.map((r) => ({
     id: r.id,
@@ -306,28 +276,6 @@ export function getContradictionGraphEdges(db) {
     toPath: r.to_path,
     edgeType: r.edge_type,
   }));
-}
-
-export function getPendingReview(db) {
-  return rowsToObjects(db.exec("SELECT * FROM edges WHERE confidence = 'medium'"));
-}
-
-export function confirmEdge(db, id, newType) {
-  if (newType) {
-    if (!VALID_TYPES.includes(newType)) {
-      throw new Error(`Invalid edge type: ${newType}. Must be one of: ${VALID_TYPES.join(', ')}`);
-    }
-    db.run(
-      "UPDATE edges SET confidence = 'high', edge_type = ? WHERE id = ? AND confidence = 'medium'",
-      [newType, id],
-    );
-  } else {
-    db.run("UPDATE edges SET confidence = 'high' WHERE id = ? AND confidence = 'medium'", [id]);
-  }
-}
-
-export function rejectEdge(db, id) {
-  db.run("DELETE FROM edges WHERE id = ? AND confidence = 'medium'", [id]);
 }
 
 export function addSupersession(
@@ -342,17 +290,10 @@ export function addSupersession(
       `oldPatternQuery has no content words after stopword removal: "${oldPatternQuery}". Add at least one distinctive word.`,
     );
   }
-  if (supersededDate) {
-    db.run(
-      'INSERT INTO supersessions (old_pattern_query, superseded_date, replacement_note_path, reason) VALUES (?, ?, ?, ?)',
-      [oldPatternQuery, supersededDate, replacementNotePath, reason],
-    );
-  } else {
-    db.run(
-      'INSERT INTO supersessions (old_pattern_query, replacement_note_path, reason) VALUES (?, ?, ?)',
-      [oldPatternQuery, replacementNotePath, reason],
-    );
-  }
+  db.run(
+    "INSERT INTO supersessions (old_pattern_query, superseded_date, replacement_note_path, reason) VALUES (?, COALESCE(NULLIF(?, ''), date('now')), ?, ?)",
+    [oldPatternQuery, supersededDate, replacementNotePath, reason],
+  );
   const [row] = db.exec('SELECT last_insert_rowid() as id');
   return row.values[0][0];
 }

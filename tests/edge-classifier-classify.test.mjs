@@ -9,57 +9,85 @@ import {
 
 // The existing direction test pins only `.flip` on a handful of examples. These
 // tests pin the classification behaviour the mutation baseline left open:
-//   - which edge type / confidence tier each verb class resolves to,
-//   - the high-beats-medium and array-order precedence,
+//   - which edge type each verb class resolves to, and which verbs are too
+//     weak to classify at all,
+//   - the array-order precedence,
 //   - the sentence-boundary window trimming in classifyLink,
 //   - link extraction (alias, anchor, empty target, context window),
 //   - the classifyNoteEdges guards (self-link, resolver, edge shape),
 //   - detectFlip's AND (not OR) between the two verb-position sides.
 
 describe('edge-classifier: edge-type / confidence classification', () => {
-  // One high verb and one medium verb per type. Pins the .type string and the
-  // confidence tier for every PATTERNS entry — kills the "empty the regex array"
-  // and "swap the type literal" mutants across all six types.
+  // Verbs per type. Pins the .type string for every PATTERNS entry — kills
+  // the "empty the regex array" and "swap the type literal" mutants across all
+  // six types.
   const cases = [
     // derived_from
-    ['This builds on [[target]] for the mechanism.', 'derived_from', 'high'],
-    ['This extends [[target]] considerably.', 'derived_from', 'high'],
-    ['It sets the baseline [[target]] uses.', 'derived_from', 'high'],
-    ['This inspired by [[target]] originally.', 'derived_from', 'medium'],
-    ['The idea comes from [[target]] directly.', 'derived_from', 'medium'],
+    ['This builds on [[target]] for the mechanism.', 'derived_from'],
+    ['This extends [[target]] considerably.', 'derived_from'],
+    ['It sets the baseline [[target]] uses.', 'derived_from'],
     // evidence_for
-    ['Our data proves [[target]] holds.', 'evidence_for', 'high'],
-    ['This demonstrates [[target]] clearly.', 'evidence_for', 'high'],
-    ['We confirm [[target]] under load.', 'evidence_for', 'high'],
-    ['This validates [[target]] empirically.', 'evidence_for', 'high'],
-    ['It shows that [[target]] scales.', 'evidence_for', 'medium'],
+    ['Our data proves [[target]] holds.', 'evidence_for'],
+    ['This demonstrates [[target]] clearly.', 'evidence_for'],
+    ['We confirm [[target]] under load.', 'evidence_for'],
+    ['This validates [[target]] empirically.', 'evidence_for'],
     // supports
-    ['This reinforces [[target]] strongly.', 'supports', 'high'],
-    ['It strengthens [[target]] materially.', 'supports', 'high'],
-    ['This corroborates [[target]] independently.', 'supports', 'high'],
-    ['It aligns with [[target]] neatly.', 'supports', 'medium'],
-    ['This is consistent with [[target]] throughout.', 'supports', 'medium'],
+    ['This reinforces [[target]] strongly.', 'supports'],
+    ['It strengthens [[target]] materially.', 'supports'],
+    ['This corroborates [[target]] independently.', 'supports'],
     // challenges_undermining
-    ['This contradicts [[target]] directly.', 'challenges_undermining', 'high'],
-    ['It refutes [[target]] outright.', 'challenges_undermining', 'high'],
-    ['This disproves [[target]] cleanly.', 'challenges_undermining', 'high'],
-    ['It challenges [[target]] on three counts.', 'challenges_undermining', 'medium'],
+    ['This contradicts [[target]] directly.', 'challenges_undermining'],
+    ['It refutes [[target]] outright.', 'challenges_undermining'],
+    ['This disproves [[target]] cleanly.', 'challenges_undermining'],
+    ['It challenges [[target]] on three counts.', 'challenges_undermining'],
+    ['Challenges [[target]] — the sample was too small.', 'challenges_undermining'],
     // challenges_undercutting
-    ['This undercuts [[target]] entirely.', 'challenges_undercutting', 'high'],
-    ['It weakens the basis [[target]] rests on.', 'challenges_undercutting', 'high'],
-    ['This weakens [[target]] somewhat.', 'challenges_undercutting', 'medium'],
+    ['This undercuts [[target]] entirely.', 'challenges_undercutting'],
+    ['It weakens the basis [[target]] rests on.', 'challenges_undercutting'],
     // challenges_rebuttal
-    ['This rebuts [[target]] point by point.', 'challenges_rebuttal', 'high'],
-    ['It debunks [[target]] convincingly.', 'challenges_rebuttal', 'high'],
-    ['This counters [[target]] plainly.', 'challenges_rebuttal', 'medium'],
+    ['This rebuts [[target]] point by point.', 'challenges_rebuttal'],
+    ['It debunks [[target]] convincingly.', 'challenges_rebuttal'],
+    ['This counters [[target]] plainly.', 'challenges_rebuttal'],
+    ['Counterpoint: [[target]] ignores the base rate.', 'challenges_rebuttal'],
   ];
 
-  for (const [ctx, type, confidence] of cases) {
-    it(`classifies "${ctx.slice(0, 34)}…" → ${type}/${confidence}`, () => {
+  for (const [ctx, type] of cases) {
+    it(`classifies "${ctx.slice(0, 34)}…" → ${type}`, () => {
       const result = classifyLink(ctx, 'target');
       assert.ok(result, 'expected a classification');
       assert.equal(result.type, type);
-      assert.equal(result.confidence, confidence);
+      assert.equal(result.confidence, 'high');
+    });
+  }
+
+  // Weaker verbs say too little to be argued. They classify as nothing here,
+  // and classifyNoteEdges records the link as a co-mention instead.
+  const weak = [
+    'This inspired by [[target]] originally.',
+    'The idea comes from [[target]] directly.',
+    'It shows that [[target]] scales.',
+    'It aligns with [[target]] neatly.',
+    'This is consistent with [[target]] throughout.',
+    'This weakens [[target]] somewhat.',
+    'There is tension with [[target]] here.',
+    // Counterpoint markers in their ordinary-word uses.
+    'One of the challenges of [[target]] is cost.',
+    'Its challenges are [[target]] and cost.',
+    'The challenges in [[target]] remain.',
+    'The challenges for [[target]] remain.',
+    'The challenges with [[target]] remain.',
+    'The main challenge is [[target]].',
+    'The trust-challenge matrix connects to [[target]].',
+    'Phase 1 challenge-response is [[target]].',
+    'This is counter-intuitive given [[target]].',
+    'A non-counterpoint [[target]] note.',
+    'Its ring-counters feed [[target]].',
+    '[[target]] is relevant -- self-authored counterpoints risk bias.',
+    '47 notes, 8 counterpoints, 10 blindspots at [[target]].',
+  ];
+  for (const ctx of weak) {
+    it(`does not classify the weak verb in "${ctx.slice(0, 34)}…"`, () => {
+      assert.equal(classifyLink(ctx, 'target'), null);
     });
   }
 
@@ -73,9 +101,8 @@ describe('edge-classifier: edge-type / confidence classification', () => {
 });
 
 describe('edge-classifier: precedence', () => {
-  it('high beats medium even when the medium verb is a different type', () => {
-    // "aligns with" = supports/medium; "proves" = evidence_for/high. The high
-    // pass runs across ALL patterns before any medium pass, so evidence_for wins.
+  it('a weak verb beside a strong one does not change the strong verdict', () => {
+    // "aligns with" no longer classifies; "proves" = evidence_for.
     const r = classifyLink('This proves [[target]] and aligns with prior work.', 'target');
     assert.equal(r.type, 'evidence_for');
     assert.equal(r.confidence, 'high');
@@ -90,10 +117,29 @@ describe('edge-classifier: precedence', () => {
     assert.equal(r.confidence, 'high');
   });
 
-  it('falls to the medium tier only when no high verb matches anywhere', () => {
-    const r = classifyLink('This aligns with [[target]] and is consistent with it.', 'target');
-    assert.equal(r.confidence, 'medium');
-    assert.equal(r.type, 'supports');
+  it('a verb decides type and direction before a counterpoint marker does', () => {
+    // undermining comes first in PATTERNS, so a single pass would let
+    // "challenge" outrank the undercut verb and take its direction too.
+    const both = classifyLink('This challenges and undercuts [[target]].', 'target');
+    assert.equal(both.type, 'challenges_undercutting');
+    const after = classifyLink('Undercuts [[target]] as a challenge.', 'target');
+    assert.deepEqual([after.type, after.flip], ['challenges_undercutting', false]);
+    const rebut = classifyLink('Challenges [[target]] and debunks it.', 'target');
+    assert.deepEqual([rebut.type, rebut.flip], ['challenges_rebuttal', true]);
+  });
+
+  it('a cue does not read across the link it sits beside', () => {
+    // The link is cut out of the window. Read as one string, "challenges"
+    // would meet the "for" after the link and pass as the noun use.
+    const r = classifyLink('Challenges [[target]] for ignoring the base rate.', 'target');
+    assert.equal(r?.type, 'challenges_undermining');
+  });
+
+  it('weak verbs alone classify as nothing', () => {
+    assert.equal(
+      classifyLink('This aligns with [[target]] and is consistent with it.', 'target'),
+      null,
+    );
   });
 });
 
@@ -228,6 +274,38 @@ describe('edge-classifier: makeResolver', () => {
   });
 });
 
+describe('edge-classifier: counterpoint direction', () => {
+  // A marker says this note counters the link; a label says the link is the
+  // counterpoint. Frontmatter sync writes rebuts:/undermines: for unflipped
+  // edges only and never removes a key, so a label read as a marker would put
+  // a note's own counterpoints into its rebuts: list.
+  const cases = [
+    ['Challenges [[target]] — the sample was too small.', 'challenges_undermining', false],
+    ['This counters [[target]] plainly.', 'challenges_rebuttal', false],
+    ['Counterpoint to [[target]].', 'challenges_rebuttal', false],
+    ['Counterpoint to: [[target]]', 'challenges_rebuttal', false],
+    ['Counter-argument to [[target]].', 'challenges_rebuttal', false],
+    ['Counter evidence to [[target]].', 'challenges_rebuttal', false],
+    ['Counter evidence: [[target]]', 'challenges_rebuttal', true],
+    // The marker after the link decides, and it must be judged against the
+    // markers alone: the label before the link would otherwise read as a cue
+    // on both sides, which abstains to unflipped.
+    ['Counterpoint: [[target]] counters the claim.', 'challenges_rebuttal', true],
+    ['Counterpoint: [[target]] ignores the base rate.', 'challenges_rebuttal', true],
+    ['See counterpoint [[target]].', 'challenges_rebuttal', true],
+    ['- counterpoint: [[target]]', 'challenges_rebuttal', true],
+    ['**Counter-evidence:** [[target]]', 'challenges_rebuttal', true],
+    ['The counter-argument the other side will run is [[target]].', 'challenges_rebuttal', true],
+    ['[[target]] — counter-evidence: replication failed.', 'challenges_rebuttal', true],
+  ];
+  for (const [ctx, type, flip] of cases) {
+    it(`"${ctx.slice(0, 40)}…" → ${type}${flip ? ', flipped' : ''}`, () => {
+      const r = classifyLink(ctx, 'target');
+      assert.deepEqual([r?.type, r?.flip], [type, flip]);
+    });
+  }
+});
+
 describe('edge-classifier: detectFlip AND-not-OR', () => {
   // detectFlip returns true only when the verb is after AND not before. These
   // three cases together distinguish `&&` from `||` and pin each return branch.
@@ -244,10 +322,11 @@ describe('edge-classifier: detectFlip AND-not-OR', () => {
     assert.equal(classifyLink('proves [[target]] proves again', 'target').flip, false);
   });
 
-  it('flip uses the same confidence tier as the match (medium verb after)', () => {
-    // "aligns with" is medium-only; detectFlip must be handed pattern.medium.
-    const r = classifyLink('[[target]] aligns with the broader framework.', 'target');
-    assert.equal(r.confidence, 'medium');
+  it("flip is judged on the matched pattern's own verbs (counterpoint verb after)", () => {
+    // "challenges" belongs to challenges_undermining; detectFlip must be handed
+    // that pattern's verbs, or it finds no verb after and keeps the direction.
+    const r = classifyLink('[[target]] challenges the broader framework.', 'target');
+    assert.equal(r.type, 'challenges_undermining');
     assert.equal(r.flip, true);
   });
 });
@@ -306,6 +385,14 @@ describe('edge-classifier: co-mention tier', () => {
       flip: false,
       sourceGraph: 'comention',
     });
+  });
+
+  it('records a link beside a weak verb as a comention, not an argued edge', () => {
+    const edges = classifyNoteEdges('It aligns with [[target]] neatly.', 'src', resolver);
+    assert.deepEqual(
+      edges.map((e) => [e.edgeType, e.confidence, e.sourceGraph]),
+      [['associative', 'low', 'comention']],
+    );
   });
 
   it('suppresses the comention when any occurrence of the target classifies', () => {

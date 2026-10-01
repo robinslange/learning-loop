@@ -18,14 +18,8 @@ import { isMainModule } from './lib/is-main.mjs';
 import { logError } from './lib/log.mjs';
 import { PLUGIN_DATA, VAULT_PATH } from './lib/constants.mjs';
 import { DATA_FILES } from './lib/paths.mjs';
-import {
-  openEdgeDb,
-  addEdge,
-  removeOutgoingEdges,
-  saveDb,
-  acquireLock,
-  releaseLock,
-} from './lib/edges.mjs';
+import { openEdgeDb, addEdge, removeOutgoingEdges, saveDb } from './lib/edges.mjs';
+import { acquireLock, releaseLock } from './lib/file-lock.mjs';
 import { classifyNoteEdges, buildVaultIndex, makeResolver } from './lib/edge-classifier.mjs';
 import { hasFlag, flagValue } from './lib/cli-args.mjs';
 import { listVaultNotes } from './lib/vault-walk.mjs';
@@ -123,7 +117,7 @@ async function main() {
     notes_with_edges: 0,
     edges_total: 0,
     by_type: {},
-    by_confidence: { high: 0, medium: 0, low: 0 },
+    by_confidence: { high: 0, low: 0 },
   };
 
   const walkedSourceRels = new Set(
@@ -135,7 +129,8 @@ async function main() {
     ),
   );
 
-  if (!dryRun && !acquireLock(DB_FILE)) {
+  const lock = dryRun ? null : acquireLock(DB_FILE);
+  if (!dryRun && !lock) {
     console.error('edges: another writer holds the lock; retry shortly');
     process.exit(1);
   }
@@ -207,7 +202,7 @@ async function main() {
       }
     }
   } finally {
-    if (!dryRun) releaseLock(DB_FILE);
+    releaseLock(lock);
   }
 
   console.log(JSON.stringify({ ...stats, dry_run: dryRun }, null, 2));

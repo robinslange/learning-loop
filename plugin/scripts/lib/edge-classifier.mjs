@@ -45,60 +45,64 @@ export function makeResolver(vaultIndex) {
   return (targetName) => vaultIndex.get(targetName) || null;
 }
 
+// Only strong verbs classify. A link beside a weaker verb ("shows that",
+// "aligns with", "comes from") says too little to be argued, so it is recorded
+// as a co-mention, which justification and impact traversals skip.
+//
+// Counterpoints have their own vocabulary, in two grammatical roles:
+//   `markers` say this note counters the link: "Challenges [[target]] —
+//     reason" (the counter-argument template), "counters [[x]]",
+//     "Counterpoint to [[x]]".
+//   `labels` name the linked note as the counterpoint: "Counterpoint: [[x]]",
+//     "see counterpoint [[x]]", "Counter-evidence: [[x]]". The edge runs from
+//     the linked note, so a label always flips.
+// Both are ordinary words too ("one of the challenges of", "challenge-response",
+// "counter-intuitive"), so they exclude those uses, and classifyLink tries them
+// only after every verb.
 export const PATTERNS = [
   {
     type: 'derived_from',
-    high: [
+    verbs: [
       /\bderived\s+from\b/i,
       /\bbased\s+(?:directly\s+)?on\b/i,
       /\bbuilds?\s+on\b/i,
       /\bextends?\b/i,
       /\bsets?\s+the\s+baseline\b/i,
     ],
-    medium: [/\bcomes?\s+from\b/i, /\boriginated\b/i, /\binspired\s+by\b/i],
   },
   {
     type: 'evidence_for',
-    high: [
+    verbs: [
       /\bproves?\b/i,
       /\bdemonstrates?\b/i,
       /\bevidence\s+(?:for|that)\b/i,
       /\bconfirms?\b/i,
       /\bvalidates?\b/i,
     ],
-    medium: [
-      /\bshows?\s+(?:that|how|why)\b/i,
-      /\bis\s+how\s+to\b/i,
-      /\bbenchmarked\s+(?:in|by|on)\b/i,
-    ],
   },
   {
     type: 'supports',
-    high: [/\breinforces?\b/i, /\bstrengthens?\b/i, /\bbolsters?\b/i, /\bcorroborates?\b/i],
-    medium: [
-      /\baligns?\s+with\b/i,
-      /\bconsistent\s+with\b/i,
-      /\bis\s+the\s+\w+\s+(design|method|approach|mechanism|pattern|model|framework)\b/i,
-    ],
+    verbs: [/\breinforces?\b/i, /\bstrengthens?\b/i, /\bbolsters?\b/i, /\bcorroborates?\b/i],
   },
   {
     type: 'challenges_undermining',
-    high: [/\bcontradicts?\b/i, /\brefutes?\b/i, /\bdisproves?\b/i, /\bundermines?\b/i],
-    medium: [
-      /\bchallenges?\b/i,
-      /\bquestions?\s+(?:whether|if)\b/i,
-      /\btension\s+(?:with|between)\b/i,
-    ],
+    verbs: [/\bcontradicts?\b/i, /\brefutes?\b/i, /\bdisproves?\b/i, /\bundermines?\b/i],
+    markers: [/(?<![-\w])challenges?\b(?!-|\s+(?:of|is|are|in|for|with)\b)/i],
   },
   {
     type: 'challenges_undercutting',
-    high: [/\bundercuts?\b/i, /\bweakens?\s+the\s+(?:basis|foundation|premise)\b/i],
-    medium: [/\bweakens?\b/i, /\blimits?\s+the\s+(?:scope|applicability)\b/i],
+    verbs: [/\bundercuts?\b/i, /\bweakens?\s+the\s+(?:basis|foundation|premise)\b/i],
   },
   {
     type: 'challenges_rebuttal',
-    high: [/\brebuts?\b/i, /\bdebunks?\b/i, /\bcounterexample\s+to\b/i],
-    medium: [/\bcounters?\b/i, /\bcounterpoint\b/i],
+    verbs: [/\brebuts?\b/i, /\bdebunks?\b/i, /\bcounterexample\s+to\b/i],
+    markers: [
+      /(?<![-\w])counters?\b(?!-|\s(?:evidence|arguments?)\b)/i,
+      /(?<![-\w])counter(?:point|[- ]?evidence|[- ]?arguments?)\s+to\b/i,
+    ],
+    // Singular only: in this vault "counterpoints" is the note kind ("47
+    // notes, 8 counterpoints"), not a label on the link beside it.
+    labels: [/(?<![-\w])counter(?:point|[- ]?evidence|[- ]?arguments?)\b/i],
   },
 ];
 
@@ -156,23 +160,17 @@ export function classifyLink(context, targetName, offset = -1) {
 
   const beforeTail = before.slice(-100);
   const afterHead = after.slice(0, 100);
-  const window = beforeTail + ' ' + afterHead;
 
-  for (const pattern of PATTERNS) {
-    for (const re of pattern.high) {
-      if (re.test(window)) {
-        const flip = detectFlip(beforeTail, afterHead, pattern.high);
-        return { type: pattern.type, confidence: 'high', flip };
-      }
-    }
-  }
-
-  for (const pattern of PATTERNS) {
-    for (const re of pattern.medium) {
-      if (re.test(window)) {
-        const flip = detectFlip(beforeTail, afterHead, pattern.medium);
-        return { type: pattern.type, confidence: 'medium', flip };
-      }
+  // Verbs across every pattern first, then markers, then labels, so a verb
+  // anywhere near the link decides the type and direction before a
+  // counterpoint word can. A cue is tested against one side of the link at a
+  // time: the link is cut out between them, and a cue must not read across it.
+  for (const key of ['verbs', 'markers', 'labels']) {
+    for (const pattern of PATTERNS) {
+      const cues = pattern[key] ?? [];
+      if (!cues.some((re) => re.test(beforeTail) || re.test(afterHead))) continue;
+      const flip = key === 'labels' || detectFlip(beforeTail, afterHead, cues);
+      return { type: pattern.type, confidence: 'high', flip };
     }
   }
 
