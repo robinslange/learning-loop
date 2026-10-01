@@ -113,7 +113,7 @@ async function archiveNoteEdges(filePath, vaultPath, pluginData) {
     db = await openEdgeDb(dbPath);
     archiveOutgoingEdges(db, relPath);
     const archived = db.getRowsModified();
-    saveDb(db, dbPath);
+    if (archived > 0) saveDb(db, dbPath);
     return archived;
   } catch (err) {
     logError('supersede-note.archiveNoteEdges', err);
