@@ -45,6 +45,29 @@ describe('edge-classifier verb-position direction', () => {
     assert.equal(result.flip, false);
   });
 
+  it('keeps direction when this note is the subject of a verb after the link', () => {
+    for (const ctx of [
+      '[[target]] holds a thesis that this note directly challenges.',
+      'Sits beside [[target]] (the original note this challenges).',
+      '[[target]] is the base algorithm this extends.',
+      ...['directly', 'also', 'further', 'partly', 'largely', 'explicitly'].map(
+        (adverb) => `[[target]] is the claim this note ${adverb} challenges.`,
+      ),
+    ]) {
+      assert.equal(classifyLink(ctx, 'target').flip, false, ctx);
+    }
+  });
+
+  it('still flips when "this" is the object or names something else', () => {
+    for (const ctx of [
+      '[[target]] challenges this note directly.',
+      '[[target]] logged the drift; this anomaly confirms the model.',
+      '[[target]] says this year confirms the trend.',
+    ]) {
+      assert.equal(classifyLink(ctx, 'target').flip, true, ctx);
+    }
+  });
+
   it('abstains (flip=false) when verb appears on both sides', () => {
     const ctx = 'Our experiment proves [[target]] confirms the broader pattern.';
     const result = classifyLink(ctx, 'target');

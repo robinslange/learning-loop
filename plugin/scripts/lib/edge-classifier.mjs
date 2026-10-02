@@ -192,12 +192,18 @@ export function classifyLink(context, targetName, offset = -1) {
   return null;
 }
 
+// A verb after the link whose subject is this note ("[[x]], the claim this
+// note directly challenges") reads forward, like a verb before the link.
+const THIS_SUBJECT =
+  /\bthis(?:\s+note)?(?:\s+(?:directly|also|further|partly|largely|explicitly))?\s+$/i;
+
 function detectFlip(beforeTail, afterHead, patterns) {
   const verbInBefore = patterns.some((re) => re.test(beforeTail));
-  const verbInAfter = patterns.some((re) => re.test(afterHead));
-  if (verbInBefore && !verbInAfter) return false;
-  if (verbInAfter && !verbInBefore) return true;
-  return false;
+  const verbInAfter = patterns.some((re) => {
+    const m = re.exec(afterHead);
+    return m && !THIS_SUBJECT.test(afterHead.slice(0, m.index));
+  });
+  return verbInAfter && !verbInBefore;
 }
 
 // classifyNoteEdges takes the note content, the source note's bare name, and an
