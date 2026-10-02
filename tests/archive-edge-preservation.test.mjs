@@ -75,7 +75,7 @@ describe('archive edge preservation', () => {
     addEdge(db, {
       fromPath: 'a.md',
       toPath: 'c.md',
-      edgeType: 'derived_from',
+      edgeType: 'supports',
       sourceGraph: 'archived',
     });
     addEdge(db, {

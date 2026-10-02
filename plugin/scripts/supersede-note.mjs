@@ -76,8 +76,8 @@ export function stampSupersession(raw, { date, replacementPath }) {
 
 /**
  * Best-effort: archive the note's outgoing edges (source_graph='archived')
- * so a retired note stops counting as live justification in downstream
- * traversal. The note itself is not moved or overwritten by supersedeNoteFile,
+ * so the links its own text makes stop counting in downstream traversal.
+ * Links other notes make to it stay live. The note itself is not moved or overwritten by supersedeNoteFile,
  * so nothing else ever touches its edges. Failure here (no vault root known,
  * no edges db yet, a read/write error) must never fail the frontmatter stamp
  * that already succeeded -- it is logged and reported as 0.

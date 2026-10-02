@@ -34,15 +34,13 @@ ll-run edges-cli.mjs sole-dependents <note_path>
 ll-run edges-cli.mjs downstream <note_path> --max-depth 5
 ```
 
-**Critical: query both directions.** The classifier can produce edges in either direction depending on the prose pattern that triggered them. "[[X]] confirms the finding" stores from=source, to=X with evidence_for, but semantically X is the evidence and source is the claim. "this proves [[X]]" has the opposite reading. You cannot tell from the edge alone which way the dependency flows.
+**Which way the edges run.** `sole-dependents` and `downstream` return dependencies: in each row, a change to `from_path` reaches `to_path`. They work that out from how the link was written. "[[X]] confirms this" makes X the evidence and this note the claim, and "this builds on [[X]]" makes this note depend on X, so retracting X reaches it.
 
-Therefore, when looking for the impact of retracting `note_path`, you MUST inspect BOTH directions:
+- **`sole-dependents`** returns the notes whose only evidence-typed support is `note_path`. Use it for the "if note_path collapses, what loses its only support?" query.
+- **`downstream`** walks those dependencies outward from `note_path`, up to `--max-depth`. Use it for the broader ripple.
+- **`list <note_path>`** returns the rows as stored. `outgoing` holds the edges from links in `note_path`, and `incoming` the edges from links in other notes. When `direction_flipped` is 1, the linked note is the one doing the arguing.
 
-- **`list <note_path>`** returns `outgoing` (edges where note_path is from_path) and `incoming` (edges where note_path is to_path). Both sets contain candidate dependents.
-- **`sole-dependents`** uses outgoing edges only and returns notes whose only inbound evidence-typed edge originates from `note_path`. Use this for the "if note_path collapses, what loses its only support?" query, but supplement it with the incoming-edge inspection because of the directional ambiguity.
-- **`downstream`** is a forward walk via `e.from_path = d.to_path`. Use it to get the cascade in the OUTGOING direction. Run a parallel manual check on the INCOMING direction by reading each note in `list incoming` and tracing further.
-
-You read individual notes with `Read` to (a) extract context for classification, and (b) disambiguate the directional reading by inspecting the actual prose around the wiki-link.
+The classifier still misreads some sentences, so a dependency can be missing or point the wrong way. Read each affected note with `Read` to (a) extract context for classification, and (b) confirm the direction from the actual prose around the wiki-link. Before reporting `no_impact`, read the notes in `list incoming` as well.
 
 ## Process
 
@@ -50,7 +48,7 @@ You read individual notes with `Read` to (a) extract context for classification,
 
 Call `sole-dependents` first: these are the highest-priority cases. Then call `downstream` for the broader ripple. Then `list` for the immediate context.
 
-If `sole-dependents` is empty AND `downstream` is empty, the change has no detectable downstream impact. Report `no_impact` and stop.
+If `sole-dependents` and `downstream` are both empty, and no note in `list incoming` depends on `note_path`, the change has no detectable downstream impact. Report `no_impact` and stop.
 
 ### 2. Read the affected notes
 
