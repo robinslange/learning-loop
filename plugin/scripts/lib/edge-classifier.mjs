@@ -97,7 +97,8 @@ export const PATTERNS = [
     type: 'challenges_rebuttal',
     verbs: [/\brebuts?\b/i, /\bdebunks?\b/i, /\bcounterexample\s+to\b/i],
     markers: [
-      /(?<![-\w])counters?\b(?!-|\s(?:evidence|arguments?)\b)/i,
+      // "counter" after a determiner is the noun: "the same counter".
+      /(?<![-\w])(?:counters|(?<!\b(?:a|the|this|its|same|different)\s)counter)\b(?!-|\s(?:evidence|arguments?)\b)/i,
       /(?<![-\w])counter(?:point|[- ]?evidence|[- ]?arguments?)\s+to\b/i,
     ],
     // Singular only: in this vault "counterpoints" is the note kind ("47
