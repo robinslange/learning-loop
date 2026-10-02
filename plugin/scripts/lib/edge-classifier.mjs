@@ -144,19 +144,33 @@ export function classifyLink(context, targetName, offset = -1) {
   let before = context.slice(0, targetMatch.index);
   let after = context.slice(targetMatch.index + targetMatch[0].length);
 
+  // A table cell ends at "|".
   const beforeBoundary = Math.max(
     before.lastIndexOf(']]'),
     before.lastIndexOf('. '),
     before.lastIndexOf('! '),
     before.lastIndexOf('? '),
     before.lastIndexOf('\n'),
+    before.lastIndexOf('|'),
   );
   if (beforeBoundary !== -1) before = before.slice(beforeBoundary + 1);
 
-  const afterBoundaries = ['[[', '. ', '! ', '? ', '\n']
+  const afterBoundaries = ['. ', '! ', '? ', '\n', '|']
     .map((s) => after.indexOf(s))
     .filter((i) => i !== -1);
-  if (afterBoundaries.length) after = after.slice(0, Math.min(...afterBoundaries));
+  after = after.slice(0, Math.min(...afterBoundaries, after.length));
+
+  // When another link follows in the same sentence, the words just before it
+  // introduce that link ("See [[a]] and counterpoint [[b]]"). What still
+  // describes this one is a parenthetical right after it, or the clause up to
+  // the first , ; : or ( ("[[a]] — counter-evidence: it fails in [[b]]").
+  const nextLink = after.indexOf('[[');
+  if (nextLink !== -1) {
+    const paren = /^\s*\(([^)[]*)\)/.exec(after);
+    const head = after.slice(0, nextLink);
+    const clauseEnd = [',', ';', ':', '('].map((s) => head.indexOf(s)).filter((i) => i !== -1);
+    after = paren ? paren[1] : head.slice(0, clauseEnd.length ? Math.min(...clauseEnd) : 0);
+  }
 
   const beforeTail = before.slice(-100);
   const afterHead = after.slice(0, 100);

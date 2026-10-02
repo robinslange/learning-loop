@@ -170,6 +170,58 @@ describe('edge-classifier: classifyLink window boundaries', () => {
     );
   });
 
+  it('gives a cue between two links to the next link, not this one', () => {
+    const ctx = 'See [[a]] and counterpoint [[target]].';
+    assert.equal(classifyLink(ctx, 'a'), null);
+    assert.deepEqual(classifyLink(ctx, 'target'), {
+      type: 'challenges_rebuttal',
+      confidence: 'high',
+      flip: true,
+    });
+    assert.equal(classifyLink('[[a]] proves [[target]] holds.', 'a'), null);
+  });
+
+  it('never reads past the next link for a clause end', () => {
+    for (const ctx of [
+      'See [[a]] and counterpoint [[target]], which argues otherwise.',
+      '[[a]] proves [[target]] holds, mostly.',
+      'Compare [[a]] with [[counterpoint-b]], and decide.',
+      'Read [[a]] first; counterpoint [[target]].',
+      'Read [[a]] beside it (counterpoint [[target]]).',
+    ]) {
+      assert.equal(classifyLink(ctx, 'a'), null, ctx);
+    }
+  });
+
+  it('keeps the clause or parenthetical right after a link when another link follows', () => {
+    assert.deepEqual(
+      classifyLink('[[a]] — counter-evidence: the effect vanishes in [[target]].', 'a'),
+      { type: 'challenges_rebuttal', confidence: 'high', flip: true },
+    );
+    for (const ctx of [
+      '[[a]] confirms this, as does [[target]].',
+      '[[a]] confirms this; so does [[target]].',
+      '[[a]] confirms this (see [[target]]).',
+    ]) {
+      assert.deepEqual(
+        classifyLink(ctx, 'a'),
+        { type: 'evidence_for', confidence: 'high', flip: true },
+        ctx,
+      );
+    }
+    assert.equal(
+      classifyLink('Sits beside [[a]] (the note it undercuts) and connects to [[target]].', 'a')
+        ?.type,
+      'challenges_undercutting',
+    );
+  });
+
+  it('ends both windows at a table cell boundary', () => {
+    const row = '| [[a]]: the empirical counterpoint | [[target]]: the economic case |';
+    assert.equal(classifyLink(row, 'target'), null);
+    assert.equal(classifyLink(row, 'a')?.type, 'challenges_rebuttal');
+  });
+
   it('reads a verb immediately before the link (no boundary in between)', () => {
     const r = classifyLink('The result proves [[target]] conclusively.', 'target');
     assert.equal(r.type, 'evidence_for');
