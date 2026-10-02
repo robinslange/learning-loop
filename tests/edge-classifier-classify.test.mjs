@@ -48,6 +48,7 @@ describe('edge-classifier: edge-type / confidence classification', () => {
     ['This rebuts [[target]] point by point.', 'challenges_rebuttal'],
     ['It debunks [[target]] convincingly.', 'challenges_rebuttal'],
     ['This counters [[target]] plainly.', 'challenges_rebuttal'],
+    ['Two studies that counter [[target]] exist.', 'challenges_rebuttal'],
     ['Counterpoint: [[target]] ignores the base rate.', 'challenges_rebuttal'],
   ];
 
@@ -82,6 +83,12 @@ describe('edge-classifier: edge-type / confidence classification', () => {
     'This is counter-intuitive given [[target]].',
     'A non-counterpoint [[target]] note.',
     'Its ring-counters feed [[target]].',
+    '[[target]] makes this counter trustworthy.',
+    '[[target]] is the same trade paid at a different counter.',
+    '[[target]] and a null ended in the same counter.',
+    'The counter at [[target]] reads zero.',
+    'It ticks a counter in [[target]].',
+    'Its counter in [[target]] resets.',
     '[[target]] is relevant -- self-authored counterpoints risk bias.',
     '47 notes, 8 counterpoints, 10 blindspots at [[target]].',
   ];
