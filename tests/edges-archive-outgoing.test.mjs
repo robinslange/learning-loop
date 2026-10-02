@@ -4,8 +4,9 @@
 // so its outgoing edges keep participating in live graph traversal unless
 // something marks them archived. archiveOutgoingEdges is that something --
 // it marks rather than deletes (never touching an edge already archived or
-// comention), so getDownstream stops counting the retired note's
-// outgoing edges live while the edge rows themselves survive for history.
+// comention), so getDownstream stops counting the links the retired note's
+// own text makes while the edge rows themselves survive for history. Links
+// other notes make to it stay live.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -93,6 +94,20 @@ test("a retired note's outgoing edges drop out of getDownstream after archiving"
     getDownstream(db, 'a.md').map((r) => r.to_path),
     [],
     'archived edges must not appear in downstream traversal',
+  );
+});
+
+test('links other notes make to a retired note stay live after archiving', async (t) => {
+  const db = await freshDb(t);
+  // y.md: "[[r]] confirms this". z.md: "Builds on [[r]]".
+  addEdge(db, { fromPath: 'y.md', toPath: 'r.md', edgeType: 'evidence_for', directionFlipped: 1 });
+  addEdge(db, { fromPath: 'z.md', toPath: 'r.md', edgeType: 'derived_from' });
+
+  archiveOutgoingEdges(db, 'r.md');
+
+  assert.deepEqual(
+    getDownstream(db, 'r.md').map((r) => r.to_path),
+    ['y.md', 'z.md'],
   );
 });
 

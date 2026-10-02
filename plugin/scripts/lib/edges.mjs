@@ -164,12 +164,35 @@ export function removeOutgoingEdges(db, notePath) {
 // the same columns.
 const traversable = (t) => `${t}.source_graph NOT IN ('archived', 'comention')`;
 
+// The edges as arguments: from_path is the note making the claim about
+// to_path. A stored row runs from the note that holds the link, so a row the
+// classifier flipped ("[[x]] confirms this" stores this → x) is swapped.
+const ARGUED_EDGES = `(
+  SELECT id, edge_type, confidence, source_graph, created_at,
+    CASE WHEN direction_flipped = 1 THEN to_path ELSE from_path END AS from_path,
+    CASE WHEN direction_flipped = 1 THEN from_path ELSE to_path END AS to_path
+  FROM edges
+)`;
+
+// The edges as dependencies: from_path is the note whose change reaches
+// to_path. That is the arguer, except for derived_from: a note depends on
+// what it builds on.
+const DEPENDENCY_EDGES = `(
+  SELECT id, edge_type, confidence, source_graph, created_at,
+    CASE WHEN edge_type = 'derived_from' THEN to_path ELSE from_path END AS from_path,
+    CASE WHEN edge_type = 'derived_from' THEN from_path ELSE to_path END AS to_path
+  FROM ${ARGUED_EDGES}
+)`;
+
 // Marks a note's outgoing edges source_graph='archived' rather than deleting
 // them: a supersedeNoteFile-driven retirement leaves the note in place, so
-// its edges should stop counting in the traversals (getDownstream and the
-// symmetric walk exclude 'archived') without losing the history the
-// sole-justification queries still trace. Only traversable rows are
-// relabelled: an already-archived or breadth-only edge stays what it is.
+// the links its own text makes should stop counting in the traversals
+// (getDownstream and the symmetric walk exclude 'archived') without losing
+// the history the sole-justification queries still trace. Links other notes
+// make to it stay live until those notes change: "[[retired]] confirms
+// this" is still what that note claims, and it is the kind of dependent a
+// correction has to surface. Only traversable rows are relabelled: an
+// already-archived or breadth-only edge stays what it is.
 export function archiveOutgoingEdges(db, notePath) {
   db.run(
     `UPDATE edges SET source_graph = 'archived' WHERE from_path = ? AND ${traversable('edges')}`,
@@ -197,14 +220,15 @@ export function getEdgesTo(db, notePath) {
   return rowsToObjects(db.exec('SELECT * FROM edges WHERE to_path = ?', [notePath]));
 }
 
+// The notes a change to notePath reaches, following dependency edges.
 export function getDownstream(db, notePath, maxDepth = 10) {
   const sql = `
-    WITH RECURSIVE downstream(id, from_path, to_path, edge_type, confidence, source_graph, direction_flipped, created_at, depth) AS (
-      SELECT id, from_path, to_path, edge_type, confidence, source_graph, direction_flipped, created_at, 1
-      FROM edges root WHERE from_path = ? AND ${traversable('root')}
+    WITH RECURSIVE downstream(id, from_path, to_path, edge_type, confidence, source_graph, created_at, depth) AS (
+      SELECT id, from_path, to_path, edge_type, confidence, source_graph, created_at, 1
+      FROM ${DEPENDENCY_EDGES} root WHERE from_path = ? AND ${traversable('root')}
       UNION
-      SELECT e.id, e.from_path, e.to_path, e.edge_type, e.confidence, e.source_graph, e.direction_flipped, e.created_at, d.depth + 1
-      FROM edges e
+      SELECT e.id, e.from_path, e.to_path, e.edge_type, e.confidence, e.source_graph, e.created_at, d.depth + 1
+      FROM ${DEPENDENCY_EDGES} e
       JOIN downstream d ON e.from_path = d.to_path
       WHERE d.depth < ? AND ${traversable('e')}
     )
@@ -220,12 +244,12 @@ export function getDownstream(db, notePath, maxDepth = 10) {
 // note's justifications.
 function soleJustificationDependents(db, notePath, rootMatch) {
   const sql = `
-    SELECT e.id, e.from_path, e.to_path, e.edge_type, e.confidence, e.source_graph, e.direction_flipped, e.created_at
-    FROM edges e
+    SELECT e.id, e.from_path, e.to_path, e.edge_type, e.confidence, e.source_graph, e.created_at
+    FROM ${DEPENDENCY_EDGES} e
     WHERE ${rootMatch}
       AND e.edge_type IN ('evidence_for', 'supports')
       AND NOT EXISTS (
-        SELECT 1 FROM edges other
+        SELECT 1 FROM ${DEPENDENCY_EDGES} other
         WHERE other.to_path = e.to_path
           AND other.from_path != e.from_path
           AND other.edge_type IN ('evidence_for', 'supports')
@@ -263,11 +287,16 @@ export function getDownstreamSymmetric(db, notePath, maxDepth = 10) {
   return rowsToObjects(db.exec(sql, [notePath, maxDepth, notePath]));
 }
 
-// Edge rows shaped for cycle-detect (camelCase from/to/type plus id). Same
-// eligibility filter as the recursive traversals: argued local edges only.
+// Edge rows shaped for cycle-detect (camelCase from/to/type plus id), with the
+// recursive traversals' eligibility filter. A cycle is notes arguing in a
+// loop, so edges run from the arguer: a counterpoint's "Challenges [[x]]" and
+// x's "[[counterpoint]] — counter-evidence" backlink are one hop the same
+// way, and a note that builds on x and challenges it argues at x twice.
 export function getContradictionGraphEdges(db) {
   const rows = rowsToObjects(
-    db.exec(`SELECT id, from_path, to_path, edge_type FROM edges e WHERE ${traversable('e')}`),
+    db.exec(
+      `SELECT id, from_path, to_path, edge_type FROM ${ARGUED_EDGES} e WHERE ${traversable('e')}`,
+    ),
   );
   return rows.map((r) => ({
     id: r.id,
