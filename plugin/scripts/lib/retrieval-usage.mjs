@@ -54,6 +54,7 @@ import { DATA_PATHS } from './paths.mjs';
 import { appendJsonlLine, readJsonlDir } from './jsonl.mjs';
 import { logError } from './log.mjs';
 import { HookConfig } from './hook-config.mjs';
+import { monthStr } from './retrieval.mjs';
 
 const DAY_MS = 86_400_000;
 
@@ -172,9 +173,7 @@ export function syncInjectionLedger(pluginData) {
       const key = injectionKey(e.session_id, e.path, e.ts);
       if (seen.has(key)) continue;
       seen.add(key);
-      const month = /^\d{4}-\d{2}/.test(e.ts || '')
-        ? e.ts.slice(0, 7)
-        : new Date().toISOString().slice(0, 7);
+      const month = monthStr(new Date(Date.parse(e.ts) || Date.now()));
       appendJsonlLine(join(retrievalDir, `injections-${month}.jsonl`), {
         ts: e.ts,
         session_id: e.session_id,

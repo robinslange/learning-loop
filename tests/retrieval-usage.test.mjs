@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -912,6 +912,37 @@ test('engagement counts credit every kind a verdict carries', async () => {
     assert.equal(r.used_events, 1, 'one verdict');
     assert.equal(r.used_engaged_events, 1, 'the read is still counted');
     assert.equal(r.used_informed_events, 1, 'and so is the informed claim');
+  } finally {
+    rmSync(pd, { recursive: true, force: true });
+  }
+});
+
+test('syncInjectionLedger files an injection under its local month', () => {
+  const pd = mkdtempSync(join(tmpdir(), 'll-ret-usage-tz-'));
+  try {
+    const dedupe = join(pd, 'retrieval', 'session-dedupe');
+    mkdirSync(dedupe, { recursive: true });
+    // Sep 30 12:00Z is already Oct 1 in Auckland.
+    writeFileSync(
+      join(dedupe, 'sA.json'),
+      JSON.stringify([{ path: '3-permanent/a.md', level: 'body', ts: '2026-09-30T12:00:00.000Z' }]),
+    );
+    const usage = pathToFileURL(join(SCRIPTS, 'lib', 'retrieval-usage.mjs')).href;
+    const r = spawnSync(
+      process.execPath,
+      [
+        '--input-type=module',
+        '-e',
+        `const { syncInjectionLedger } = await import('${usage}'); console.log(syncInjectionLedger(${JSON.stringify(pd)}));`,
+      ],
+      { env: cliEnv(pd, { TZ: 'Pacific/Auckland' }), encoding: 'utf-8' },
+    );
+    assert.strictEqual(r.status, 0, r.stderr);
+    assert.strictEqual(r.stdout.trim(), '1');
+    assert.deepStrictEqual(
+      readdirSync(join(pd, 'retrieval')).filter((f) => f.startsWith('injections-')),
+      ['injections-2026-10.jsonl'],
+    );
   } finally {
     rmSync(pd, { recursive: true, force: true });
   }
