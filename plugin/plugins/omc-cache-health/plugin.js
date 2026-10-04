@@ -49,6 +49,7 @@ import { join } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
 import { appendJsonlLine } from '../../scripts/lib/jsonl.mjs';
 import { logError } from '../../scripts/lib/log.mjs';
+import { monthStr } from '../../scripts/lib/retrieval.mjs';
 
 export const meta = {
   name: 'cache-health',
@@ -123,8 +124,7 @@ function resolveLogPath(configPath) {
     mkdirSync(dir, { recursive: true });
     // eslint-disable-next-line learning-loop/no-empty-catch -- dir already exists or is uncreatable; the append below surfaces the real failure.
   } catch {}
-  const month = new Date().toISOString().slice(0, 7);
-  return join(dir, `cache-health-${month}.jsonl`);
+  return join(dir, `cache-health-${monthStr()}.jsonl`);
 }
 
 function isDuplicate(sessionId, read, create, uncached) {
