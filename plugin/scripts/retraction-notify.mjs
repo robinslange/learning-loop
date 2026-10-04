@@ -16,6 +16,7 @@ import { PLUGIN_DATA } from './lib/constants.mjs';
 import { safeLoad } from './lib/safe-load.mjs';
 import { logError } from './lib/log.mjs';
 import { FEDERATION_PATHS } from './lib/paths.mjs';
+import { monthStr } from './lib/retrieval.mjs';
 
 const FEDERATION_DIR = FEDERATION_PATHS.root(PLUGIN_DATA);
 const OUTBOX_DIR = FEDERATION_PATHS.outbox(PLUGIN_DATA);
@@ -144,8 +145,7 @@ async function main() {
   };
 
   mkdirSync(OUTBOX_DIR, { recursive: true });
-  const month = new Date().toISOString().slice(0, 7);
-  const outboxFile = join(OUTBOX_DIR, `retractions-${month}.jsonl`);
+  const outboxFile = join(OUTBOX_DIR, `retractions-${monthStr()}.jsonl`);
   appendJsonlLine(outboxFile, event);
 
   out({
