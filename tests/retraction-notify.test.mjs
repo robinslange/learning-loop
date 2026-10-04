@@ -1,13 +1,23 @@
 import { describe, it, before, beforeEach, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  writeFileSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  existsSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomBytes } from 'node:crypto';
 import { initSQL } from '../plugin/scripts/lib/sqljs.mjs';
+import { strykerEnv } from './helpers/stryker-env.mjs';
 
 const SCRIPT = join(import.meta.dirname, '..', 'plugin', 'scripts', 'retraction-notify.mjs');
+const HOME = mkdtempSync(join(tmpdir(), 'll-test-home-retraction-'));
 const PLUGIN_DATA = join(
   tmpdir(),
   `ll-test-plugin-data-retraction-${randomBytes(8).toString('hex')}`,
@@ -51,20 +61,29 @@ function listReadable(vaultIds) {
   writeFileSync(READABLE_VAULTS_PATH, JSON.stringify({ at: 1, vault_ids: vaultIds }));
 }
 
-function runScript(args) {
-  const out = execFileSync('node', [SCRIPT, ...args], {
+function runScript(args, { nodeArgs = [], env = {} } = {}) {
+  const out = execFileSync('node', [...nodeArgs, SCRIPT, ...args], {
     encoding: 'utf-8',
-    env: { ...process.env, CLAUDE_PLUGIN_DATA: PLUGIN_DATA },
+    env: {
+      PATH: process.env.PATH,
+      HOME,
+      USERPROFILE: HOME,
+      CLAUDE_PLUGIN_DATA: PLUGIN_DATA,
+      ...strykerEnv(),
+      ...env,
+    },
     timeout: 8000,
   });
   return JSON.parse(out);
 }
 
 function readOutbox() {
-  const month = new Date().toISOString().slice(0, 7);
-  const file = join(OUTBOX_DIR, `retractions-${month}.jsonl`);
-  if (!existsSync(file)) return [];
-  return readFileSync(file, 'utf-8').trim().split('\n').filter(Boolean).map(JSON.parse);
+  if (!existsSync(OUTBOX_DIR)) return [];
+  return readdirSync(OUTBOX_DIR)
+    .sort()
+    .flatMap((f) => readFileSync(join(OUTBOX_DIR, f), 'utf-8').trim().split('\n'))
+    .filter(Boolean)
+    .map(JSON.parse);
 }
 
 describe('retraction-notify', () => {
@@ -91,6 +110,21 @@ describe('retraction-notify', () => {
 
   after(() => {
     rmSync(PLUGIN_DATA, { recursive: true, force: true });
+    rmSync(HOME, { recursive: true, force: true });
+  });
+
+  it('names the outbox file by the local month, not the UTC one', async () => {
+    await makePeerIndex('alice', ['3-permanent/note.md']);
+    listReadable(['alice']);
+    // Sep 30 12:00Z is already Oct 1 in Auckland.
+    const clock = `data:text/javascript,${encodeURIComponent(
+      "import { mock } from 'node:test'; mock.timers.enable({ apis: ['Date'], now: Date.UTC(2026, 8, 30, 12, 0) });",
+    )}`;
+    runScript(['3-permanent/note.md'], {
+      nodeArgs: ['--import', clock],
+      env: { TZ: 'Pacific/Auckland' },
+    });
+    assert.deepEqual(readdirSync(OUTBOX_DIR), ['retractions-2026-10.jsonl']);
   });
 
   it('targets only peers whose index contains the note', async () => {

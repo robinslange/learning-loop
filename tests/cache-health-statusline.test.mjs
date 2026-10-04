@@ -11,6 +11,8 @@ import { mkdtempSync, rmSync, writeFileSync, readFileSync, readdirSync } from 'n
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { spawnSync } from 'node:child_process';
+import { strykerEnv } from './helpers/stryker-env.mjs';
 
 const PLUGIN = join(
   import.meta.dirname,
@@ -69,4 +71,30 @@ test('two concurrent sessions do not consume each others turn markers', async (t
   const stateFile = readdirSync(dir).find((f) => f.startsWith('omc-cache-health-session-sess-a'));
   const stateA = JSON.parse(readFileSync(join(dir, stateFile), 'utf8'));
   assert.equal(stateA.turns, 1, 'session a saw one real turn, not one per render');
+});
+
+test('names the cache-health log by the local month, not the UTC one', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'll-cachehealth-tz-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  // Sep 30 12:00Z is already Oct 1 in Auckland.
+  const script = `
+    import { mock } from 'node:test';
+    mock.timers.enable({ apis: ['Date'], now: Date.UTC(2026, 8, 30, 12, 0) });
+    const { render } = await import('${pathToFileURL(PLUGIN).href}');
+    render(${JSON.stringify(payload('sess-tz', { read: 100, create: 10, uncached: 5 }))}, {});
+  `;
+  const r = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
+    env: {
+      PATH: process.env.PATH,
+      HOME: dir,
+      USERPROFILE: dir,
+      CLAUDE_PLUGIN_DATA: dir,
+      LL_CACHE_HEALTH_STATE_DIR: dir,
+      TZ: 'Pacific/Auckland',
+      ...strykerEnv(),
+    },
+    encoding: 'utf-8',
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(readdirSync(join(dir, 'retrieval')), ['cache-health-2026-10.jsonl']);
 });
