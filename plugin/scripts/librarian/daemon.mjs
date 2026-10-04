@@ -1,7 +1,10 @@
 // scripts/librarian/daemon.mjs : librarian daemon loop and investigateNote.
 //
-// runDaemon drives the main loop: pick note, check staleness, investigate tasks,
-// mark visited, sleep. Accepts an AbortSignal; drains state.save() on abort.
+// runDaemon drives the main loop: pick a note that changed since its last check,
+// check staleness, investigate tasks, record the check, sleep. When no note has
+// changed or the pending queue is at its cap it idles instead, so the model sees
+// no traffic and ollama can unload it. Accepts an AbortSignal; drains
+// state.save() on abort.
 //
 // SIGTERM drain note: when signal fires, the loop exits cleanly and saveState()
 // is called within withLock (5-second budget covers state.save() only).
@@ -16,12 +19,20 @@ import { getPluginData } from '../lib/config.mjs';
 import { loadLibrarianConfig } from './config.mjs';
 import { DB_PATH, VAULT_PATH } from '../lib/constants.mjs';
 import { openReadonly } from '../lib/sqljs.mjs';
-import { loadState, saveState, markVisited, pendingCount, expireStaleItems } from './queue.mjs';
+import {
+  loadState,
+  saveState,
+  markChecked,
+  pendingCount,
+  expireStaleItems,
+  trimToCap,
+} from './queue.mjs';
 import { waitForOllama, chat, DEFAULTS as OLLAMA_DEFAULTS } from './ollama-client.mjs';
 import { TOOL_DEFS, executeTool, extractModelProb } from './tools/index.mjs';
 import { logError, info } from '../lib/log.mjs';
 import {
   pickNote,
+  mtimeOf,
   checkStaleness,
   noteNeedsInvestigation,
   getTagVocabulary,
@@ -30,6 +41,7 @@ import {
 } from './daemon-helpers.mjs';
 
 const LOG_MAX_BYTES = 10 * 1024 * 1024;
+const IDLE_MS = 5 * 60 * 1000;
 
 function resolveLogPath() {
   const pd = getPluginData();
@@ -209,12 +221,37 @@ export async function runDaemon({ signal, configOverride, deps } = {}) {
   await waitForOllama({ url: cfg.ollamaUrl, logFn: log });
   log('Librarian started (model: ' + cfg.model + ', pace: ' + cfg.paceMs / 1000 + 's)\n');
 
-  const db = deps?.db || (await openReadonly(DB_PATH));
-  const allPaths = await getAllNotePaths(db);
+  let db = deps?.db || (await openReadonly(DB_PATH));
+  let allPaths = await getAllNotePaths(db);
   log('Loaded ' + allPaths.length + ' notes\n');
 
   let state = loadState();
   if (!state.started_at) state.started_at = new Date().toISOString();
+  if (!state.checked) {
+    // A state from before change gating has already been round the whole vault,
+    // so every note as it stands now counts as checked.
+    const checked = {};
+    for (const p of allPaths) {
+      const mtimeMs = mtimeOf(p);
+      if (mtimeMs !== null) checked[p] = mtimeMs;
+    }
+    state = { ...state, checked };
+    delete state.visited;
+    saveState(state);
+    log('Marked ' + Object.keys(checked).length + ' notes checked (migrated from visited list)\n');
+  }
+
+  const idle = async () => {
+    expireStaleItems(VAULT_PATH);
+    trimToCap(cfg.queueCap);
+    await sleep(IDLE_MS, signal);
+    if (signal?.aborted) return;
+    if (!deps?.db) {
+      db.close();
+      db = await openReadonly(DB_PATH);
+    }
+    allPaths = await getAllNotePaths(db);
+  };
 
   let batteryLogged = false;
   while (!signal?.aborted) {
@@ -232,22 +269,17 @@ export async function runDaemon({ signal, configOverride, deps } = {}) {
     }
 
     if (pendingCount() >= cfg.queueCap) {
-      log('Queue full, expiring stale items...\n');
-      expireStaleItems(VAULT_PATH);
-      if (pendingCount() >= cfg.queueCap) {
-        log('Queue still full, sleeping 5m...\n');
-        await sleep(300000, signal);
-        continue;
-      }
-    }
-
-    const note = pickNote(allPaths, state.visited || []);
-    if (!note) {
-      log('Full pass complete. Resetting visited set.\n');
-      state.visited = [];
-      saveState(state);
+      log('Queue at cap (' + cfg.queueCap + '), idling\n');
+      await idle();
       continue;
     }
+
+    const picked = pickNote(allPaths, state.checked);
+    if (!picked) {
+      await idle();
+      continue;
+    }
+    const note = picked.path;
 
     try {
       checkStaleness(note);
@@ -268,7 +300,7 @@ export async function runDaemon({ signal, configOverride, deps } = {}) {
       }
     }
 
-    state = markVisited(state, note);
+    state = markChecked(state, note, picked.mtimeMs);
     saveState(state);
     await sleep(cfg.paceMs, signal);
   }

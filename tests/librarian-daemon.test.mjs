@@ -1,10 +1,19 @@
 // tests/librarian-daemon.test.mjs : unit tests for scripts/librarian/daemon.mjs
 //
-// Tests: SIGTERM drain, AbortSignal loop exit, state save on drain, __test__ surface.
+// Tests: SIGTERM drain, AbortSignal loop exit, state save on drain, __test__ surface,
+// change-gated note picking, and the queue cap as a stop.
 
 import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs';
+import {
+  mkdirSync,
+  writeFileSync,
+  readFileSync,
+  existsSync,
+  rmSync,
+  statSync,
+  utimesSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomBytes } from 'node:crypto';
@@ -247,5 +256,139 @@ describe('librarian-daemon', () => {
       'a 200 with no message must not become a TypeError:\n' + log,
     );
     assert.match(log, /ollama returned no message: model not found/);
+  });
+  const gatedCfg = {
+    enabled: true,
+    model: 'test-model',
+    paceMs: 10,
+    queueCap: 200,
+    ollamaUrl: 'http://localhost:11434',
+    pauseOnBattery: false,
+    batteryPollMs: 60000,
+    linkPrompt: '',
+    voicePrompt: '',
+    tagPrompt: '',
+    duplicatePrompt: '',
+    structuralTags: new Set(),
+  };
+
+  // One linked, well-tagged note, so the only task it ever needs is duplicate_check.
+  const dbOf = (paths) => ({
+    exec: (sql) => {
+      if (sql.includes('SELECT path FROM notes')) return [{ values: paths.map((p) => [p]) }];
+      if (sql.includes('COUNT(*)')) return [{ values: [[1]] }];
+      return [{ values: [['alpha beta']] }];
+    },
+  });
+
+  function writeNote(rel, mtime) {
+    const full = join(TEMP_VAULT, rel);
+    writeFileSync(full, '# ' + rel + '\n\nA body.\n');
+    utimesSync(full, mtime, mtime);
+    return statSync(full).mtimeMs;
+  }
+
+  function countChats() {
+    const counter = { calls: 0 };
+    server.use(
+      chat(() => {
+        counter.calls++;
+        return HttpResponse.json({ message: { role: 'assistant', content: '{}' } });
+      }),
+    );
+    return counter;
+  }
+
+  async function runFor(ms, tag, cfg, db) {
+    const { runDaemon } = await import(
+      '../plugin/scripts/librarian/daemon.mjs?bust=daemon-' + tag + '-' + runId
+    );
+    const ac = new AbortController();
+    const done = runDaemon({ signal: ac.signal, configOverride: cfg, deps: { db } });
+    setTimeout(() => ac.abort(), ms);
+    await captureStderr(() => done);
+  }
+
+  async function freshQueue(tag) {
+    const q = await import('../plugin/scripts/librarian/queue.mjs?bust=gated-q-' + tag + runId);
+    q.resetState();
+    rmSync(join(LIB_DIR, 'queue.jsonl'), { force: true });
+    return q;
+  }
+
+  it('pickNote skips a note unchanged since its check and picks it again once touched', async () => {
+    const { pickNote } = await import(
+      '../plugin/scripts/librarian/daemon-helpers.mjs?bust=pick-' + runId
+    );
+    const rel = '3-permanent/pick.md';
+    const mtimeMs = writeNote(rel, new Date(Date.now() - 60000));
+
+    assert.deepEqual(pickNote([rel], {}), { path: rel, mtimeMs });
+    assert.equal(pickNote([rel], { [rel]: mtimeMs }), null);
+    assert.equal(pickNote(['3-permanent/gone.md'], {}), null, 'a note missing on disk is skipped');
+
+    const now = new Date();
+    utimesSync(join(TEMP_VAULT, rel), now, now);
+    assert.equal(pickNote([rel], { [rel]: mtimeMs })?.path, rel);
+  });
+
+  it('checks a changed note once, then leaves it alone', async () => {
+    const q = await freshQueue('once');
+    const rel = '3-permanent/once.md';
+    const mtimeMs = writeNote(rel, new Date(Date.now() - 60000));
+    q.saveState({ checked: { [rel]: mtimeMs - 1000 }, notes_visited: 0, counters: {} });
+    countChats();
+
+    await runFor(300, 'once', gatedCfg, dbOf([rel]));
+
+    const state = q.loadState();
+    assert.equal(state.checked[rel], mtimeMs);
+    assert.equal(state.notes_visited, 1, 'an unchanged note must not be checked again');
+  });
+
+  it('migrates a visited-list state by marking every current note checked, without a model call', async () => {
+    const q = await freshQueue('migrate');
+    const rel = '3-permanent/migrate.md';
+    const mtimeMs = writeNote(rel, new Date(Date.now() - 60000));
+    q.saveState({ visited: ['3-permanent/other.md'], notes_visited: 7, counters: {} });
+    const chats = countChats();
+
+    await runFor(100, 'migrate', gatedCfg, dbOf([rel]));
+
+    const state = q.loadState();
+    assert.equal(chats.calls, 0);
+    assert.deepEqual(state.checked, { [rel]: mtimeMs });
+    assert.equal(state.visited, undefined);
+    assert.equal(state.notes_visited, 7);
+  });
+
+  it('a full queue stops all model work and trims an over-cap queue to the newest items', async () => {
+    const q = await freshQueue('cap');
+    const rel = '3-permanent/unchecked.md';
+    writeNote(rel, new Date(Date.now() - 60000));
+    q.appendItem({
+      id: 'old',
+      task: 'tag_suggestion',
+      target: rel,
+      status: 'pending',
+      created_at: new Date(Date.now() - 120000).toISOString(),
+    });
+    q.appendItem({
+      id: 'new',
+      task: 'tag_suggestion',
+      target: rel,
+      status: 'pending',
+      created_at: new Date().toISOString(),
+    });
+    const chats = countChats();
+
+    await runFor(100, 'cap', { ...gatedCfg, queueCap: 1 }, dbOf([rel]));
+
+    assert.equal(chats.calls, 0, 'no model call while the queue is at its cap');
+    assert.deepEqual(
+      q.pendingItems().map((i) => i.id),
+      ['new'],
+    );
+    assert.equal(q.loadState().checked[rel], undefined, 'the unchecked note waits for room');
   });
 });

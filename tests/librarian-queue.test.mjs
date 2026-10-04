@@ -84,13 +84,13 @@ describe('librarian-queue', () => {
 
   it('loadState returns default state when state file missing', () => {
     const state = queue.loadState();
-    assert.deepEqual(state.visited, []);
+    assert.deepEqual(state.checked, {});
     assert.equal(state.notes_visited, 0);
   });
 
   it('saveState + loadState round-trips', () => {
     const saved = {
-      visited: ['a.md'],
+      checked: { 'a.md': 1000 },
       notes_visited: 5,
       counters: { x: 2 },
       last_note: 'a.md',
@@ -98,7 +98,7 @@ describe('librarian-queue', () => {
     };
     queue.saveState(saved);
     const loaded = queue.loadState();
-    assert.deepEqual(loaded.visited, ['a.md']);
+    assert.deepEqual(loaded.checked, { 'a.md': 1000 });
     assert.equal(loaded.notes_visited, 5);
     assert.equal(loaded.counters.x, 2);
   });
@@ -110,13 +110,51 @@ describe('librarian-queue', () => {
     assert.equal(state.counters.rejected_self_link, 2);
   });
 
-  it('markVisited appends note to visited', () => {
+  it('markChecked records the mtime each note was checked at', () => {
     let state = queue.loadState();
-    state = queue.markVisited(state, 'a.md');
-    state = queue.markVisited(state, 'b.md');
-    assert.deepEqual(state.visited, ['a.md', 'b.md']);
-    assert.equal(state.notes_visited, 2);
-    assert.equal(state.last_note, 'b.md');
+    state = queue.markChecked(state, 'a.md', 1000);
+    state = queue.markChecked(state, 'b.md', 2000);
+    state = queue.markChecked(state, 'a.md', 3000);
+    assert.deepEqual(state.checked, { 'a.md': 3000, 'b.md': 2000 });
+    assert.equal(state.notes_visited, 3);
+    assert.equal(state.last_note, 'a.md');
+  });
+
+  it('trimToCap expires the oldest pending items beyond the cap and keeps the newest', () => {
+    const at = (min) => new Date(Date.UTC(2026, 0, 1, 0, min)).toISOString();
+    const add = (id, status, created_at) =>
+      queue.appendItem({ id, task: 'a', status, created_at, target: 'x.md' });
+    add('p-old', 'pending', at(1));
+    add('p-new', 'pending', at(4));
+    add('approved', 'approved', at(0));
+    add('p-mid', 'pending', at(3));
+    add('p-bad-date', 'pending', 'not a date');
+    queue.trimToCap(2);
+    assert.deepEqual(
+      queue.readQueue().map((i) => [i.id, i.status, i.expired_reason]),
+      [
+        ['p-old', 'expired', 'over_cap'],
+        ['p-new', 'pending', undefined],
+        ['approved', 'approved', undefined],
+        ['p-mid', 'pending', undefined],
+        ['p-bad-date', 'expired', 'over_cap'],
+      ],
+    );
+    assert.equal(queue.pendingCount(), 2);
+  });
+
+  it('trimToCap leaves a queue at or under the cap untouched', () => {
+    queue.appendItem({
+      id: 'a',
+      task: 'a',
+      status: 'pending',
+      created_at: new Date().toISOString(),
+    });
+    queue.trimToCap(1);
+    assert.deepEqual(
+      queue.readQueue().map((i) => i.status),
+      ['pending'],
+    );
   });
 
   it('newItemId returns a 12-char hex string', () => {
@@ -182,7 +220,7 @@ describe('librarian-queue', () => {
 
   it('resetState removes the state file', () => {
     queue.saveState({
-      visited: ['x'],
+      checked: { x: 1 },
       notes_visited: 1,
       counters: {},
       last_note: null,
@@ -190,7 +228,7 @@ describe('librarian-queue', () => {
     });
     queue.resetState();
     const state = queue.loadState();
-    assert.deepEqual(state.visited, []);
+    assert.deepEqual(state.checked, {});
   });
 });
 

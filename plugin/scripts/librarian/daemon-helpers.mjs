@@ -11,14 +11,26 @@ import { logError } from '../lib/log.mjs';
 import { stripFrontmatter } from '../lib/markdown-parse.mjs';
 
 /**
- * Pick a random unvisited note from allPaths.
- * Returns null when all paths have been visited.
+ * Pick a random note that changed since it was last checked, or was never checked.
+ * `checked` maps a note path to the mtimeMs it had when the librarian last looked.
+ * Returns { path, mtimeMs }, or null when every note is as it was last checked.
  */
-export function pickNote(allPaths, visited) {
-  const visitedSet = new Set(visited);
-  const unvisited = allPaths.filter((p) => !visitedSet.has(p));
-  if (!unvisited.length) return null;
-  return unvisited[Math.floor(Math.random() * unvisited.length)];
+export function pickNote(allPaths, checked) {
+  const due = [];
+  for (const path of allPaths) {
+    const mtimeMs = mtimeOf(path);
+    if (mtimeMs !== null && !(checked[path] >= mtimeMs)) due.push({ path, mtimeMs });
+  }
+  if (!due.length) return null;
+  return due[Math.floor(Math.random() * due.length)];
+}
+
+export function mtimeOf(notePath) {
+  try {
+    return statSync(join(VAULT_PATH, notePath)).mtimeMs;
+  } catch {
+    return null;
+  }
 }
 
 /**

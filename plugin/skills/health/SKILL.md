@@ -143,7 +143,7 @@ Skip silently when edges.db does not exist yet.
 
 ### Step 7.5: Check: Librarian Queue
 
-Read `PLUGIN_DATA/librarian/queue.jsonl` (where PLUGIN_DATA = `CLAUDE_PLUGIN_DATA` env; if absent, resolve via `ll-run resolve-paths.mjs PLUGIN_DATA`; never hardcode a fallback path). Parse each line as JSON. Filter to items where `status === 'pending'`. Also read `PLUGIN_DATA/librarian/state.json` for visited count.
+Read `PLUGIN_DATA/librarian/queue.jsonl` (where PLUGIN_DATA = `CLAUDE_PLUGIN_DATA` env; if absent, resolve via `ll-run resolve-paths.mjs PLUGIN_DATA`; never hardcode a fallback path). Parse each line as JSON. Filter to items where `status === 'pending'`. Also read `PLUGIN_DATA/librarian/state.json`: the number of keys in its `checked` map is how many notes the librarian has checked.
 
 If the queue file doesn't exist or is empty, skip this step silently.
 
@@ -158,7 +158,7 @@ Group pending items by `task` field:
 Add to the dashboard output:
 
 ```
-  Librarian:       N pending observations (visited M/T notes)
+  Librarian:       N pending observations (checked M/T notes)
     Link suggestions:     N (X high, Y review)
     Tag suggestions:      N
     Voice flags:          N

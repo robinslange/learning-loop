@@ -128,8 +128,28 @@ export function expireStaleItems(vaultPath) {
   });
 }
 
+// The pending queue is a short list for a reviewer, so when it grows past the
+// cap the newest items survive: they describe the vault as it is now.
+export function trimToCap(cap) {
+  withLock(queuePath(), {}, () => {
+    const items = readQueue();
+    const created = (item) => Date.parse(item.created_at) || -Infinity;
+    const over = new Set(
+      items
+        .filter((item) => item.status === 'pending')
+        .sort((a, b) => created(b) - created(a))
+        .slice(cap),
+    );
+    if (!over.size) return;
+    const trimmed = items.map((item) =>
+      over.has(item) ? { ...item, status: 'expired', expired_reason: 'over_cap' } : item,
+    );
+    writeFileAtomic(queuePath(), trimmed.map((item) => JSON.stringify(item)).join('\n') + '\n');
+  });
+}
+
 const DEFAULT_STATE = {
-  visited: [],
+  checked: {},
   notes_visited: 0,
   link_suggestions: 0,
   voice_flags: 0,
@@ -158,10 +178,10 @@ export function saveState(state) {
   });
 }
 
-export function markVisited(state, notePath) {
+export function markChecked(state, notePath, mtimeMs) {
   return {
     ...state,
-    visited: [...(state.visited || []), notePath],
+    checked: { ...state.checked, [notePath]: mtimeMs },
     notes_visited: (state.notes_visited || 0) + 1,
     last_note: notePath,
   };
