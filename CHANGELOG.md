@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+## v2.4.0
+
 ### Changed
 
 - **The librarian checks a note only when it has changed, and a full queue stops it.** It used to walk the whole vault, reset, and walk it again, so every note cost at least one model call on every pass and the local model never went idle. When the pending queue reached its cap it expired stale items to make room, and because any edit to a note expires that note's items, an active vault always freed a few slots: on one install 11,481 of 12,147 expired items were `target_changed`, while 199 had ever been reviewed.
