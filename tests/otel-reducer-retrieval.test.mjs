@@ -1,6 +1,6 @@
 // tests/otel-reducer-retrieval.test.mjs
-// T2d: the retrieval reducer. Reads the four retrieval streams (queries,
-// reads, injections, shadow-injection), recomputes counts and histograms from
+// T2d: the retrieval reducer. Reads the three retrieval streams (queries,
+// reads, shadow-injection), recomputes counts and histograms from
 // scratch, returns metric records in otlp.mjs's input shape. See
 // docs/plans/otel-consolidation.md, "Phase 2: aggregators and POST", signal
 // mapping: "retrieval streams to counters plus result_count histograms,
@@ -31,6 +31,16 @@ function withCorpus(files, fn) {
 
 function metricsNamed(metrics, name) {
   return metrics.filter((m) => m.name === `ll.${name}`);
+}
+
+function liveInjection(ts, paths, levels = []) {
+  return {
+    ts,
+    session_id: 's1',
+    type: 'gate-pass-payload',
+    mode: 'live',
+    payload: { injected_paths: paths.map((path, i) => ({ path, level: levels[i] || 'body' })) },
+  };
 }
 
 test('counts by command across a multi-stream, multi-month fixture', () => {
@@ -119,15 +129,7 @@ test('running the reducer twice returns identical output', () => {
         federated: true,
       },
     ],
-    'injections-2026-05.jsonl': [
-      {
-        ts: '2026-05-01T00:00:01Z',
-        session_id: 's1',
-        path: '/vault/note.md',
-        via: 'auto',
-        level: 'permanent',
-      },
-    ],
+    'shadow-injection-2026-05.jsonl': [liveInjection('2026-05-01T00:00:01Z', ['note.md'])],
   };
 
   withCorpus(files, (pluginData) => {
@@ -188,8 +190,14 @@ test('records missing optional fields do not produce undefined labels or NaN', (
     'queries-2026-05.jsonl': [
       { ts: '2026-05-01T00:00:00Z', session_id: 's1', command: 'search', query: 'x' },
     ],
-    'injections-2026-05.jsonl': [
-      { ts: '2026-05-01T00:00:01Z', session_id: 's1', path: '/vault/note.md' },
+    'shadow-injection-2026-05.jsonl': [
+      {
+        ts: '2026-05-01T00:00:01Z',
+        session_id: 's1',
+        type: 'gate-pass-payload',
+        mode: 'live',
+        payload: { injected_paths: [{ path: 'note.md' }] },
+      },
     ],
   };
 
@@ -233,16 +241,8 @@ test('every returned record passes phase 0 attribute validation', () => {
         type: 'note',
       },
     ],
-    'injections-2026-05.jsonl': [
-      {
-        ts: '2026-05-01T00:00:02Z',
-        session_id: 's1',
-        path: '/vault/note.md',
-        via: 'auto',
-        level: 'permanent',
-      },
-    ],
     'shadow-injection-2026-05.jsonl': [
+      liveInjection('2026-05-01T00:00:02Z', ['note.md']),
       {
         ts: '2026-05-01T00:00:03Z',
         session_id: 's1',
@@ -276,15 +276,7 @@ test('the output serializes through buildOtlpPayload without throwing', () => {
         result_count: 3,
       },
     ],
-    'injections-2026-05.jsonl': [
-      {
-        ts: '2026-05-01T00:00:01Z',
-        session_id: 's1',
-        path: '/vault/note.md',
-        via: 'auto',
-        level: 'permanent',
-      },
-    ],
+    'shadow-injection-2026-05.jsonl': [liveInjection('2026-05-01T00:00:01Z', ['note.md'])],
   };
 
   withCorpus(files, (pluginData) => {
@@ -333,29 +325,17 @@ test('counts queries by federated', () => {
   });
 });
 
-test('counts injections by via and level', () => {
+test('counts the notes live shadow-injection records injected, by via and level', () => {
   const files = {
-    'injections-2026-05.jsonl': [
-      {
-        ts: '2026-05-01T00:00:00Z',
-        session_id: 's1',
-        path: '/a.md',
-        via: 'auto',
-        level: 'permanent',
-      },
-      {
-        ts: '2026-05-01T00:00:01Z',
-        session_id: 's1',
-        path: '/b.md',
-        via: 'manual',
-        level: 'inbox',
-      },
+    'shadow-injection-2026-05.jsonl': [
+      liveInjection('2026-05-01T00:00:00Z', ['a.md', 'b.md'], ['body', 'pointer']),
+      liveInjection('2026-05-01T00:00:01Z', ['c.md'], ['body']),
       {
         ts: '2026-05-01T00:00:02Z',
-        session_id: 's1',
-        path: '/c.md',
-        via: 'auto',
-        level: 'permanent',
+        session_id: 's2',
+        type: 'gate-pass-payload',
+        mode: 'shadow',
+        payload: { injected_paths: [{ path: 'never-reached-model.md', level: 'body' }] },
       },
     ],
   };
@@ -364,9 +344,11 @@ test('counts injections by via and level', () => {
     const metrics = reduceRetrieval({ pluginData, timeUnixMs: Date.now() });
     const byVia = metricsNamed(metrics, 'retrieval.injection_via');
     const byLevel = metricsNamed(metrics, 'retrieval.injection_level');
-    const auto = byVia.find((m) => m.attributes.via === 'auto');
-    const permanent = byLevel.find((m) => m.attributes.level === 'permanent');
-    assert.strictEqual(auto.value, 2);
-    assert.strictEqual(permanent.value, 2);
+    assert.deepStrictEqual(
+      byVia.map((m) => [m.attributes.via, m.value]),
+      [['injected', 3]],
+    );
+    assert.strictEqual(byLevel.find((m) => m.attributes.level === 'body').value, 2);
+    assert.strictEqual(byLevel.find((m) => m.attributes.level === 'pointer').value, 1);
   });
 });

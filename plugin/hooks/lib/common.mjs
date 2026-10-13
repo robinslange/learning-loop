@@ -190,10 +190,10 @@ export function emitRetrieval(prefix, event) {
   // writer, so an event passing any of these would override the writer's
   // computed value silently: ts, session_id, command, query, result_count,
   // peer_results, top_paths. Audit before adding new keys to any hook
-  // caller. session-label.js's gate-pass-payload record passes `ts` on
-  // purpose, to line up with the sibling dedupe-state write the usage-report
-  // join keys off. Any other caller should use the explicit slot (e.g.
-  // `query: ...`) rather than through event.
+  // caller. session-label.js's shadow-injection records pass `session_id` on
+  // purpose: the hook payload names the prompt's session, while the writer's
+  // resolver can fall back to the machine-wide id. Any other caller should
+  // use the explicit slot (e.g. `query: ...`) rather than through event.
   writeRetrieval({
     pluginData: getPluginData(),
     prefix,

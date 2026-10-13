@@ -58,6 +58,7 @@ function writeMonthlyShards(dir, prefix, entries) {
 function makePluginData({
   queries = [],
   dedupe = {},
+  ledger = [],
   provenance = [],
   shadowInjections = [],
 } = {}) {
@@ -66,6 +67,7 @@ function makePluginData({
   mkdirSync(join(root, 'provenance'), { recursive: true });
   writeMonthlyShards(join(root, 'retrieval'), 'queries', queries);
   writeMonthlyShards(join(root, 'retrieval'), 'shadow-injection', shadowInjections);
+  if (ledger.length) writeMonthlyShards(join(root, 'retrieval'), 'injections', ledger);
   for (const [sid, entries] of Object.entries(dedupe)) {
     writeFileSync(
       join(root, 'retrieval', 'session-dedupe', `${sid}.json`),
@@ -87,12 +89,20 @@ test('sessionSurfaced merges injected + retrieved for one session, keeps level',
       },
       { ts: daysAgo(0), session_id: 's2', command: 'query', top_paths: ['3-permanent/other.md'] },
     ],
-    dedupe: {
-      s1: [
-        { path: '3-permanent/a.md', level: 'pointer', ts: daysAgo(0) },
-        { path: '0-inbox/b.md', level: 'body', ts: daysAgo(0) },
-      ],
-    },
+    shadowInjections: [
+      {
+        ts: daysAgo(0),
+        session_id: 's1',
+        type: 'gate-pass-payload',
+        mode: 'live',
+        payload: {
+          injected_paths: [
+            { path: '3-permanent/a.md', level: 'pointer' },
+            { path: '0-inbox/b.md', level: 'body' },
+          ],
+        },
+      },
+    ],
   });
   try {
     const out = sessionSurfaced(pd, 's1');
@@ -109,12 +119,9 @@ test('sessionSurfaced merges injected + retrieved for one session, keeps level',
   }
 });
 
-// GitHub issue #64: the injection ledger (injections-*.jsonl) only carries
-// whatever ephemeral dedupe state survived to the next sync, but every live
-// injection is also durably recorded on shadow-injection-*.jsonl (mode:
-// 'live', type: 'gate-pass-payload') the moment it happens -- no pruning, no
-// sync dependency. A note surfaced ONLY through that record (never synced
-// into the ledger, never in dedupe state) must still join to its usage event.
+// Every live injection is recorded on shadow-injection-*.jsonl (mode: 'live',
+// type: 'gate-pass-payload') the moment it happens, and that record alone
+// must join to its usage event.
 test('sessionSurfaced and usageReport pick up a live injection recorded only on shadow-injection', () => {
   const pd = makePluginData({
     shadowInjections: [
@@ -170,19 +177,22 @@ test('sessionSurfaced and usageReport pick up a live injection recorded only on 
   }
 });
 
-// session-label.js writes the SAME live injection twice: once into the
-// ephemeral session-dedupe state (persistDedupeState) and once into
-// shadow-injection-*.jsonl (the gate-pass-payload record). Both writers
-// stamp their own `ts` from `new Date()` a few statements apart, so the join
-// key (session_id, path, ts) never matches and loadSurfacedEvents counts one
-// live injection as two surfaced events. A fixture with identical ts on both
-// records, the fix the writer must make, is the one that should collapse.
-test('loadSurfacedEvents collapses a live injection recorded on both dedupe state and shadow-injection when ts matches', () => {
+// The injections-*.jsonl ledger written before #121 copied each live
+// injection out of the session-dedupe state, so the same injection is also on
+// shadow-injection-*.jsonl. Until those ledger files age out, one live
+// injection on both must count once.
+const ledgerRow = (ts, path = '3-permanent/dup.md') => ({
+  ts,
+  session_id: 's1',
+  path,
+  via: 'injected',
+  level: 'body',
+});
+
+test('loadSurfacedEvents collapses a live injection recorded on both the ledger and shadow-injection when ts matches', () => {
   const sharedTs = daysAgo(1);
   const pd = makePluginData({
-    dedupe: {
-      s1: [{ path: '3-permanent/dup.md', level: 'body', ts: sharedTs }],
-    },
+    ledger: [ledgerRow(sharedTs)],
     shadowInjections: [
       {
         ts: sharedTs,
@@ -223,15 +233,28 @@ test('loadSurfacedEvents collapses a pre-upgrade live injection whose two record
     payload: { injected_paths: [{ path: '3-permanent/dup.md', level: 'body' }] },
   });
   const pd = makePluginData({
-    dedupe: {
-      s1: [{ path: '3-permanent/dup.md', level: 'body', ts: new Date(base).toISOString() }],
-    },
+    ledger: [ledgerRow(new Date(base).toISOString())],
     shadowInjections: [liveRecord(new Date(base + 4).toISOString())],
   });
   try {
     const r = usageReport(pd, { now: NOW, minSurfaced: 1 });
     const entry = r.surfaced_unevaluated.find((n) => n.path === '3-permanent/dup.md');
     assert.strictEqual(entry.surfaced, 1, 'one injection seen by two writers is one event');
+  } finally {
+    rmSync(pd, { recursive: true, force: true });
+  }
+});
+
+// Shadow mode writes session-dedupe state too, so its own would-inject filter
+// stays realistic, but nothing there reached the model.
+test('session-dedupe state alone never counts as an injection', () => {
+  const pd = makePluginData({
+    dedupe: { s1: [{ path: '3-permanent/would-inject.md', level: 'body', ts: daysAgo(0) }] },
+  });
+  try {
+    assert.deepStrictEqual(sessionSurfaced(pd, 's1'), []);
+    const r = usageReport(pd, { now: NOW, minSurfaced: 1 });
+    assert.deepStrictEqual(r.surfaced_unevaluated, []);
   } finally {
     rmSync(pd, { recursive: true, force: true });
   }
@@ -400,7 +423,15 @@ test('loadUnevidencedInformed reads the pre-rename `note` key too', () => {
 
 test('CLI --session-surfaced prints JSON for the session', () => {
   const pd = makePluginData({
-    dedupe: { sX: [{ path: '0-inbox/b.md', level: 'body', ts: daysAgo(0) }] },
+    shadowInjections: [
+      {
+        ts: daysAgo(0),
+        session_id: 'sX',
+        type: 'gate-pass-payload',
+        mode: 'live',
+        payload: { injected_paths: [{ path: '0-inbox/b.md', level: 'body' }] },
+      },
+    ],
   });
   try {
     const result = spawnSync('node', [REPORT, '--session-surfaced', 'sX'], {
@@ -912,37 +943,6 @@ test('engagement counts credit every kind a verdict carries', async () => {
     assert.equal(r.used_events, 1, 'one verdict');
     assert.equal(r.used_engaged_events, 1, 'the read is still counted');
     assert.equal(r.used_informed_events, 1, 'and so is the informed claim');
-  } finally {
-    rmSync(pd, { recursive: true, force: true });
-  }
-});
-
-test('syncInjectionLedger files an injection under its local month', () => {
-  const pd = mkdtempSync(join(tmpdir(), 'll-ret-usage-tz-'));
-  try {
-    const dedupe = join(pd, 'retrieval', 'session-dedupe');
-    mkdirSync(dedupe, { recursive: true });
-    // Sep 30 12:00Z is already Oct 1 in Auckland.
-    writeFileSync(
-      join(dedupe, 'sA.json'),
-      JSON.stringify([{ path: '3-permanent/a.md', level: 'body', ts: '2026-09-30T12:00:00.000Z' }]),
-    );
-    const usage = pathToFileURL(join(SCRIPTS, 'lib', 'retrieval-usage.mjs')).href;
-    const r = spawnSync(
-      process.execPath,
-      [
-        '--input-type=module',
-        '-e',
-        `const { syncInjectionLedger } = await import('${usage}'); console.log(syncInjectionLedger(${JSON.stringify(pd)}));`,
-      ],
-      { env: cliEnv(pd, { TZ: 'Pacific/Auckland' }), encoding: 'utf-8' },
-    );
-    assert.strictEqual(r.status, 0, r.stderr);
-    assert.strictEqual(r.stdout.trim(), '1');
-    assert.deepStrictEqual(
-      readdirSync(join(pd, 'retrieval')).filter((f) => f.startsWith('injections-')),
-      ['injections-2026-10.jsonl'],
-    );
   } finally {
     rmSync(pd, { recursive: true, force: true });
   }
