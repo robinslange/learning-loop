@@ -7,8 +7,23 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { delimiter, join } from 'node:path';
 import { checkEdgesBackfill, runFullChecks } from '../plugin/scripts/health-check.mjs';
+
+// runFullChecks probes `claude --version` on PATH. A stub first on PATH keeps
+// these tests off whatever Claude CLI the machine has installed.
+async function withStubClaude(dir, fn) {
+  const bin = join(dir, 'stub-bin');
+  mkdirSync(bin, { recursive: true });
+  writeFileSync(join(bin, 'claude'), '#!/bin/sh\necho "9.9.9 (Claude Code)"\n', { mode: 0o755 });
+  const saved = process.env.PATH;
+  process.env.PATH = `${bin}${delimiter}${saved}`;
+  try {
+    return await fn();
+  } finally {
+    process.env.PATH = saved;
+  }
+}
 
 test('fails with the backfill fix when edges.db is missing and the vault has notes', () => {
   const c = checkEdgesBackfill({ vaultNoteCount: 12, dbExists: false, edgeCount: null });
@@ -52,7 +67,12 @@ test('runFullChecks includes the edges-backfill check with collected inputs', as
     mkdirSync(join(vaultRoot, '0-inbox'), { recursive: true });
     mkdirSync(pluginData, { recursive: true });
     writeFileSync(join(vaultRoot, '0-inbox', 'a.md'), '---\nname: a\n---\nBody.\n');
-    const result = await runFullChecks({ pluginData, vaultRoot, home: dir });
+    const result = await withStubClaude(dir, () =>
+      runFullChecks({ pluginData, vaultRoot, home: dir }),
+    );
+    if (process.platform !== 'win32') {
+      assert.equal(result.checks.find((c) => c.id === 'claude-version').detail, '9.9.9');
+    }
     const check = result.checks.find((c) => c.id === 'edges-backfill');
     assert.ok(check, 'edges-backfill check missing from full run');
     // one note, no edges.db -> the backfill nudge fires
@@ -87,7 +107,9 @@ test('a comention-only index is populated, not a backfill failure', async () => 
     writeFileSync(join(vaultRoot, '0-inbox', 'a.md'), '# a\n\nsee [[b]]\n');
     writeFileSync(join(vaultRoot, '0-inbox', 'b.md'), '# b\n');
 
-    const result = await runFullChecks({ pluginData: dir, vaultRoot, home: dir });
+    const result = await withStubClaude(dir, () =>
+      runFullChecks({ pluginData: dir, vaultRoot, home: dir }),
+    );
     const check = result.checks.find((c) => c.id === 'edges-backfill');
     assert.equal(check.status, 'ok', check.detail);
     assert.match(check.detail, /0 argued edge\(s\), 1 co-mention\(s\)/);
