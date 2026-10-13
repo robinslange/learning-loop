@@ -17,7 +17,8 @@ import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { getPluginData } from '../lib/config.mjs';
 import { loadLibrarianConfig } from './config.mjs';
-import { DB_PATH, VAULT_PATH } from '../lib/constants.mjs';
+import { getVaultPath } from '../lib/config.mjs';
+import { VAULT_PATHS } from '../lib/paths.mjs';
 import { openReadonly } from '../lib/sqljs.mjs';
 import {
   loadState,
@@ -221,7 +222,7 @@ export async function runDaemon({ signal, configOverride, deps } = {}) {
   await waitForOllama({ url: cfg.ollamaUrl, logFn: log });
   log('Librarian started (model: ' + cfg.model + ', pace: ' + cfg.paceMs / 1000 + 's)\n');
 
-  let db = deps?.db || (await openReadonly(DB_PATH));
+  let db = deps?.db || (await openReadonly(VAULT_PATHS.index(getVaultPath())));
   let allPaths = await getAllNotePaths(db);
   log('Loaded ' + allPaths.length + ' notes\n');
 
@@ -242,13 +243,13 @@ export async function runDaemon({ signal, configOverride, deps } = {}) {
   }
 
   const idle = async () => {
-    expireStaleItems(VAULT_PATH);
+    expireStaleItems(getVaultPath());
     trimToCap(cfg.queueCap);
     await sleep(IDLE_MS, signal);
     if (signal?.aborted) return;
     if (!deps?.db) {
       db.close();
-      db = await openReadonly(DB_PATH);
+      db = await openReadonly(VAULT_PATHS.index(getVaultPath()));
     }
     allPaths = await getAllNotePaths(db);
   };
