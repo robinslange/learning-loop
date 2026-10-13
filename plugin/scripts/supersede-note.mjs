@@ -21,7 +21,7 @@ import { openEdgeDb, archiveOutgoingEdges, saveDb } from './lib/edges.mjs';
 import { acquireLock, releaseLock } from './lib/file-lock.mjs';
 import { DATA_FILES } from './lib/paths.mjs';
 import { logError } from './lib/log.mjs';
-import { VAULT_PATH, PLUGIN_DATA } from './lib/constants.mjs';
+import { getPluginData, getVaultPath } from './lib/config.mjs';
 
 const FM_SPLIT_RE = /^(---\r?\n)([\s\S]*?)(\r?\n---\r?\n?)/;
 
@@ -131,7 +131,7 @@ async function archiveNoteEdges(filePath, vaultPath, pluginData) {
  */
 export async function supersedeNoteFile(
   filePath,
-  { vaultPath = VAULT_PATH, pluginData = PLUGIN_DATA, ...opts } = {},
+  { vaultPath = getVaultPath(), pluginData = getPluginData(), ...opts } = {},
 ) {
   const raw = readFileSync(filePath, 'utf-8');
   const result = stampSupersession(raw, opts);

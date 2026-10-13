@@ -15,8 +15,8 @@ import {
   incrementCounter,
   readQueue,
 } from '../queue.mjs';
-import { VAULT_PATH, DB_PATH } from '../../lib/constants.mjs';
-import { resolveInVault } from '../../lib/paths.mjs';
+import { getVaultPath } from '../../lib/config.mjs';
+import { resolveInVault, VAULT_PATHS } from '../../lib/paths.mjs';
 import { logError } from '../../lib/log.mjs';
 import { stripFrontmatter } from '../../lib/markdown-parse.mjs';
 
@@ -33,7 +33,7 @@ export function cap(str) {
 // containment check.
 export function vaultFile(relPath) {
   if (typeof relPath !== 'string' || !relPath.endsWith('.md')) return null;
-  return resolveInVault(relPath, VAULT_PATH);
+  return resolveInVault(relPath, getVaultPath());
 }
 
 export function slug(notePath) {
@@ -45,16 +45,26 @@ export function isUnitProb(x) {
   return typeof x === 'number' && Number.isFinite(x) && x >= 0 && x <= 1;
 }
 
+// Resolved per call: the daemon outlives any one vault config.
+export function indexPath() {
+  return VAULT_PATHS.index(getVaultPath());
+}
+
 let _db = null;
+let _dbPath = null;
 
 export async function getDb() {
-  if (_db) return _db;
-  _db = await openReadonly(DB_PATH);
+  const path = indexPath();
+  if (_dbPath !== path) {
+    _db?.close();
+    _db = await openReadonly(path);
+    _dbPath = path;
+  }
   return _db;
 }
 
 export async function findSimilar({ note_path }, ctx) {
-  const results = run(['similar', DB_PATH, note_path, '--top', '5']);
+  const results = run(['similar', indexPath(), note_path, '--top', '5']);
   if (ctx && ctx.neighbourScores && Array.isArray(results)) {
     for (const r of results) {
       if (r && typeof r.path === 'string' && typeof r.score === 'number') {
@@ -66,12 +76,12 @@ export async function findSimilar({ note_path }, ctx) {
 }
 
 export async function searchVault({ query }) {
-  const results = run(['query', DB_PATH, query, '--top', '5']);
+  const results = run(['query', indexPath(), query, '--top', '5']);
   return cap(JSON.stringify(results));
 }
 
 export async function findClusters() {
-  const results = run(['cluster', DB_PATH, '--threshold', '0.85']);
+  const results = run(['cluster', indexPath(), '--threshold', '0.85']);
   return cap(JSON.stringify(results));
 }
 
@@ -99,7 +109,7 @@ export async function getOutlinks({ note_path }) {
 }
 
 export async function getTags() {
-  const results = run(['tags', DB_PATH]);
+  const results = run(['tags', indexPath()]);
   return cap(JSON.stringify(results));
 }
 

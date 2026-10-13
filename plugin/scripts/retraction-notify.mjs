@@ -12,17 +12,18 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync } from 
 import { appendJsonlLine } from './lib/jsonl.mjs';
 import { join, dirname } from 'path';
 import { initSQL } from './lib/sqljs.mjs';
-import { PLUGIN_DATA } from './lib/constants.mjs';
+import { getPluginData } from './lib/config.mjs';
 import { safeLoad } from './lib/safe-load.mjs';
 import { logError } from './lib/log.mjs';
 import { FEDERATION_PATHS } from './lib/paths.mjs';
 import { monthStr } from './lib/retrieval.mjs';
 
-const FEDERATION_DIR = FEDERATION_PATHS.root(PLUGIN_DATA);
-const OUTBOX_DIR = FEDERATION_PATHS.outbox(PLUGIN_DATA);
-const PEERS_DIR = FEDERATION_PATHS.peersDir(PLUGIN_DATA);
-const CONFIG_PATH = FEDERATION_PATHS.config(PLUGIN_DATA);
-const READABLE_VAULTS_PATH = FEDERATION_PATHS.readableVaults(PLUGIN_DATA);
+const pluginData = getPluginData();
+const FEDERATION_DIR = FEDERATION_PATHS.root(pluginData);
+const OUTBOX_DIR = FEDERATION_PATHS.outbox(pluginData);
+const PEERS_DIR = FEDERATION_PATHS.peersDir(pluginData);
+const CONFIG_PATH = FEDERATION_PATHS.config(pluginData);
+const READABLE_VAULTS_PATH = FEDERATION_PATHS.readableVaults(pluginData);
 
 const args = process.argv.slice(2);
 
@@ -52,7 +53,7 @@ const replacement = parseFlag('--replacement', null);
 const sourceGraph = parseFlag('--source-graph', 'local');
 
 async function peerHasNote(peerId, notePath) {
-  const dbPath = FEDERATION_PATHS.peerDb(PLUGIN_DATA, peerId);
+  const dbPath = FEDERATION_PATHS.peerDb(pluginData, peerId);
   if (!existsSync(dbPath)) return false;
   try {
     const SQL = await initSQL();
