@@ -81,9 +81,10 @@ fn setup_source_db(dir: &Path) -> PathBuf {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn silent_hub_triggers_recv_timeout() {
-    // SAFETY: each integration test binary is its own process. This is the only
-    // test in this one that runs the client, and the other reads no
-    // environment, so nothing reads it concurrently.
+    // SAFETY: each integration test binary is its own process. The only other
+    // test in this one reads the environment solely through std (anyhow's
+    // backtrace capture checks RUST_BACKTRACE via std::env::var_os), which
+    // takes the same lock as set_var, and nothing here calls libc getenv.
     unsafe {
         std::env::set_var("LL_SYNC_RECV_TIMEOUT_MS", "1000");
         // This mock hub is exactly the "local test harness" LL_ALLOW_INSECURE_WS
