@@ -34,6 +34,17 @@ async fn spawn_silent_hub() -> SocketAddr {
     addr
 }
 
+/// macOS refuses a loopback connect with EADDRNOTAVAIL when sockets in
+/// TIME_WAIT have used up the ephemeral ports, as when lefthook runs the JS
+/// suite beside this one. The refused connect never reaches the hub's accept,
+/// so another attempt tests the same thing.
+fn addr_not_available(err: &anyhow::Error) -> bool {
+    err.chain().any(|e| {
+        e.downcast_ref::<std::io::Error>()
+            .is_some_and(|io| io.kind() == std::io::ErrorKind::AddrNotAvailable)
+    })
+}
+
 /// A config dir with `federation/config.json` and a generated seed. Sync
 /// never mints an identity itself, so the seed has to exist beforehand.
 fn setup_config_dir(hub_addr: SocketAddr) -> tempfile::TempDir {
@@ -70,8 +81,9 @@ fn setup_source_db(dir: &Path) -> PathBuf {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn silent_hub_triggers_recv_timeout() {
-    // SAFETY: each integration test binary is its own process, and this is the
-    // only test in this one, so nothing else reads the environment concurrently.
+    // SAFETY: each integration test binary is its own process. This is the only
+    // test in this one that runs the client, and the other reads no
+    // environment, so nothing reads it concurrently.
     unsafe {
         std::env::set_var("LL_SYNC_RECV_TIMEOUT_MS", "1000");
         // This mock hub is exactly the "local test harness" LL_ALLOW_INSECURE_WS
@@ -91,11 +103,20 @@ async fn silent_hub_triggers_recv_timeout() {
 
     let config = ll_search::sync::config::load_config(dir.path()).expect("load_config");
 
-    let started = Instant::now();
-    let result =
-        ll_search::sync::client::sync_all_async(&source_db, vault.path(), dir.path(), &config)
-            .await;
-    let elapsed = started.elapsed();
+    let mut attempts = 0;
+    let (result, elapsed) = loop {
+        attempts += 1;
+        let started = Instant::now();
+        let result =
+            ll_search::sync::client::sync_all_async(&source_db, vault.path(), dir.path(), &config)
+                .await;
+        match &result {
+            Err(err) if attempts < 5 && addr_not_available(err) => {
+                tokio::time::sleep(Duration::from_millis(200)).await;
+            }
+            _ => break (result, started.elapsed()),
+        }
+    };
 
     let err = result.expect_err("silent hub must produce a timeout error");
     let chain: String = err
@@ -111,4 +132,13 @@ async fn silent_hub_triggers_recv_timeout() {
         elapsed < Duration::from_secs(5),
         "timeout fired too slowly: {elapsed:?} (override LL_SYNC_RECV_TIMEOUT_MS=1000)",
     );
+}
+
+#[test]
+fn addr_not_available_sees_through_the_connect_context() {
+    let io = std::io::Error::from(std::io::ErrorKind::AddrNotAvailable);
+    let refused = anyhow::Error::new(tokio_tungstenite::tungstenite::Error::Io(io))
+        .context("failed to connect to hub");
+    assert!(addr_not_available(&refused));
+    assert!(!addr_not_available(&anyhow::anyhow!("recv timed out")));
 }
