@@ -17,9 +17,9 @@ const fields = {
   PLUGIN: getPluginRoot(),
   PLUGIN_DATA: pluginData,
   VAULT: getVaultPath(),
-  // The canonical session id (scripts/lib/session.mjs) the reflect new-notes
-  // hook keys its marker on. Skills resolve LL_SID through this so both sides
-  // of the handshake run the identical resolver.
+  // The canonical session id (scripts/lib/session.mjs). The reflect new-notes
+  // marker is keyed on it; on Claude Code it is $CLAUDE_CODE_SESSION_ID, the
+  // same id the post-tool hook reads from its payload.
   SESSION_ID: sessionId,
   // The dir the reflect Step 4 scratch markers live in — plugin-data, NOT tmp.
   // Mirrors hooks/modules/reflect-track.mjs:reflectScratchDir() exactly so the

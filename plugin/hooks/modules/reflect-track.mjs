@@ -4,12 +4,11 @@
 //   - Step 4 init creates an empty marker file in the reflect-scratch dir
 //     (plugin-data/reflect-scratch via reflectScratchDir(); tmp only when
 //     plugin-data can't be resolved), keyed by session id as
-//     ll-${sid}-reflect-new-notes.txt. The session id comes from the canonical
-//     getSessionId() ($CLAUDE_CODE_SESSION_ID, then plugin-data, then a legacy
-//     tmp file). The skill's bash resolves BOTH the dir and the id via
-//     scripts/resolve-paths.mjs (REFLECT_SCRATCH / SESSION_ID), the same
-//     resolvers this hook uses, so the two sides resolve the identical path
-//     across the $TMPDIR-split hook/shell boundary (see reflectNewNotesPath).
+//     ll-${sid}-reflect-new-notes.txt. The skill's bash resolves the dir and
+//     the id via scripts/resolve-paths.mjs (REFLECT_SCRATCH / SESSION_ID). The
+//     hook resolves the same dir, and post-tool.js hands it the id that shell
+//     sees (see the sessionId comment there), so both sides name one path
+//     across the $TMPDIR-split hook/shell boundary.
 //   - For every vault Write/Edit that fires during the marker's lifetime,
 //     this module appends the absolute file path + newline.
 //   - Step 4.6.g `rm -f` deletes the marker, ending the tracking window.
@@ -59,10 +58,9 @@ import { getPluginData } from '../../scripts/lib/config.mjs';
 // (which exports REFLECT_SCRATCH = reflectScratchDir()'s value).
 //
 // Session id keys the file within that dir. The skill's bash resolves it with
-// getSessionId() through resolve-paths.mjs --sh, where the harness env var is
-// set. A hook process may lack that var, so the hook passes the payload's own
-// session_id explicitly; getSessionId() is only the fallback for callers that
-// pass none, and returns the 'unknown' sentinel outside a Claude Code session.
+// getSessionId() through resolve-paths.mjs --sh. post-tool.js passes the id
+// that shell sees; getSessionId() is only the fallback for callers that pass
+// none, and returns the 'unknown' sentinel outside a Claude Code session.
 export function reflectScratchDir() {
   const pd = getPluginData();
   return pd ? DATA_PATHS.reflectScratch(pd) : tmpdir();
@@ -84,9 +82,8 @@ export function runReflectTrack(ctx) {
   const rel = vaultRelPath(input.file_path, vaultRoot);
   if (!rel) return;
 
-  // post-tool.js passes the write's own session (LL_REFLECT_SID on replay,
-  // else the payload's session_id); a direct caller that passes none falls
-  // back to getSessionId().
+  // post-tool.js passes the id the /reflect shell resolves (LL_REFLECT_SID on
+  // replay); a direct caller that passes none falls back to getSessionId().
   const marker = reflectNewNotesPath(sessionId);
   if (!existsSync(marker)) return;
 

@@ -125,7 +125,7 @@ Using the reflect-scan results from Step 2.5:
 - Follow persona.md voice: Hemingway + Musashi + Lao Tzu. No filler.
 - Tag with source project/domain
 - Link to the project index note in `4-projects/` if one exists
-- **Stamp `reflect_sid: <SESSION_ID>` in the frontmatter of every note you write this session** (get the value from `ll-paths SESSION_ID` — the canonical resolver, the same one the hook reads). The Step 4.4 sweep uses it to recover sub-agent notes (PostToolUse hooks don't fire on sub-agent writes); the Step 4.6.g cleanup strips it once tracking is done.
+- **Stamp `reflect_sid: <SESSION_ID>` in the frontmatter of every note you write this session** (get the value from `ll-paths SESSION_ID`, the canonical resolver; the post-tool hook keys this session's marker on the same id). The Step 4.4 sweep uses it to recover sub-agent notes (PostToolUse hooks don't fire on sub-agent writes); the Step 4.6.g cleanup strips it once tracking is done.
 - **Create the session-keyed reflect new-notes marker once, at the start of Step 4.** From then until the Step 4.6.g cleanup, the post-tool hook (`hooks/modules/reflect-track.mjs`) appends every vault Write/Edit's absolute path to that file. Do not echo paths in by hand — the hook is the single writer. The marker lives in **plugin-data**, not tmp: get its path stem from `ll-paths REFLECT_PREFIX` (as in the init block below), the same resolver the hook uses, so writer and reader stay in lockstep.
 
 ```bash
