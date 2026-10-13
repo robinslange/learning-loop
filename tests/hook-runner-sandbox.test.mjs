@@ -16,6 +16,7 @@ import {
   existsSync,
   utimesSync,
   rmSync,
+  realpathSync,
 } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -94,19 +95,23 @@ test('runHook never links the installed plugin binary into a sandbox', () => {
         '--input-type=module',
         '-e',
         `const { runHook } = await import(${JSON.stringify(runner)});
-         const { readlinkSync, lstatSync } = await import('node:fs');
+         const { readFileSync, realpathSync } = await import('node:fs');
          const r = runHook(${JSON.stringify(HOOK)}, { stdin: ${JSON.stringify(NOOP_STDIN)} });
          const bin = r.pluginDataDir + '/bin/ll-search';
-         let link = null;
-         try { if (lstatSync(bin).isSymbolicLink()) link = readlinkSync(bin); } catch {}
+         let seen = null;
+         try { seen = { real: realpathSync(bin), head: readFileSync(bin, 'latin1').slice(0, 15) }; } catch {}
          r.cleanup();
-         console.log(JSON.stringify(link));`,
+         console.log(JSON.stringify(seen));`,
       ],
       { encoding: 'utf8', env: { ...process.env, CLAUDE_PLUGIN_DATA: installed } },
     );
     assert.equal(r.status, 0, r.stderr);
-    const link = JSON.parse(r.stdout.trim().split('\n').at(-1));
-    assert.ok(!link?.startsWith(installed), `sandbox binary links to the install: ${link}`);
+    const seen = JSON.parse(r.stdout.trim().split('\n').at(-1));
+    assert.ok(
+      !seen?.real.startsWith(realpathSync(installed)),
+      `sandbox links the install: ${seen?.real}`,
+    );
+    assert.notEqual(seen?.head, 'installed-decoy', 'sandbox holds a copy of the installed binary');
   } finally {
     rmSync(installed, { recursive: true, force: true });
   }
