@@ -7,6 +7,8 @@ All notable changes to this project are documented here. The format is based on 
 ### Fixed
 
 - **Three more log writers name their monthly file by the local month (#141).** The cache-health statusline log (`retrieval/cache-health-*.jsonl`), the injections ledger (`retrieval/injections-*.jsonl`) and the federation retractions outbox (`federation/outbox/retractions-*.jsonl`) used the UTC month. East of UTC, a record from the first hours of a local month went into the previous month's file. `retrieval/` is swept on the local-month cutoff, so those hours lost a month of retention. The outbox isn't swept, but it split one stream across two calendars. All three now use `monthStr`, the injections ledger on the injection's own timestamp. Files already written keep their names.
+- **A flag with no value gets a usage line, not a stack trace (#124).** `backfill-edges`, `cache-health-report`, `normalise-frontmatter`, `refinement-candidates`, `refinement-validate`, `supersede-note` and `vault-search` now print `--flag needs a value` and exit 2, as `sweep-hook-replay` already did.
+- **The vault and plugin-data paths are resolved per call (#128).** `lib/constants.mjs` fixed them when it was first imported. The librarian daemon kept the vault it started with until it restarted, and tests that changed the environment after import still wrote through the first path. The module is gone, and each caller resolves the path where it uses it.
 
 ## v2.4.0
 
