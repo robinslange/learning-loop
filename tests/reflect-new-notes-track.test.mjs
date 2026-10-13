@@ -895,15 +895,19 @@ describe('/reflect Step 4 new-notes tracking handshake', () => {
     });
 
     // A live hook run without CLAUDE_CODE_SESSION_ID in its env: getSessionId()
-    // falls back to the machine-wide id file, which names whichever session
-    // started last. The payload's own session_id is the write's session.
-    it('live post-tool.js keys the marker on the payload session_id, not the machine-wide id', () => {
+    // falls back to the machine-wide session/id, which names whichever session
+    // started last. Both markers are open, so the test sees which key won.
+    function runLiveHook(extraEnv) {
       const ownSid = 'payload-own-sid';
-      const marker = join(scratchDir, `ll-${ownSid}-reflect-new-notes.txt`);
-      const otherMarker = join(scratchDir, 'll-other-concurrent-session-reflect-new-notes.txt');
+      const machineSid = 'machine-wide-sid';
+      const own = join(scratchDir, `ll-${ownSid}-reflect-new-notes.txt`);
+      const machine = join(scratchDir, `ll-${machineSid}-reflect-new-notes.txt`);
+      const sessionDir = join(pluginData, 'session');
+      mkdirSync(sessionDir, { recursive: true });
       mkdirSync(scratchDir, { recursive: true });
-      writeFileSync(marker, '');
-      writeFileSync(otherMarker, '');
+      writeFileSync(join(sessionDir, 'id'), machineSid);
+      writeFileSync(own, '');
+      writeFileSync(machine, '');
 
       const notePath = join(fakeVaultRoot, '0-inbox', 'payload-sid-note.md');
       const hook = join(__dirname, '..', 'plugin', 'hooks', 'post-tool.js');
@@ -911,27 +915,40 @@ describe('/reflect Step 4 new-notes tracking handshake', () => {
         ...process.env,
         VAULT_PATH: fakeVaultRoot,
         CLAUDE_PLUGIN_DATA: pluginData,
+        ...extraEnv,
       };
       delete childEnv.LL_REFLECT_SID;
       delete childEnv.CLAUDE_CODE_SESSION_ID;
-      execFileSync('node', [hook], {
-        input: JSON.stringify({
-          session_id: ownSid,
-          tool_name: 'Write',
-          tool_input: { file_path: notePath, content: 'body\n' },
-        }),
-        encoding: 'utf8',
-        env: childEnv,
-      });
+      try {
+        execFileSync('node', [hook], {
+          input: JSON.stringify({
+            session_id: ownSid,
+            tool_name: 'Write',
+            tool_input: { file_path: notePath, content: 'body\n' },
+          }),
+          encoding: 'utf8',
+          env: childEnv,
+        });
+        return { notePath, own: readFileSync(own, 'utf8'), machine: readFileSync(machine, 'utf8') };
+      } finally {
+        rmSync(own);
+        rmSync(machine);
+        rmSync(sessionDir, { recursive: true, force: true });
+      }
+    }
 
-      assert.equal(readFileSync(marker, 'utf8'), notePath + '\n');
-      assert.equal(
-        readFileSync(otherMarker, 'utf8'),
-        '',
-        "another session's marker must stay empty",
-      );
-      rmSync(marker);
-      rmSync(otherMarker);
+    it('on Claude Code, keys the marker on the payload session_id, not the machine-wide id', () => {
+      const r = runLiveHook({});
+      assert.equal(r.own, r.notePath + '\n');
+      assert.equal(r.machine, '', "the machine-wide session's marker must stay empty");
+    });
+
+    // Codex gives the skill's shell no session id, so /reflect creates its
+    // marker under the machine-wide one; the hook has to use the same key.
+    it('on Codex, keys the marker on the machine-wide id the skill can see', () => {
+      const r = runLiveHook({ PLUGIN_ROOT: join(__dirname, '..', 'plugin') });
+      assert.equal(r.machine, r.notePath + '\n');
+      assert.equal(r.own, '');
     });
   });
 });

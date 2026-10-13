@@ -18,6 +18,7 @@ import { getPluginData, getVaultPath } from '../scripts/lib/config.mjs';
 import { resolveMemoryDir } from '../scripts/lib/memory-paths.mjs';
 import { appendMemoryWrite } from '../scripts/lib/marker-cache.mjs';
 import { env } from '../scripts/lib/env.mjs';
+import { harness, CLAUDE_CODE } from '../scripts/lib/harness.mjs';
 import { logError } from '../scripts/lib/log.mjs';
 
 // Record the CREATION of an auto-memory file against THIS session's write log,
@@ -59,13 +60,15 @@ const ctx = {
   input: raw.tool_input || {},
   response: raw.tool_response,
   raw,
-  // Session id for the reflect-track marker. The replay path
-  // (sweep-hook-replay.mjs, /reflect Step 4.4) sets LL_REFLECT_SID to the
-  // calling reflect session, since sub-agent writes can carry another id.
-  // A live hook keys on its own payload: getSessionId() alone can fall back
-  // to the machine-wide session/id file, which names whichever session
-  // started last.
-  sessionId: env.LL_REFLECT_SID || sessionIdFrom(raw) || null,
+  // Session id for the reflect-track marker: the id the /reflect skill's own
+  // shell resolves, since that shell creates the marker. The replay path
+  // (sweep-hook-replay.mjs, Step 4.4) sets LL_REFLECT_SID to the calling
+  // reflect session. On Claude Code the shell has $CLAUDE_CODE_SESSION_ID,
+  // which is this payload's session_id; this hook's own env may lack it, and
+  // getSessionId() would then fall back to the machine-wide session/id, which
+  // names whichever session started last. Codex gives shells no session id,
+  // so the skill can only resolve that machine-wide id, and the hook matches it.
+  sessionId: env.LL_REFLECT_SID || (harness() === CLAUDE_CODE && sessionIdFrom(raw)) || null,
   vaultRoot: getVaultPath(),
   snapshot: null,
 };

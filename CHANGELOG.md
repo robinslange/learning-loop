@@ -7,7 +7,7 @@ All notable changes to this project are documented here. The format is based on 
 ### Fixed
 
 - **Three more log writers name their monthly file by the local month (#141).** The cache-health statusline log (`retrieval/cache-health-*.jsonl`), the injections ledger (`retrieval/injections-*.jsonl`) and the federation retractions outbox (`federation/outbox/retractions-*.jsonl`) used the UTC month. East of UTC, a record from the first hours of a local month went into the previous month's file. `retrieval/` is swept on the local-month cutoff, so those hours lost a month of retention. The outbox isn't swept, but it split one stream across two calendars. All three now use `monthStr`, the injections ledger on the injection's own timestamp. Files already written keep their names.
-- **A note written in one session no longer lands in another session's /reflect marker (#122).** The post-tool hook keyed the marker with the resolver alone. Without `CLAUDE_CODE_SESSION_ID` in the hook's env, that resolver reads the machine-wide session id, which names whichever session started last. The hook now uses the session id from its own payload.
+- **A note written in one session no longer lands in another session's /reflect marker (#122).** The post-tool hook keyed the marker with the resolver alone. Without `CLAUDE_CODE_SESSION_ID` in the hook's env, that resolver reads the machine-wide session id, which names whichever session started last. On Claude Code the hook now uses the session id from its own payload, which is the id the /reflect shell sees. Codex gives shells no session id, so there the hook keeps the machine-wide id the skill also resolves.
 
 ## v2.4.0
 
