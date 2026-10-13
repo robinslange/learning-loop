@@ -15,7 +15,7 @@
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { relative } from 'node:path';
 import { parseFrontmatter } from './lib/markdown-parse.mjs';
-import { flagValue } from './lib/cli-args.mjs';
+import { flagValue, runCli } from './lib/cli-args.mjs';
 import { isMainModule } from './lib/is-main.mjs';
 import { openEdgeDb, archiveOutgoingEdges, saveDb } from './lib/edges.mjs';
 import { acquireLock, releaseLock } from './lib/file-lock.mjs';
@@ -142,7 +142,7 @@ export async function supersedeNoteFile(
   return result;
 }
 
-if (isMainModule(import.meta.url)) {
+async function main() {
   const args = process.argv.slice(2);
   const filePath = args[0];
   const replacementPath = flagValue(args, '--replacement', null);
@@ -166,3 +166,5 @@ if (isMainModule(import.meta.url)) {
     console.log(JSON.stringify({ ok: true, stamped: false, reason: 'already-invalidated' }));
   }
 }
+
+if (isMainModule(import.meta.url)) await runCli(main);

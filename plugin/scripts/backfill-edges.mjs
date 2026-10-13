@@ -21,7 +21,7 @@ import { DATA_FILES } from './lib/paths.mjs';
 import { openEdgeDb, addEdge, removeOutgoingEdges, saveDb } from './lib/edges.mjs';
 import { acquireLock, releaseLock } from './lib/file-lock.mjs';
 import { classifyNoteEdges, buildVaultIndex, makeResolver } from './lib/edge-classifier.mjs';
-import { hasFlag, flagValue } from './lib/cli-args.mjs';
+import { hasFlag, flagValue, runCli } from './lib/cli-args.mjs';
 import { listVaultNotes } from './lib/vault-walk.mjs';
 
 const VAULT_DIRS = ['0-inbox', '1-fleeting', '2-literature', '3-permanent', '4-projects', '5-maps'];
@@ -208,9 +208,4 @@ async function main() {
   console.log(JSON.stringify({ ...stats, dry_run: dryRun }, null, 2));
 }
 
-if (isMainModule(import.meta.url)) {
-  main().catch((err) => {
-    console.error(err.stack || err.message);
-    process.exit(1);
-  });
-}
+if (isMainModule(import.meta.url)) await runCli(main);
