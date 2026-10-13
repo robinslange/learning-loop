@@ -58,11 +58,11 @@ import { getPluginData } from '../../scripts/lib/config.mjs';
 // reflectScratchDir(), the skill's bash via resolve-paths.mjs --sh
 // (which exports REFLECT_SCRATCH = reflectScratchDir()'s value).
 //
-// Session id keys the file within that dir, via the canonical getSessionId()
-// (the same resolver the skill runs through resolve-paths.mjs --sh, whose
-// SESSION_ID is getSessionId()'s value). An explicit `sessionId` arg still wins
-// for tests/direct callers; getSessionId() returns the 'unknown' sentinel
-// outside a Claude Code session.
+// Session id keys the file within that dir. The skill's bash resolves it with
+// getSessionId() through resolve-paths.mjs --sh, where the harness env var is
+// set. A hook process may lack that var, so the hook passes the payload's own
+// session_id explicitly; getSessionId() is only the fallback for callers that
+// pass none, and returns the 'unknown' sentinel outside a Claude Code session.
 export function reflectScratchDir() {
   const pd = getPluginData();
   return pd ? DATA_PATHS.reflectScratch(pd) : tmpdir();
@@ -84,10 +84,9 @@ export function runReflectTrack(ctx) {
   const rel = vaultRelPath(input.file_path, vaultRoot);
   if (!rel) return;
 
-  // sessionId is honored only as an explicit override (tests/direct callers);
-  // in production it is undefined here so the path resolves from getSessionId()
-  // — the same resolver the skill's bash runs via resolve-paths.mjs --sh
-  // (SESSION_ID).
+  // post-tool.js passes the write's own session (LL_REFLECT_SID on replay,
+  // else the payload's session_id); a direct caller that passes none falls
+  // back to getSessionId().
   const marker = reflectNewNotesPath(sessionId);
   if (!existsSync(marker)) return;
 

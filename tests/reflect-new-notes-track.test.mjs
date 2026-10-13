@@ -893,5 +893,45 @@ describe('/reflect Step 4 new-notes tracking handshake', () => {
       );
       rmSync(marker);
     });
+
+    // A live hook run without CLAUDE_CODE_SESSION_ID in its env: getSessionId()
+    // falls back to the machine-wide id file, which names whichever session
+    // started last. The payload's own session_id is the write's session.
+    it('live post-tool.js keys the marker on the payload session_id, not the machine-wide id', () => {
+      const ownSid = 'payload-own-sid';
+      const marker = join(scratchDir, `ll-${ownSid}-reflect-new-notes.txt`);
+      const otherMarker = join(scratchDir, 'll-other-concurrent-session-reflect-new-notes.txt');
+      mkdirSync(scratchDir, { recursive: true });
+      writeFileSync(marker, '');
+      writeFileSync(otherMarker, '');
+
+      const notePath = join(fakeVaultRoot, '0-inbox', 'payload-sid-note.md');
+      const hook = join(__dirname, '..', 'plugin', 'hooks', 'post-tool.js');
+      const childEnv = {
+        ...process.env,
+        VAULT_PATH: fakeVaultRoot,
+        CLAUDE_PLUGIN_DATA: pluginData,
+      };
+      delete childEnv.LL_REFLECT_SID;
+      delete childEnv.CLAUDE_CODE_SESSION_ID;
+      execFileSync('node', [hook], {
+        input: JSON.stringify({
+          session_id: ownSid,
+          tool_name: 'Write',
+          tool_input: { file_path: notePath, content: 'body\n' },
+        }),
+        encoding: 'utf8',
+        env: childEnv,
+      });
+
+      assert.equal(readFileSync(marker, 'utf8'), notePath + '\n');
+      assert.equal(
+        readFileSync(otherMarker, 'utf8'),
+        '',
+        "another session's marker must stay empty",
+      );
+      rmSync(marker);
+      rmSync(otherMarker);
+    });
   });
 });
