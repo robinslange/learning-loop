@@ -10,7 +10,7 @@ import { logError } from './lib/log.mjs';
 import { writeRetrieval } from './lib/retrieval.mjs';
 import { FEDERATION_PATHS, hasVaultIndex } from './lib/paths.mjs';
 import { wrapRetrieval } from './lib/origin-envelope.mjs';
-import { hasFlag, flagValue } from './lib/cli-args.mjs';
+import { hasFlag, flagValue, UsageError } from './lib/cli-args.mjs';
 
 const FEDERATION_CONFIG = FEDERATION_PATHS.config(PLUGIN_DATA);
 
@@ -353,6 +353,10 @@ try {
       console.log(USAGE);
   }
 } catch (err) {
+  if (err instanceof UsageError) {
+    process.stderr.write(`${err.message}\n`);
+    process.exit(2);
+  }
   process.stderr.write(`Error: ${err.message}\n`);
   process.exit(1);
 }

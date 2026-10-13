@@ -16,7 +16,7 @@ import { join, sep } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { getVaultPath } from './lib/config.mjs';
 import { parseFrontmatter } from './lib/markdown-parse.mjs';
-import { hasFlag, flagValue } from './lib/cli-args.mjs';
+import { hasFlag, flagValue, runCli } from './lib/cli-args.mjs';
 import { isMainModule } from './lib/is-main.mjs';
 import { gitEnv } from './lib/session-ledger.mjs';
 import { classifyVaultPath } from '../hooks/lib/common.mjs';
@@ -385,4 +385,4 @@ function main(args) {
   if (!apply && repaired > 0) console.log(`\nRe-run with --apply to write.`);
 }
 
-if (isMainModule(import.meta.url)) main(process.argv.slice(2));
+if (isMainModule(import.meta.url)) await runCli(() => main(process.argv.slice(2)));

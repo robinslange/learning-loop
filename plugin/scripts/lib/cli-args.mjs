@@ -5,6 +5,22 @@ export class UsageError extends Error {
   name = 'UsageError';
 }
 
+/**
+ * Run a CLI entry point. A UsageError prints its message and exits 2; any
+ * other error propagates.
+ *
+ * @param {() => unknown} main
+ */
+export async function runCli(main) {
+  try {
+    await main();
+  } catch (err) {
+    if (!(err instanceof UsageError)) throw err;
+    process.stderr.write(`${err.message}\n`);
+    process.exit(2);
+  }
+}
+
 export function hasFlag(args, flag) {
   return args.includes(flag);
 }
