@@ -228,7 +228,11 @@ describe('librarian-daemon', () => {
       !log.includes('Cannot read properties of undefined'),
       'must not surface a TypeError from destructuring an error body:\n' + log,
     );
-    assert.match(log, /ollama HTTP 400/, 'must name the HTTP status that actually failed');
+    assert.match(
+      log,
+      /ollama HTTP 400: context length exceeded/,
+      'must name the HTTP status and the reason ollama gave',
+    );
   });
   it('investigateNote reports a 200 that carries no completion', async () => {
     const { investigateNote } = await import(
