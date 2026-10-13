@@ -56,8 +56,9 @@ let _dbPath = null;
 export async function getDb() {
   const path = indexPath();
   if (_dbPath !== path) {
+    const db = await openReadonly(path);
     _db?.close();
-    _db = await openReadonly(path);
+    _db = db;
     _dbPath = path;
   }
   return _db;

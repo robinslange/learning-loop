@@ -7,6 +7,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { binaryFileName } from '../plugin/scripts/lib/paths.mjs';
 
 const SCRIPTS = join(import.meta.dirname, '..', 'plugin', 'scripts');
 
@@ -38,7 +39,7 @@ for (const [script, argv] of Object.entries(DANGLING)) {
       mkdirSync(join(pluginData, 'retrieval'), { recursive: true });
       mkdirSync(join(pluginData, 'bin'), { recursive: true });
       mkdirSync(vault, { recursive: true });
-      writeFileSync(join(pluginData, 'bin', 'll-search'), '', { mode: 0o755 });
+      writeFileSync(join(pluginData, 'bin', binaryFileName()), '', { mode: 0o755 });
 
       const r = spawnSync(process.execPath, [join(SCRIPTS, script), ...argv], {
         input: '',
