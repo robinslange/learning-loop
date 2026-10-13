@@ -31,12 +31,9 @@ Output is a JSON array of `{path, via, level?}`:
 
 If the array is empty, skip to the next step — emit nothing.
 
-Known gap, accept it: the injected record keeps only the session's most recent
-injection burst (the dedupe state is pruned on write), so earlier injections
-in the same session may be missing. The durable injections ledger captures the
-burst at the time of the report run, but any burst that came and went before a
-sync ran is gone permanently. Classify what the list gives you; do not
-reconstruct paths from memory.
+Injected notes come from the live injection records, written as each prompt is
+answered, so the list covers the whole session. Classify what the list gives
+you; do not reconstruct paths from memory.
 
 ## 4.7.b: Classify each note as used or ignored
 

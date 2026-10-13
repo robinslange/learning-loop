@@ -12,7 +12,7 @@
 // runs over the same files produce byte-identical output.
 
 import { DATA_PATHS } from '../../lib/paths.mjs';
-import { readShadowLiveInjections } from '../../lib/retrieval-usage.mjs';
+import { readInjectedEvents } from '../../lib/retrieval-usage.mjs';
 import {
   readRecords,
   monthlyFiles,
@@ -48,8 +48,9 @@ function readStream(pluginData, prefix) {
 
 /**
  * Reduce the three retrieval streams (queries, reads, shadow-injection) to
- * metric records: counts by command, counts by via/level for the notes live
- * shadow-injection records put in front of the model, counts by federated (queries), a result_count
+ * metric records: counts by command, counts by via/level for injected notes
+ * (readInjectedEvents, shared with the usage report), counts by federated
+ * (queries), a result_count
  * histogram across the query-shaped streams, and a latency_ms histogram
  * from shadow-injection, the only stream that records a duration today.
  *
@@ -65,7 +66,7 @@ function readStream(pluginData, prefix) {
 export function reduceRetrieval({ pluginData, timeUnixMs }) {
   const queries = readStream(pluginData, 'queries-');
   const commandRecords = STREAMS.flatMap(({ prefix }) => readStream(pluginData, prefix));
-  const injections = readShadowLiveInjections(pluginData);
+  const injections = readInjectedEvents(pluginData);
   const startTimeUnixMs = earliestTimestamp([...commandRecords, ...injections], timeUnixMs);
 
   const metrics = [
