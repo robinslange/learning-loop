@@ -126,9 +126,9 @@ export async function run(ctx) {
   }
 
   // TTL sweeps. One pass, five targets:
-  //   (a) retrieval/session-dedupe + markers/ entries older than 7 days
-  //       (memory-writes-<sid> accumulates one file per session, as did the
-  //       now-removed memory-snapshot-<sid> — both reaped here);
+  //   (a) retrieval/session-dedupe, markers/ and fetch-budget/ entries older
+  //       than 7 days (memory-writes-<sid> and fetch-budget/<sid>/ accumulate
+  //       one per session, as did the now-removed memory-snapshot-<sid>);
   //   (b) edges.db.<pid>.tmp orphans (crash between saveDb's write and
   //       rename) older than 1 hour;
   //   (c) tmp session-label files older than 7 days. NEVER the live
@@ -152,7 +152,9 @@ export async function run(ctx) {
       const full = join(dir, f);
       try {
         const st = lstatSync(full);
-        if (st.isFile() && st.mtimeMs < cutoffMs) rmSync(full, { force: true });
+        if (!st.isSymbolicLink() && st.mtimeMs < cutoffMs) {
+          rmSync(full, { recursive: true, force: true });
+        }
       } catch (err) {
         if (err?.code !== 'ENOENT') logError('session-start.vault-snapshot.ttlSweep', err);
       }
@@ -219,6 +221,7 @@ export async function run(ctx) {
     if (ctx.pluginData) {
       sweepDir(DATA_PATHS.retrievalSessionDedupe(ctx.pluginData), () => true, weekCutoff);
       sweepDir(DATA_PATHS.markers(ctx.pluginData), () => true, weekCutoff);
+      sweepDir(DATA_PATHS.fetchBudget(ctx.pluginData), () => true, weekCutoff);
       sweepDir(
         ctx.pluginData,
         (f) => /^edges\.db\..+\.tmp$/.test(f),
