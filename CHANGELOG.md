@@ -6,6 +6,7 @@ All notable changes to this project are documented here. The format is based on 
 
 ### Fixed
 
+- **A project with no memory dir no longer logs an error from the dream gate (#150).** `dream-gate.statMemoryDir` fired on every session in a cwd that had never written a memory, which is the normal state for a short-lived git worktree. On one install it was 84 of 218 errors in a month and kept the error-log health check red. Only a missing dir (`ENOENT`) is quiet now; any other `stat` failure still logs.
 - **Three more log writers name their monthly file by the local month (#141).** The cache-health statusline log (`retrieval/cache-health-*.jsonl`), the injections ledger (`retrieval/injections-*.jsonl`) and the federation retractions outbox (`federation/outbox/retractions-*.jsonl`) used the UTC month. East of UTC, a record from the first hours of a local month went into the previous month's file. `retrieval/` is swept on the local-month cutoff, so those hours lost a month of retention. The outbox isn't swept, but it split one stream across two calendars. All three now use `monthStr`, the injections ledger on the injection's own timestamp. Files already written keep their names.
 
 ## v2.4.0

@@ -7,6 +7,7 @@ import {
   rmSync,
   existsSync,
   readFileSync,
+  readdirSync,
   utimesSync,
   mkdtempSync,
 } from 'node:fs';
@@ -103,6 +104,26 @@ describe('dream-gate', () => {
     }
 
     assert.equal(run(), null);
+  });
+
+  it('exits quietly, without logging an error, when the project has no memory dir', () => {
+    writeFileSync(DREAM_MARKER, String(Math.floor(Date.now() / 1000) - 90000));
+    rmSync(memoryDir, { recursive: true, force: true });
+    rmSync(join(PLUGIN_DATA, 'logs'), { recursive: true, force: true });
+
+    try {
+      assert.equal(run(), null);
+    } finally {
+      mkdirSync(memoryDir, { recursive: true });
+    }
+
+    const logDir = join(PLUGIN_DATA, 'logs');
+    const logged = existsSync(logDir)
+      ? readdirSync(logDir)
+          .map((f) => readFileSync(join(logDir, f), 'utf8'))
+          .join('')
+      : '';
+    assert.ok(!logged.includes('dream-gate.statMemoryDir'), logged);
   });
 
   it('caches a nudge when both gates pass (24h elapsed + 5+ modified files)', () => {
