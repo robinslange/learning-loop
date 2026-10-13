@@ -11,11 +11,13 @@ import { delimiter, join } from 'node:path';
 import { checkEdgesBackfill, runFullChecks } from '../plugin/scripts/health-check.mjs';
 
 // runFullChecks probes `claude --version` on PATH. A stub first on PATH keeps
-// these tests off whatever Claude CLI the machine has installed.
+// these tests off whatever Claude CLI the machine has installed. Windows runs
+// the probe through cmd.exe, which only finds a name with a PATHEXT extension.
 async function withStubClaude(dir, fn) {
   const bin = join(dir, 'stub-bin');
   mkdirSync(bin, { recursive: true });
   writeFileSync(join(bin, 'claude'), '#!/bin/sh\necho "9.9.9 (Claude Code)"\n', { mode: 0o755 });
+  writeFileSync(join(bin, 'claude.cmd'), '@echo 9.9.9 (Claude Code)\r\n');
   const saved = process.env.PATH;
   process.env.PATH = `${bin}${delimiter}${saved}`;
   try {
@@ -70,9 +72,7 @@ test('runFullChecks includes the edges-backfill check with collected inputs', as
     const result = await withStubClaude(dir, () =>
       runFullChecks({ pluginData, vaultRoot, home: dir }),
     );
-    if (process.platform !== 'win32') {
-      assert.equal(result.checks.find((c) => c.id === 'claude-version').detail, '9.9.9');
-    }
+    assert.equal(result.checks.find((c) => c.id === 'claude-version').detail, '9.9.9');
     const check = result.checks.find((c) => c.id === 'edges-backfill');
     assert.ok(check, 'edges-backfill check missing from full run');
     // one note, no edges.db -> the backfill nudge fires
