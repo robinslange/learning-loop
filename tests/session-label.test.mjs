@@ -725,19 +725,21 @@ describe(
       }
     });
 
-    // retrieval-usage.mjs joins the dedupe-state entry and the
-    // gate-pass-payload record for the same live injection on (session_id,
-    // path, ts). Two independent `new Date()` calls a few statements apart
-    // give them different ts, so one live injection reads as two surfaced
-    // events. Both writes must share one ts.
-    it('the dedupe-state entry and the gate-pass-payload record share one ts for the same injection', () => {
-      const base = mkdtempSync(join(tmpdir(), 'll-live-ts-'));
+    // The usage report reads live injections off the gate-pass-payload record
+    // alone, so the record must name the prompt's own session. Without
+    // CLAUDE_CODE_SESSION_ID in the hook's env, writeRetrieval's resolver falls
+    // back to the machine-wide session/id file, which names whichever session
+    // started last.
+    it('the gate-pass-payload record carries the payload session_id, not the machine-wide id', () => {
+      const base = mkdtempSync(join(tmpdir(), 'll-live-sid-'));
       try {
         const vault = join(base, 'vault');
         const pluginData = join(base, 'plugin-data');
         const stubBin = join(pluginData, 'bin');
         mkdirSync(join(vault, 'notes'), { recursive: true });
         mkdirSync(stubBin, { recursive: true });
+        mkdirSync(join(pluginData, 'session'), { recursive: true });
+        writeFileSync(join(pluginData, 'session', 'id'), 'another-session');
 
         writeFileSync(
           join(vault, 'notes', 'delta.md'),
@@ -770,11 +772,6 @@ describe(
           },
         );
 
-        const statePath = join(pluginData, 'retrieval', 'session-dedupe', `${sid}.json`);
-        const state = JSON.parse(readFileSync(statePath, 'utf-8'));
-        const dedupeEntry = state.find((e) => e.path === 'notes/delta.md');
-        assert.ok(dedupeEntry, 'dedupe state must record the injected note');
-
         const month = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
         const logPath = join(pluginData, 'retrieval', `shadow-injection-${month}.jsonl`);
         const records = readFileSync(logPath, 'utf8')
@@ -784,11 +781,7 @@ describe(
         const pass = records.find((r) => r.gate?.passed === true);
         assert.ok(pass, 'a gate-pass record must be logged in live mode');
 
-        assert.equal(
-          dedupeEntry.ts,
-          pass.ts,
-          'the dedupe-state entry and the shadow record must carry the same ts, or the usage-report join double-counts the injection',
-        );
+        assert.equal(pass.session_id, sid);
       } finally {
         rmSync(base, { recursive: true, force: true });
       }

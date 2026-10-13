@@ -259,6 +259,7 @@ async function inject({ session_id, prompt, messages, label }) {
   function logShadow(record) {
     try {
       emitRetrieval('shadow-injection', {
+        session_id,
         session_label: label,
         prompt: scrubForLog(prompt, HookConfig.PROMPT_SLICE_CHARS),
         prompt_length: (prompt || '').length,
@@ -384,12 +385,6 @@ async function inject({ session_id, prompt, messages, label }) {
 
   const scrubbedContext = scrubSecrets(injection.additionalContext);
 
-  // Shared by both writes below: retrieval-usage.mjs joins the dedupe-state
-  // entry and this gate-pass-payload record on (session_id, path, ts), so
-  // two independent `new Date()` calls a few ms apart would read one live
-  // injection as two surfaced events.
-  const injectedAt = new Date().toISOString();
-
   // One record shape for both modes — live injections stay visible to
   // review-shadow.mjs, so gate recalibration keeps its data after go-live.
   if (mode === 'live') {
@@ -400,7 +395,6 @@ async function inject({ session_id, prompt, messages, label }) {
   logShadow({
     type: 'gate-pass-payload',
     mode,
-    ts: injectedAt,
     gate: {
       passed: true,
       vault_top_score: vaultTop,
@@ -419,7 +413,7 @@ async function inject({ session_id, prompt, messages, label }) {
     dedupe_filtered_count: dedupeFilteredCount,
     would_inject: scrubbedContext,
   });
-  persistDedupeState(session_id, injection.injectedVault, injectedAt);
+  persistDedupeState(session_id, injection.injectedVault, new Date().toISOString());
 }
 
 if (isMainModule(import.meta.url)) {
