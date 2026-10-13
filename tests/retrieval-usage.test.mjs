@@ -177,10 +177,10 @@ test('sessionSurfaced and usageReport pick up a live injection recorded only on 
   }
 });
 
-// The injections-*.jsonl ledger written before #121 copied each live
-// injection out of the session-dedupe state, so the same injection is also on
-// shadow-injection-*.jsonl. Until those ledger files age out, one live
-// injection on both must count once.
+// The injections-*.jsonl ledger, no longer written, copied session-dedupe
+// state: each live injection, which a gate-pass record also holds, and in
+// shadow mode notes that never reached the model. Those files are still read
+// until retention removes them.
 const ledgerRow = (ts, path = '3-permanent/dup.md') => ({
   ts,
   session_id: 's1',
@@ -189,57 +189,64 @@ const ledgerRow = (ts, path = '3-permanent/dup.md') => ({
   level: 'body',
 });
 
-test('loadSurfacedEvents collapses a live injection recorded on both the ledger and shadow-injection when ts matches', () => {
-  const sharedTs = daysAgo(1);
+const gatePass = (ts, mode, injected) => ({
+  ts,
+  session_id: 's1',
+  type: 'gate-pass-payload',
+  mode,
+  payload: { injected_paths: injected },
+});
+
+test("a ledger row inside the gate-pass records' span is not counted again", () => {
+  const base = NOW - 86_400_000;
   const pd = makePluginData({
-    ledger: [ledgerRow(sharedTs)],
+    ledger: [ledgerRow(new Date(base + 4).toISOString())],
     shadowInjections: [
-      {
-        ts: sharedTs,
-        session_id: 's1',
-        type: 'gate-pass-payload',
-        mode: 'live',
-        payload: {
-          injected_paths: [{ path: '3-permanent/dup.md', level: 'body' }],
-        },
-      },
+      gatePass(new Date(base).toISOString(), 'live', [
+        { path: '3-permanent/dup.md', level: 'body' },
+      ]),
     ],
   });
   try {
-    const surfaced = sessionSurfaced(pd, 's1');
     assert.deepStrictEqual(
-      surfaced.map((n) => n.path),
+      sessionSurfaced(pd, 's1').map((n) => n.path),
       ['3-permanent/dup.md'],
     );
-
     const r = usageReport(pd, { now: NOW, minSurfaced: 1 });
     const entry = r.surfaced_unevaluated.find((n) => n.path === '3-permanent/dup.md');
-    assert.ok(entry, 'note must be surfaced at all');
     assert.strictEqual(entry.surfaced, 1, 'one live injection is one surfaced event, not two');
   } finally {
     rmSync(pd, { recursive: true, force: true });
   }
 });
 
-// Rows written before the writers shared a timestamp sit a few ms apart and
-// are never pruned, so the join cannot depend on the ts matching exactly.
-test('loadSurfacedEvents collapses a pre-upgrade live injection whose two records are ms apart', () => {
-  const base = NOW - 86_400_000;
-  const liveRecord = (ts) => ({
-    ts,
-    session_id: 's1',
-    type: 'gate-pass-payload',
-    mode: 'live',
-    payload: { injected_paths: [{ path: '3-permanent/dup.md', level: 'body' }] },
-  });
+test('a ledger row copied from a shadow-mode prompt never counts as injected', () => {
+  const ts = daysAgo(1);
   const pd = makePluginData({
-    ledger: [ledgerRow(new Date(base).toISOString())],
-    shadowInjections: [liveRecord(new Date(base + 4).toISOString())],
+    ledger: [ledgerRow(ts, '3-permanent/never-reached-model.md')],
+    shadowInjections: [
+      gatePass(ts, 'shadow', [{ path: '3-permanent/never-reached-model.md', level: 'body' }]),
+    ],
   });
   try {
+    assert.deepStrictEqual(sessionSurfaced(pd, 's1'), []);
     const r = usageReport(pd, { now: NOW, minSurfaced: 1 });
-    const entry = r.surfaced_unevaluated.find((n) => n.path === '3-permanent/dup.md');
-    assert.strictEqual(entry.surfaced, 1, 'one injection seen by two writers is one event');
+    assert.deepStrictEqual(r.surfaced_unevaluated, []);
+  } finally {
+    rmSync(pd, { recursive: true, force: true });
+  }
+});
+
+test('a ledger row from before the first gate-pass record still counts', () => {
+  const pd = makePluginData({
+    ledger: [ledgerRow(daysAgo(5), '3-permanent/older.md')],
+    shadowInjections: [gatePass(daysAgo(1), 'live', [{ path: '3-permanent/newer.md' }])],
+  });
+  try {
+    assert.deepStrictEqual(
+      sessionSurfaced(pd, 's1').map((n) => n.path),
+      ['3-permanent/newer.md', '3-permanent/older.md'],
+    );
   } finally {
     rmSync(pd, { recursive: true, force: true });
   }
@@ -274,6 +281,31 @@ test('loadSurfacedEvents counts a re-injection after the dedupe window as a seco
   try {
     const r = usageReport(pd, { now: NOW, minSurfaced: 1 });
     const entry = r.surfaced_unevaluated.find((n) => n.path === '3-permanent/again.md');
+    assert.strictEqual(entry.surfaced, 2);
+  } finally {
+    rmSync(pd, { recursive: true, force: true });
+  }
+});
+
+// session-label re-injects a note it gave as a pointer as its body on the next
+// prompt, inside the dedupe window: two injections, and the body reached the
+// model.
+test('a pointer injection upgraded to body on the next prompt counts twice, at body level', () => {
+  const base = NOW - 86_400_000;
+  const pd = makePluginData({
+    shadowInjections: [
+      gatePass(new Date(base).toISOString(), 'live', [
+        { path: '3-permanent/a.md', level: 'pointer' },
+      ]),
+      gatePass(new Date(base + 60_000).toISOString(), 'live', [
+        { path: '3-permanent/a.md', level: 'body' },
+      ]),
+    ],
+  });
+  try {
+    assert.strictEqual(sessionSurfaced(pd, 's1')[0].level, 'body');
+    const r = usageReport(pd, { now: NOW, minSurfaced: 1 });
+    const entry = r.surfaced_unevaluated.find((n) => n.path === '3-permanent/a.md');
     assert.strictEqual(entry.surfaced, 2);
   } finally {
     rmSync(pd, { recursive: true, force: true });

@@ -46,7 +46,6 @@
 
 import { DATA_PATHS } from './paths.mjs';
 import { readJsonlDir } from './jsonl.mjs';
-import { HookConfig } from './hook-config.mjs';
 
 const DAY_MS = 86_400_000;
 
@@ -74,20 +73,33 @@ function readLedgerInjections(pluginData) {
   return out;
 }
 
-// shadow-injection-*.jsonl is written on EVERY prompt, shadow mode or live. A
-// mode:'live' gate-pass-payload record is exactly what session-label.js just
-// put in front of the model (buildInjection's post-dedupe injectedVault), so
-// it is a durable, complete record of live injections from the moment they
-// happen. A mode:'shadow' record never reached the model and must be
-// excluded, or a shadow-only session would read as surfaced.
-export function readShadowLiveInjections(pluginData) {
+/**
+ * Every injection that reached the model: { path, ts, session_id, via:
+ * 'injected', level }.
+ *
+ * shadow-injection-*.jsonl holds a gate-pass-payload record for every prompt
+ * that passed the gate, shadow mode or live, and a mode:'live' record lists
+ * exactly what session-label put in front of the model. The old
+ * injections-*.jsonl ledger copied session-dedupe state, which session-label
+ * also writes in shadow mode, so from the first gate-pass record on the
+ * ledger adds only duplicates and notes that never reached the model. It is
+ * read only for the time before that, until retention removes it.
+ *
+ * @param {string} pluginData
+ * @returns {object[]}
+ */
+export function readInjectedEvents(pluginData) {
   const retrievalDir = DATA_PATHS.retrieval(pluginData);
-  const out = [];
+  const live = [];
+  let coveredFrom = Infinity;
   for (const rec of readJsonlDir(retrievalDir, 'shadow-injection-')) {
-    if (rec?.mode !== 'live' || rec?.type !== 'gate-pass-payload') continue;
-    for (const p of rec.payload?.injected_paths || []) {
+    if (rec?.type !== 'gate-pass-payload' || !Array.isArray(rec.payload?.injected_paths)) continue;
+    const t = Date.parse(rec.ts);
+    if (t < coveredFrom) coveredFrom = t;
+    if (rec.mode !== 'live') continue;
+    for (const p of rec.payload.injected_paths) {
       if (!isVaultNotePath(p?.path)) continue;
-      out.push({
+      live.push({
         path: p.path,
         ts: rec.ts,
         session_id: rec.session_id,
@@ -96,7 +108,8 @@ export function readShadowLiveInjections(pluginData) {
       });
     }
   }
-  return out;
+  const ledger = readLedgerInjections(pluginData).filter((e) => Date.parse(e.ts) < coveredFrom);
+  return [...ledger, ...live];
 }
 
 /**
@@ -104,8 +117,7 @@ export function readShadowLiveInjections(pluginData) {
  * (note, event): { path, ts, session_id, via: 'retrieved'|'injected', level? }.
  * Internal pipeline queries (reflect-scan) are excluded, since they would let
  * /reflect manufacture surfacing events for whatever resembles new captures.
- * Injected events merge live-mode shadow-injection records with the old
- * ledger, deduplicated per (session, path) within the hook's dedupe window.
+ * Injected events come from readInjectedEvents.
  */
 export function loadSurfacedEvents(pluginData) {
   if (!pluginData) return [];
@@ -120,22 +132,7 @@ export function loadSurfacedEvents(pluginData) {
     }
   }
 
-  // The hook never re-injects a path inside DEDUPE_WINDOW_MS of the same
-  // session, so two injected records for one (session, path) closer than that
-  // are one injection seen by two writers: the old ledger copied each live
-  // injection that shadow-injection also holds, sometimes a few ms apart.
-  const lastInjected = new Map();
-  const injectedSources = [
-    ...readLedgerInjections(pluginData),
-    ...readShadowLiveInjections(pluginData),
-  ].sort((a, b) => Date.parse(a.ts) - Date.parse(b.ts));
-  for (const e of injectedSources) {
-    const key = `${e.session_id}\u0000${e.path}`;
-    const t = Date.parse(e.ts);
-    if (t - lastInjected.get(key) < HookConfig.DEDUPE_WINDOW_MS) continue;
-    lastInjected.set(key, t);
-    events.push(e);
-  }
+  events.push(...readInjectedEvents(pluginData));
 
   return events;
 }
