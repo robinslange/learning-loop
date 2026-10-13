@@ -7,6 +7,7 @@ All notable changes to this project are documented here. The format is based on 
 ### Fixed
 
 - **Three more log writers name their monthly file by the local month (#141).** The cache-health statusline log (`retrieval/cache-health-*.jsonl`), the injections ledger (`retrieval/injections-*.jsonl`) and the federation retractions outbox (`federation/outbox/retractions-*.jsonl`) used the UTC month. East of UTC, a record from the first hours of a local month went into the previous month's file. `retrieval/` is swept on the local-month cutoff, so those hours lost a month of retention. The outbox isn't swept, but it split one stream across two calendars. All three now use `monthStr`, the injections ledger on the injection's own timestamp. Files already written keep their names.
+- **`fetch-budget/` is swept (#123).** The source gateway leaves a `fetch-budget/<session>/` directory for every session that fetches, and older installs also left `<session>.count` files. Nothing removed either. The daily sweep now deletes both once they are 7 days old, the same TTL as the other per-session state.
 
 ## v2.4.0
 
