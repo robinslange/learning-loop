@@ -90,7 +90,7 @@ if (!memoryDir) {
 try {
   statSync(memoryDir);
 } catch (err) {
-  logError('dream-gate.statMemoryDir', err);
+  if (err.code !== 'ENOENT') logError('dream-gate.statMemoryDir', err);
   writeMarkerIfNeeded(null);
   process.exit(0);
 }
