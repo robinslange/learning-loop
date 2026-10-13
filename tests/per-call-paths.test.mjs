@@ -8,7 +8,7 @@
 
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -33,7 +33,11 @@ function useEnv({ vault, pluginData }) {
 
 useEnv(A);
 const { mtimeOf } = await import('../plugin/scripts/librarian/daemon-helpers.mjs');
-const { vaultFile, indexPath } = await import('../plugin/scripts/librarian/tools/shared.mjs');
+const { vaultFile, indexPath, getDb } =
+  await import('../plugin/scripts/librarian/tools/shared.mjs');
+const { loadLibrarianConfig } = await import('../plugin/scripts/librarian/config.mjs');
+const { resetConfigCache } = await import('../plugin/scripts/lib/config.mjs');
+const { initSQL } = await import('../plugin/scripts/lib/sqljs.mjs');
 const { supersedeNoteFile } = await import('../plugin/scripts/supersede-note.mjs');
 const { openEdgeDb, addEdge, saveDb, getEdgesFrom } =
   await import('../plugin/scripts/lib/edges.mjs');
@@ -67,4 +71,40 @@ test('supersedeNoteFile archives edges in the plugin data it is called under', a
   const rows = getEdgesFrom(reopened, 'old-note.md');
   reopened.close();
   assert.equal(rows[0].source_graph, 'archived');
+});
+
+// The daemon reloads its config on each idle pass; a vault re-pointed in
+// config.json then reaches every per-call lookup.
+test('librarian paths follow a vault re-pointed in config.json once the config reloads', () => {
+  useEnv(A);
+  delete process.env.VAULT_PATH;
+  resetConfigCache();
+  const cfgFile = join(A.pluginData, 'config.json');
+  writeFileSync(cfgFile, JSON.stringify({ vault_path: A.vault }));
+  loadLibrarianConfig();
+  assert.equal(indexPath(), join(A.vault, '.vault-search', 'vault-index.db'));
+
+  writeFileSync(cfgFile, JSON.stringify({ vault_path: B.vault }));
+  const later = new Date(Date.now() + 5000);
+  utimesSync(cfgFile, later, later);
+  loadLibrarianConfig();
+  assert.equal(indexPath(), join(B.vault, '.vault-search', 'vault-index.db'));
+});
+
+test('getDb keeps its open database when the next vault has no index to open', async () => {
+  useEnv(A);
+  const SQL = await initSQL();
+  const fresh = new SQL.Database();
+  fresh.run('CREATE TABLE t (x)');
+  mkdirSync(join(A.vault, '.vault-search'), { recursive: true });
+  writeFileSync(indexPath(), Buffer.from(fresh.export()));
+  fresh.close();
+  await getDb();
+
+  useEnv(B);
+  await assert.rejects(getDb());
+
+  useEnv(A);
+  const db = await getDb();
+  assert.doesNotThrow(() => db.exec('SELECT 1'));
 });

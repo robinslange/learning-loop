@@ -206,7 +206,8 @@ export async function investigateNote(notePath, task, cfg, db, log) {
  * }} [opts]
  */
 export async function runDaemon({ signal, configOverride, deps } = {}) {
-  const cfg = configOverride || loadLibrarianConfig();
+  const loadConfig = () => configOverride || loadLibrarianConfig();
+  let cfg = loadConfig();
   if (!cfg.enabled) {
     info('daemon', 'librarian disabled in config');
     return;
@@ -243,6 +244,10 @@ export async function runDaemon({ signal, configOverride, deps } = {}) {
   }
 
   const idle = async () => {
+    // loadLibrarianConfig rereads config.json when its mtime moves and resets
+    // the cache getVaultPath() reads, so a re-pointed vault or a new queue cap
+    // applies from here without a restart.
+    cfg = loadConfig();
     expireStaleItems(getVaultPath());
     trimToCap(cfg.queueCap);
     await sleep(IDLE_MS, signal);
