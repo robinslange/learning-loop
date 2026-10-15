@@ -44,9 +44,9 @@ impl Default for PrfParams {
 
 /// Configuration for a SQLite FTS5 table and its associated content table.
 ///
-/// `#[non_exhaustive]` -- new fields may be added in patch releases. Use the
-/// `VAULT_FTS` constant rather than constructing this directly in downstream
-/// code.
+/// `#[non_exhaustive]` -- new fields may be added in patch releases, so
+/// downstream crates cannot use a struct literal. Use the `VAULT_FTS` constant
+/// or build a custom schema's config with [`FtsConfig::new`].
 #[non_exhaustive]
 pub struct FtsConfig {
     /// Name of the FTS5 virtual table (e.g. `"notes_fts"`).
@@ -61,6 +61,35 @@ pub struct FtsConfig {
     pub path_column: &'static str,
     /// BM25 column weights string as accepted by the SQLite `bm25()` function.
     pub bm25_weights: &'static str,
+}
+
+impl FtsConfig {
+    /// Build a config for a custom FTS5 schema. `const`, so it can initialise a
+    /// `const` or `static` in downstream crates.
+    ///
+    /// The generated query is
+    /// `SELECT nc.{id_column}, n.{path_column}, bm25({fts_table}, {bm25_weights})
+    /// FROM {fts_table} JOIN {content_table} nc ON nc.{id_column} = {fts_table}.rowid
+    /// JOIN {items_table} n ON n.{id_column} = nc.{id_column}
+    /// WHERE {fts_table} MATCH ?`, so `bm25_weights` needs one weight per
+    /// column of the FTS5 table.
+    pub const fn new(
+        fts_table: &'static str,
+        content_table: &'static str,
+        items_table: &'static str,
+        id_column: &'static str,
+        path_column: &'static str,
+        bm25_weights: &'static str,
+    ) -> Self {
+        FtsConfig {
+            fts_table,
+            content_table,
+            items_table,
+            id_column,
+            path_column,
+            bm25_weights,
+        }
+    }
 }
 
 /// Default FTS configuration targeting the `notes_fts` / `notes` schema used
