@@ -1,9 +1,9 @@
 #[cfg(feature = "research")]
 pub mod benchmark;
-pub mod bge_small;
 pub mod loader;
 
 pub use ll_core::embed::{EmbeddingProvider, ModelConfig};
+pub use ll_core::models::bge_small;
 
 use serde::{Deserialize, Serialize};
 

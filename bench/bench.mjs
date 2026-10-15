@@ -322,7 +322,7 @@ const QUALITY_BASELINE_PATH = join(BASELINES_DIR, 'quality.json');
 // ---------------------------------------------------------------------------
 
 /**
- * Extract the pinned HF model revision from loader.rs.
+ * Extract the pinned HF model revision from ll-core's models/bge_small.rs.
  *
  * The revision is the authoritative single source of truth for which model
  * bytes were used to compute the stored quality baseline. CI runners fetch
@@ -330,7 +330,7 @@ const QUALITY_BASELINE_PATH = join(BASELINES_DIR, 'quality.json');
  * and warn when the local cache predates the pin.
  */
 function readModelRevision() {
-  const loaderPath = join(NATIVE_DIR, 'crates', 'll-search', 'src', 'model', 'loader.rs');
+  const loaderPath = join(NATIVE_DIR, 'crates', 'll-core', 'src', 'models', 'bge_small.rs');
   try {
     const src = readFileSync(loaderPath, 'utf8');
     const m = src.match(/BGE_SMALL_REVISION:\s*&str\s*=\s*"([0-9a-f]{40})"/);

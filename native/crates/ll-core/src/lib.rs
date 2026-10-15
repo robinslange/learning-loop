@@ -6,6 +6,7 @@
 //! - **`store`** -- `EmbeddingStore`: an in-memory index with `Arc<[f32]>` accessors.
 //! - **`scoring`** -- BM25/FTS query helpers, RRF fusion, Rocchio PRF.
 //! - **`graph`** -- Personalized PageRank over a wikilink graph.
+//! - **`models`** -- bundled embedding models; `models::bge_small::load()` behind the `bge` feature.
 //! - **`rerank`** -- Cross-encoder reranking with a bundled ONNX model.
 //! - **`error`** -- Typed `Error` enum; re-exported as `ll_core::Error` / `ll_core::Result`.
 //! - **`config`** -- Shared numeric constants; re-exported as `ll_core::TOP_K` etc.
@@ -23,6 +24,9 @@ pub mod dylib;
 pub mod embed;
 pub mod error;
 pub mod graph;
+/// Concrete embedding models (feature `bge`).
+#[cfg(feature = "bge")]
+pub mod models;
 pub mod rerank;
 pub mod scoring;
 pub mod store;

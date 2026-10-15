@@ -36,12 +36,6 @@ fn crate_root() -> PathBuf {
 /// The implementation itself.
 const THE_ONE: &str = "src/sync/atomic_file.rs";
 
-/// The one real exception. `download` renames a file **curl** wrote, so there
-/// are no bytes in hand to pass to `write_bytes` — and the payload is a ~100 MB
-/// model, which is the reason not to put them in hand. A different shape, not
-/// a second copy of this one.
-const CURL_WRITES_IT: &str = "src/model/loader.rs";
-
 /// Every `.rs` file under `src/`. Test modules included: a fixture that stages
 /// its own file is a second implementation in the place nobody looks.
 fn library_sources() -> Vec<PathBuf> {
@@ -80,7 +74,7 @@ fn the_sweep_reaches_the_crate_and_the_exception_still_needs_its_exemption() {
     assert!(files.len() > 30, "swept only {} files", files.len());
 
     let names: Vec<String> = files.iter().map(|p| relative(p)).collect();
-    for expected in [THE_ONE, CURL_WRITES_IT, "src/main.rs", "src/sync/config.rs"] {
+    for expected in [THE_ONE, "src/main.rs", "src/sync/config.rs"] {
         assert!(
             names.iter().any(|n| n == expected),
             "the sweep must reach {expected}"
@@ -89,7 +83,7 @@ fn the_sweep_reaches_the_crate_and_the_exception_still_needs_its_exemption() {
 
     // An exemption for a file that no longer needs one is not cover, it is a
     // hole with a comment over it.
-    for allowed in [THE_ONE, CURL_WRITES_IT] {
+    for allowed in [THE_ONE] {
         let text = std::fs::read_to_string(crate_root().join(allowed)).unwrap();
         assert!(
             text.lines().any(names_a_staging_file),
@@ -118,7 +112,7 @@ fn no_file_but_atomic_file_names_a_staging_file() {
     let mut offenders = Vec::new();
     for path in library_sources() {
         let rel = relative(&path);
-        if rel == THE_ONE || rel == CURL_WRITES_IT {
+        if rel == THE_ONE {
             continue;
         }
         let text = std::fs::read_to_string(&path).unwrap();

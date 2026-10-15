@@ -11,6 +11,12 @@ readme = "README.md"
 keywords = ["search", "embeddings", "rag", "onnx", "sqlite"]
 categories = ["database", "science"]
 
+[features]
+# Concrete bge-small-en-v1.5 loader (`models::bge_small`): pinned download with
+# SHA-256 verification plus the ONNX provider. ort and tokenizers are already
+# non-optional, so this gates code only.
+bge = []
+
 [build-dependencies]
 sha2 = "0.10"
 hex = "0.4"

@@ -1,5 +1,5 @@
 {
-  "$comment": "Provenance + integrity manifest for the ONNX models the search binary fetches and embeds. SHA-256 hashes are enforced at build time (reranker, ll-core/build.rs) and runtime (bge-small, model/loader.rs). To upgrade a model, bump its revision, recompute the sha256, and re-run the relevant quality eval before committing.",
+  "$comment": "Provenance + integrity manifest for the ONNX models the search binary fetches and embeds. SHA-256 hashes are enforced at build time (reranker, ll-core/build.rs) and runtime (bge-small, ll-core/src/models/bge_small.rs). To upgrade a model, bump its revision, recompute the sha256, and re-run the relevant quality eval before committing.",
   "models": [
     {
       "id": "bge-small-en-v1.5",
@@ -9,7 +9,7 @@
       "license": "MIT",
       "upstream": "BAAI/bge-small-en-v1.5 (ONNX export by Xenova)",
       "fetch": "runtime",
-      "verified_in": "native/crates/ll-search/src/model/loader.rs",
+      "verified_in": "native/crates/ll-core/src/models/bge_small.rs",
       "artifacts": {
         "model_quantized.onnx": "6c9c6101a956d62dfb5e7190c538226c0c5bb9cb27b651234b6df063ee7dbfe4",
         "tokenizer.json": "d241a60d5e8f04cc1b2b3e9ef7a4921b27bf526d9f6050ab90f9267a1f9e5c66"

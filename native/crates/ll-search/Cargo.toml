@@ -12,7 +12,7 @@ license = "Apache-2.0"
 research = []
 
 [dependencies]
-ll-core = { path = "../ll-core" }
+ll-core = { path = "../ll-core", features = ["bge"] }
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 uuid = { version = "1", features = ["v7"] }
