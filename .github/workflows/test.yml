@@ -137,6 +137,15 @@ jobs:
       - name: Run cargo test
         run: cargo test --workspace --locked
 
+      # ll-core is published to crates.io with default features (no `bge`), a
+      # build the workspace runs above never produces: ll-search enables `bge`
+      # and feature unification turns it on for the whole workspace.
+      - name: Check ll-core without bge
+        run: cargo check -p ll-core --locked
+
+      - name: Test ll-core without bge
+        run: cargo test -p ll-core --locked
+
       # `cargo test` builds no bench target, so a bench broken by an API change
       # stayed green here and was caught only by lefthook's cargo-check-benches.
       - name: Check benches compile
