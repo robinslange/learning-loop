@@ -8,6 +8,17 @@ All notable changes to this project are documented here. The format is based on 
 
 - **Three more log writers name their monthly file by the local month (#141).** The cache-health statusline log (`retrieval/cache-health-*.jsonl`), the injections ledger (`retrieval/injections-*.jsonl`) and the federation retractions outbox (`federation/outbox/retractions-*.jsonl`) used the UTC month. East of UTC, a record from the first hours of a local month went into the previous month's file. `retrieval/` is swept on the local-month cutoff, so those hours lost a month of retention. The outbox isn't swept, but it split one stream across two calendars. All three now use `monthStr`, the injections ledger on the injection's own timestamp. Files already written keep their names.
 
+## ll-core v0.2.0 (2026-10-15)
+
+### Changed
+
+- **BREAKING: rusqlite is 0.40.** ll-core's public API takes `&Connection` parameters and has `From<rusqlite::Error>`, so a downstream crate that uses ll-core's database functions must move to rusqlite 0.40 as well.
+
+### Added
+
+- **`FtsConfig::new` is a `const` constructor.** Downstream crates can name their own FTS5 tables (FTS, content and items tables, id and path columns, BM25 weights) in a `const` or `static`. Before, only the built-in vault configuration could be built outside the crate.
+- **`models::bge_small` moves into ll-core behind the new `bge` feature.** `load`, `ensure_model` and `BgeSmallProvider` were in ll-search and are now here, and ll-search delegates to them. The loader downloads the pinned model and tokenizer with SHA-256 verification. The first download needs `curl` on `PATH`.
+
 ## v2.4.0
 
 ### Changed
