@@ -50,6 +50,11 @@ const BGE_SMALL_TOKENIZER_SHA256: &str =
 const MIN_MODEL_BYTES: u64 = 20 * 1024 * 1024;
 const MIN_TOKENIZER_BYTES: u64 = 500 * 1024;
 
+const MODEL_ID: &str = "Xenova/bge-small-en-v1.5";
+const DIM: usize = 384;
+const MAX_TOKENS: usize = 512;
+const QUERY_PREFIX: &str = "Represent this sentence for searching relevant passages: ";
+
 fn sha256_hex(path: &Path) -> std::io::Result<String> {
     use sha2::{Digest, Sha256};
     let mut file = fs::File::open(path)?;
@@ -99,8 +104,10 @@ fn download(url: &str, dest: &Path, min_bytes: u64, expected_sha256: &str) -> Re
     if verified(dest, min_bytes, expected_sha256) {
         return Ok(());
     }
-    fs::remove_file(dest).ok();
-    let tmp = dest.with_extension("tmp");
+    // Per-process temp name: concurrent loaders must not write the same file.
+    // An existing dest is left alone until the new file is hash-verified, then
+    // replaced by the rename below.
+    let tmp = dest.with_extension(format!("tmp.{}", std::process::id()));
     eprintln!("Downloading {} ...", url);
     let status = Command::new("curl")
         .args(["-fSL", "--progress-bar", "-o"])
@@ -450,8 +457,3 @@ mod tests {
         assert!(none.ends_with(".learning-loop/models"));
     }
 }
-
-const MODEL_ID: &str = "Xenova/bge-small-en-v1.5";
-const DIM: usize = 384;
-const MAX_TOKENS: usize = 512;
-const QUERY_PREFIX: &str = "Represent this sentence for searching relevant passages: ";

@@ -73,6 +73,17 @@ impl FtsConfig {
     /// JOIN {items_table} n ON n.{id_column} = nc.{id_column}
     /// WHERE {fts_table} MATCH ?`, so `bm25_weights` needs one weight per
     /// column of the FTS5 table.
+    ///
+    /// Parameters:
+    /// - `fts_table`: the FTS5 virtual table queried with `MATCH`.
+    /// - `content_table`: a real table joined on `{id_column}` equal to the FTS
+    ///   rowid. It must not be the FTS table itself: that self-joins and fails
+    ///   with "ambiguous column name".
+    /// - `items_table`: joined on `id_column`; supplies `path_column`.
+    /// - `id_column`: key shared by `content_table` and `items_table`, equal to
+    ///   the FTS rowid.
+    /// - `path_column`: column of `items_table` returned as the hit's path.
+    /// - `bm25_weights`: comma-separated weights, one per FTS column.
     pub const fn new(
         fts_table: &'static str,
         content_table: &'static str,
