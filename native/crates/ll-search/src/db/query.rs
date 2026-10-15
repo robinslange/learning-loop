@@ -364,7 +364,7 @@ pub fn compute_project_phases(conn: &Connection) {
         if *count >= 3 {
             conn.execute(
                 "INSERT OR REPLACE INTO project_phases (tag, first_mtime, last_mtime, note_count) VALUES (?1, ?2, ?3, ?4)",
-                params![tag, first, last, count],
+                params![tag, first, last, *count as i64],
             ).ok();
         }
     }

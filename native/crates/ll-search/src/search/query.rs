@@ -139,8 +139,8 @@ pub(crate) fn result_title(
 }
 
 pub fn total_note_count(conn: &Connection) -> usize {
-    conn.query_row("SELECT COUNT(*) FROM notes", [], |r| r.get::<_, usize>(0))
-        .unwrap_or(0)
+    conn.query_row("SELECT COUNT(*) FROM notes", [], |r| r.get::<_, i64>(0))
+        .map_or(0, |n| n as usize)
 }
 
 pub fn build_query_response(

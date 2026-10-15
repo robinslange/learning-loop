@@ -23,7 +23,7 @@ hex = "0.4"
 
 [dependencies]
 thiserror = "1"
-rusqlite = { version = "0.32", features = ["bundled", "modern_sqlite"] }
+rusqlite = { version = "0.40", features = ["bundled", "modern_sqlite"] }
 ort = { version = "2.0.0-rc.12", default-features = false, features = ["load-dynamic", "ndarray", "tracing", "api-24"] }
 tokenizers = { version = "0.21", default-features = false, features = ["fancy-regex"] }
 anyhow = "1"
