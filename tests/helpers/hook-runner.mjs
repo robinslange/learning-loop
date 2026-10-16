@@ -17,7 +17,6 @@ import {
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { getPluginData } from '../../plugin/scripts/lib/config.mjs';
 import { strykerEnv } from './stryker-env.mjs';
 
 const PKG_VERSION = JSON.parse(
@@ -76,22 +75,10 @@ process.on('exit', () => {
   }
 });
 
-// Resolve a real ll-search binary to symlink into sandboxes. Lookup mirrors
-// scripts/lib/binary.mjs: installed plugin-data first, dev build second.
-let realBinaryResolved = false;
-let realBinaryPath = null;
-function resolveRealBinary() {
-  if (realBinaryResolved) return realBinaryPath;
-  realBinaryResolved = true;
-  const candidates = [];
-  try {
-    const pd = getPluginData();
-    if (pd) candidates.push(join(pd, 'bin', 'll-search'));
-  } catch {}
-  candidates.push(fileURLToPath(new URL('../../native/target/release/ll-search', import.meta.url)));
-  realBinaryPath = candidates.find((c) => existsSync(c)) || null;
-  return realBinaryPath;
-}
+// The real ll-search a sandbox may link: this checkout's own build, never the
+// installed plugin's, which is whatever version last shipped and lives
+// outside the sandbox. Without a dev build the sandbox has no binary, as in CI.
+const DEV_BINARY = fileURLToPath(new URL('../../native/target/release/ll-search', import.meta.url));
 
 /**
  * Reap a watch daemon by reading a pidfile, SIGTERM-ing the pid, briefly
@@ -229,13 +216,10 @@ export function runHook(hookPath, opts = {}) {
   // through to the target, so linking first would let a stub clobber the real
   // binary. Symlinks don't trigger fresh Gatekeeper assessments.
   const sandboxBin = join(binDir, 'll-search');
-  if (!existsSync(sandboxBin)) {
-    const real = resolveRealBinary();
-    if (real) {
-      try {
-        symlinkSync(real, sandboxBin);
-      } catch {}
-    }
+  if (!existsSync(sandboxBin) && existsSync(DEV_BINARY)) {
+    try {
+      symlinkSync(DEV_BINARY, sandboxBin);
+    } catch {}
   }
 
   // On macOS, tmpdir() may return /var/folders/... while child processes that

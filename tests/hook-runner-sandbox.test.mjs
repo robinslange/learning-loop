@@ -16,9 +16,11 @@ import {
   existsSync,
   utimesSync,
   rmSync,
+  realpathSync,
 } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { spawnSync } from 'node:child_process';
 import { runHook, sweepStaleSandboxes } from './helpers/hook-runner.mjs';
 import { fileURLToPath } from 'node:url';
 
@@ -75,5 +77,42 @@ test('sweepStaleSandboxes removes ll-hook-sb-* older than 1h, keeps fresh ones',
   } finally {
     rmSync(oldDir, { recursive: true, force: true });
     rmSync(freshDir, { recursive: true, force: true });
+  }
+});
+
+// The installed plugin's binary is whatever version last shipped, not what
+// this branch builds, and it lives outside the sandbox. runHook must never
+// link it in, even when the test runner's own env points at an install.
+test('runHook never links the installed plugin binary into a sandbox', () => {
+  const installed = mkdtempSync(join(tmpdir(), 'll-installed-pd-'));
+  try {
+    mkdirSync(join(installed, 'bin'), { recursive: true });
+    writeFileSync(join(installed, 'bin', 'll-search'), 'installed-decoy', { mode: 0o755 });
+    const runner = new URL('./helpers/hook-runner.mjs', import.meta.url).href;
+    const r = spawnSync(
+      process.execPath,
+      [
+        '--input-type=module',
+        '-e',
+        `const { runHook } = await import(${JSON.stringify(runner)});
+         const { readFileSync, realpathSync } = await import('node:fs');
+         const r = runHook(${JSON.stringify(HOOK)}, { stdin: ${JSON.stringify(NOOP_STDIN)} });
+         const bin = r.pluginDataDir + '/bin/ll-search';
+         let seen = null;
+         try { seen = { real: realpathSync(bin), head: readFileSync(bin, 'latin1').slice(0, 15) }; } catch {}
+         r.cleanup();
+         console.log(JSON.stringify(seen));`,
+      ],
+      { encoding: 'utf8', env: { ...process.env, CLAUDE_PLUGIN_DATA: installed } },
+    );
+    assert.equal(r.status, 0, r.stderr);
+    const seen = JSON.parse(r.stdout.trim().split('\n').at(-1));
+    assert.ok(
+      !seen?.real.startsWith(realpathSync(installed)),
+      `sandbox links the install: ${seen?.real}`,
+    );
+    assert.notEqual(seen?.head, 'installed-decoy', 'sandbox holds a copy of the installed binary');
+  } finally {
+    rmSync(installed, { recursive: true, force: true });
   }
 });
