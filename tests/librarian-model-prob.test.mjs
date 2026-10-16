@@ -8,11 +8,8 @@ import { randomBytes } from 'node:crypto';
 const runId = randomBytes(4).toString('hex');
 const TEMP_ROOT = join(tmpdir(), `ll-librarian-mp-${runId}`);
 
-// constants.mjs reads process.env.{VAULT_PATH, CLAUDE_PLUGIN_DATA} at first
-// evaluation and caches them. Sibling test files may have already pulled in
-// constants.mjs with their own env, so we set ours BEFORE any import touches
-// librarian/tools/index.mjs (which transitively loads constants). Sub-suites that need
-// different paths must spawn child processes.
+// The librarian tools resolve the vault and plugin data from process.env on
+// every call, so these two variables point every call below at the fixture.
 const FILE_VAULT = join(TEMP_ROOT, 'vault');
 const FILE_DATA = join(TEMP_ROOT, 'plugin-data');
 mkdirSync(join(FILE_VAULT, '3-permanent'), { recursive: true });

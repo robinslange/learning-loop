@@ -3,14 +3,19 @@
 import { existsSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'node:os';
-import { VAULT_PATH, DB_PATH, PLUGIN_DATA, DISCRIMINATE_THRESHOLD } from './lib/constants.mjs';
+import { getPluginData, getVaultPath } from './lib/config.mjs';
 import { hasBinary, run } from './lib/binary.mjs';
 import { warnOnce } from './lib/warn-once.mjs';
 import { logError } from './lib/log.mjs';
 import { writeRetrieval } from './lib/retrieval.mjs';
-import { FEDERATION_PATHS, hasVaultIndex } from './lib/paths.mjs';
+import { FEDERATION_PATHS, VAULT_PATHS, hasVaultIndex } from './lib/paths.mjs';
 import { wrapRetrieval } from './lib/origin-envelope.mjs';
-import { hasFlag, flagValue } from './lib/cli-args.mjs';
+import { hasFlag, flagValue, UsageError } from './lib/cli-args.mjs';
+
+const VAULT_PATH = getVaultPath();
+const PLUGIN_DATA = getPluginData();
+const DB_PATH = VAULT_PATH ? VAULT_PATHS.index(VAULT_PATH) : null;
+const DISCRIMINATE_THRESHOLD = 0.85;
 
 const FEDERATION_CONFIG = FEDERATION_PATHS.config(PLUGIN_DATA);
 
@@ -353,6 +358,10 @@ try {
       console.log(USAGE);
   }
 } catch (err) {
+  if (err instanceof UsageError) {
+    process.stderr.write(`${err.message}\n`);
+    process.exit(2);
+  }
   process.stderr.write(`Error: ${err.message}\n`);
   process.exit(1);
 }
