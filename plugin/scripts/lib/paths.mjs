@@ -114,6 +114,7 @@ export function tmpFile(name) {
 export const DATA_PATHS = {
   bin: (pd) => join(pd, 'bin'),
   convergence: (pd) => join(pd, 'convergence'),
+  fetchBudget: (pd) => join(pd, 'fetch-budget'),
   librarian: (pd) => join(pd, 'librarian'),
   librarianQueue: (pd) => join(pd, 'librarian', 'queue.jsonl'),
   logs: (pd) => join(pd, 'logs'),

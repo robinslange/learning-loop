@@ -1,5 +1,6 @@
 import { closeSync, mkdirSync, openSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { DATA_PATHS } from './paths.mjs';
 
 // Per-session fetch budget under PLUGIN_DATA/fetch-budget/<sessionId>/: one
 // file per granted fetch, named 1..budget. A claim is an exclusive create of
@@ -10,7 +11,7 @@ import { join } from 'node:path';
 // must not break fetch, so a claim that cannot reach its directory is granted.
 
 function slotDir(sessionId, pluginData) {
-  return join(pluginData, 'fetch-budget', sessionId);
+  return join(DATA_PATHS.fetchBudget(pluginData), sessionId);
 }
 
 export function readCount(sessionId, pluginData) {
