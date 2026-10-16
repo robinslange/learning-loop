@@ -6,6 +6,7 @@ All notable changes to this project are documented here. The format is based on 
 
 ### Fixed
 
+- **An Ollama HTTP error now carries Ollama's reason (#149).** `chat()` threw `ollama HTTP 400` and dropped the response body, so 111 librarian `link_check` failures in a month all read the same and none said why. On `gemma3:12b` the reason is `does not support tools`. The message is now `ollama HTTP 400: <error>`; the `OLLAMA_HTTP_ERROR` code and `status` are unchanged. This does not fix `link_check` itself on a model without tool support, which #149 still tracks.
 - **Three more log writers name their monthly file by the local month (#141).** The cache-health statusline log (`retrieval/cache-health-*.jsonl`), the injections ledger (`retrieval/injections-*.jsonl`) and the federation retractions outbox (`federation/outbox/retractions-*.jsonl`) used the UTC month. East of UTC, a record from the first hours of a local month went into the previous month's file. `retrieval/` is swept on the local-month cutoff, so those hours lost a month of retention. The outbox isn't swept, but it split one stream across two calendars. All three now use `monthStr`, the injections ledger on the injection's own timestamp. Files already written keep their names.
 
 ## ll-core v0.2.1 (2026-10-16)

@@ -228,7 +228,34 @@ describe('librarian-daemon', () => {
       !log.includes('Cannot read properties of undefined'),
       'must not surface a TypeError from destructuring an error body:\n' + log,
     );
-    assert.match(log, /ollama HTTP 400/, 'must name the HTTP status that actually failed');
+    assert.match(
+      log,
+      /ollama HTTP 400: context length exceeded/,
+      'must name the HTTP status and the reason ollama gave',
+    );
+  });
+  it('investigateNote keeps the bare status when the error body is not JSON', async () => {
+    const { investigateNote } = await import(
+      '../plugin/scripts/librarian/daemon.mjs?bust=daemon-httperr-text-' + runId
+    );
+
+    server.use(chat(() => HttpResponse.text('upstream down', { status: 502 })));
+
+    const log = await captureStderr(() =>
+      investigateNote(
+        '3-permanent/oversized.md',
+        'link_check',
+        {
+          ollamaUrl: 'http://localhost:11434',
+          model: 'test-model',
+          linkPrompt: 'investigate',
+          keepAlive: '5m',
+        },
+        { exec: () => [{ values: [] }] },
+        () => {},
+      ),
+    );
+    assert.match(log, /ollama HTTP 502(?!:)/, 'must fall back to the bare status:\n' + log);
   });
   it('investigateNote reports a 200 that carries no completion', async () => {
     const { investigateNote } = await import(
