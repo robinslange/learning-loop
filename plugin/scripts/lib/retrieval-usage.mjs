@@ -6,12 +6,12 @@
 //                                Step 2.5 reflect-scan are EXCLUDED — they are
 //                                the pipeline querying itself, not retrieval
 //                                surfaced to a session)
-//   - injections-*.jsonl         durable injection ledger → via: 'injected'
-//                                (written by syncInjectionLedger below)
-//   - session-dedupe/<sid>.json  injected vault notes     → via: 'injected'
 //   - shadow-injection-*.jsonl   live-mode gate-pass-payload records
 //                                → via: 'injected' (mode:'live' only; shadow-
 //                                mode records never reached the model)
+//   - injections-*.jsonl         the old injection ledger → via: 'injected'
+//                                (no longer written; read until its last
+//                                monthly file ages out of retention)
 // Use source (PLUGIN_DATA/provenance/events-*.jsonl):
 //   - action === 'note-usage'    emitted by /reflect Step 4.7 with
 //     status 'used' | 'ignored' per surfaced note.
@@ -37,24 +37,15 @@
 //             is dropped entirely: it is not use, and it is not evidence of
 //             non-use either.
 //
-// Injection coverage: the injection hook persists only ephemeral dedupe
-// state (entries older than ~3 minutes are pruned on every write; whole
-// files are swept after 7 days). syncInjectionLedger copies whatever dedupe
-// state still exists into an append-only monthly injections-*.jsonl ledger,
-// so observed bursts survive the prune plus sweep, but bursts that came and
-// went between ledger syncs would be lost from that path alone. Every live
-// injection is ALSO durably recorded the moment it happens on
-// shadow-injection-*.jsonl (mode: 'live', type: 'gate-pass-payload'), which
-// is never pruned, so readShadowLiveInjections below closes that gap: the
-// injected channel is complete for live sessions, not merely a lower bound.
+// Injection coverage: every live injection is recorded the moment it happens
+// on shadow-injection-*.jsonl (mode: 'live', type: 'gate-pass-payload'), so
+// the injected channel is complete for live sessions. session-dedupe/ is not
+// a source: session-label writes it in shadow mode too, to keep its own
+// would-inject filter realistic, so a row there may never have reached the
+// model.
 
-import { readFileSync, readdirSync } from 'node:fs';
-import { join } from 'node:path';
 import { DATA_PATHS } from './paths.mjs';
-import { appendJsonlLine, readJsonlDir } from './jsonl.mjs';
-import { logError } from './log.mjs';
-import { HookConfig } from './hook-config.mjs';
-import { monthStr } from './retrieval.mjs';
+import { readJsonlDir } from './jsonl.mjs';
 
 const DAY_MS = 86_400_000;
 
@@ -62,46 +53,8 @@ const DAY_MS = 86_400_000;
 // them would let internal scans manufacture surfaced/ignored telemetry.
 const INTERNAL_QUERY_COMMANDS = new Set(['reflect-scan']);
 
-function listFiles(dir) {
-  try {
-    return readdirSync(dir);
-  } catch {
-    return [];
-  }
-}
-
 function isVaultNotePath(p) {
   return typeof p === 'string' && p.endsWith('.md') && !p.startsWith('peer:');
-}
-
-function injectionKey(sid, path, ts) {
-  return `${sid}\u0000${path}\u0000${ts}`;
-}
-
-function readDedupeInjections(pluginData) {
-  const out = [];
-  const dedupeDir = DATA_PATHS.retrievalSessionDedupe(pluginData);
-  for (const f of listFiles(dedupeDir)) {
-    if (!f.endsWith('.json')) continue;
-    const sid = f.slice(0, -'.json'.length);
-    let entries;
-    try {
-      entries = JSON.parse(readFileSync(join(dedupeDir, f), 'utf-8'));
-      // eslint-disable-next-line learning-loop/no-empty-catch -- unreadable or corrupt dedupe state; skip this session.
-    } catch {}
-    if (!Array.isArray(entries)) continue;
-    for (const e of entries) {
-      if (!isVaultNotePath(e?.path)) continue;
-      out.push({
-        path: e.path,
-        ts: e.ts,
-        session_id: sid,
-        via: 'injected',
-        level: e.level === 'pointer' ? 'pointer' : 'body',
-      });
-    }
-  }
-  return out;
 }
 
 function readLedgerInjections(pluginData) {
@@ -120,22 +73,33 @@ function readLedgerInjections(pluginData) {
   return out;
 }
 
-// shadow-injection-*.jsonl is written on EVERY prompt, shadow mode or live,
-// and is never pruned -- unlike the ledger above, which only carries whatever
-// ephemeral dedupe state survived to the next syncInjectionLedger() call. A
-// mode:'live' gate-pass-payload record is exactly what session-label.js just
-// put in front of the model (buildInjection's post-dedupe injectedVault), so
-// it is a durable, complete record of live injections from the moment they
-// happen. A mode:'shadow' record never reached the model and must be
-// excluded, or a shadow-only session would read as surfaced.
-function readShadowLiveInjections(pluginData) {
+/**
+ * Every injection that reached the model: { path, ts, session_id, via:
+ * 'injected', level }.
+ *
+ * shadow-injection-*.jsonl holds a gate-pass-payload record for every prompt
+ * that passed the gate, shadow mode or live, and a mode:'live' record lists
+ * exactly what session-label put in front of the model. The old
+ * injections-*.jsonl ledger copied session-dedupe state, which session-label
+ * also writes in shadow mode, so from the first gate-pass record on the
+ * ledger adds only duplicates and notes that never reached the model. It is
+ * read only for the time before that, until retention removes it.
+ *
+ * @param {string} pluginData
+ * @returns {object[]}
+ */
+export function readInjectedEvents(pluginData) {
   const retrievalDir = DATA_PATHS.retrieval(pluginData);
-  const out = [];
+  const live = [];
+  let coveredFrom = Infinity;
   for (const rec of readJsonlDir(retrievalDir, 'shadow-injection-')) {
-    if (rec?.mode !== 'live' || rec?.type !== 'gate-pass-payload') continue;
-    for (const p of rec.payload?.injected_paths || []) {
+    if (rec?.type !== 'gate-pass-payload' || !Array.isArray(rec.payload?.injected_paths)) continue;
+    const t = Date.parse(rec.ts);
+    if (t < coveredFrom) coveredFrom = t;
+    if (rec.mode !== 'live') continue;
+    for (const p of rec.payload.injected_paths) {
       if (!isVaultNotePath(p?.path)) continue;
-      out.push({
+      live.push({
         path: p.path,
         ts: rec.ts,
         session_id: rec.session_id,
@@ -144,50 +108,8 @@ function readShadowLiveInjections(pluginData) {
       });
     }
   }
-  return out;
-}
-
-/**
- * Copy injection events still visible in the ephemeral session-dedupe state
- * into the durable, append-only injections-YYYY-MM.jsonl ledger. The dedupe
- * state is pruned to a ~3-minute window on every hook write and swept after
- * 7 days, so this sync is the only thing that makes injection surfacing
- * survive into the report window. Run it on every report/reflect entry point;
- * it is idempotent (records are keyed by session_id + path + ts).
- *
- * Coverage stays partial by construction: bursts that were pruned before any
- * sync ran are unrecoverable. Report labels must carry that caveat.
- *
- * @returns {number} count of newly persisted injection events.
- */
-export function syncInjectionLedger(pluginData) {
-  if (!pluginData) return 0;
-  try {
-    const retrievalDir = DATA_PATHS.retrieval(pluginData);
-    const seen = new Set();
-    for (const rec of readJsonlDir(retrievalDir, 'injections-')) {
-      seen.add(injectionKey(rec.session_id, rec.path, rec.ts));
-    }
-    let appended = 0;
-    for (const e of readDedupeInjections(pluginData)) {
-      const key = injectionKey(e.session_id, e.path, e.ts);
-      if (seen.has(key)) continue;
-      seen.add(key);
-      const month = monthStr(new Date(Date.parse(e.ts) || Date.now()));
-      appendJsonlLine(join(retrievalDir, `injections-${month}.jsonl`), {
-        ts: e.ts,
-        session_id: e.session_id,
-        path: e.path,
-        via: 'injected',
-        level: e.level,
-      });
-      appended++;
-    }
-    return appended;
-  } catch (err) {
-    logError('retrieval-usage.syncInjectionLedger', err);
-    return 0;
-  }
+  const ledger = readLedgerInjections(pluginData).filter((e) => Date.parse(e.ts) < coveredFrom);
+  return [...ledger, ...live];
 }
 
 /**
@@ -195,10 +117,7 @@ export function syncInjectionLedger(pluginData) {
  * (note, event): { path, ts, session_id, via: 'retrieved'|'injected', level? }.
  * Internal pipeline queries (reflect-scan) are excluded, since they would let
  * /reflect manufacture surfacing events for whatever resembles new captures.
- * Injected events merge the durable ledger, any not-yet-synced dedupe state,
- * and live-mode shadow-injection records (the fullest source: written on
- * every turn, never pruned), deduplicated per (session, path) within the
- * hook's dedupe window.
+ * Injected events come from readInjectedEvents.
  */
 export function loadSurfacedEvents(pluginData) {
   if (!pluginData) return [];
@@ -213,24 +132,7 @@ export function loadSurfacedEvents(pluginData) {
     }
   }
 
-  // The hook never re-injects a path inside DEDUPE_WINDOW_MS of the same
-  // session, so two injected records for one (session, path) closer than that
-  // are one injection seen by two writers. Before the writers shared a
-  // timestamp they sat a few ms apart, and those rows are never pruned, so an
-  // exact-ts key would double count all of them.
-  const lastInjected = new Map();
-  const injectedSources = [
-    ...readLedgerInjections(pluginData),
-    ...readDedupeInjections(pluginData),
-    ...readShadowLiveInjections(pluginData),
-  ].sort((a, b) => Date.parse(a.ts) - Date.parse(b.ts));
-  for (const e of injectedSources) {
-    const key = `${e.session_id}\u0000${e.path}`;
-    const t = Date.parse(e.ts);
-    if (t - lastInjected.get(key) < HookConfig.DEDUPE_WINDOW_MS) continue;
-    lastInjected.set(key, t);
-    events.push(e);
-  }
+  events.push(...readInjectedEvents(pluginData));
 
   return events;
 }

@@ -2,9 +2,9 @@
 //
 // See docs/plans/otel-consolidation.md, "Phase 2: aggregators and POST",
 // signal mapping: "retrieval streams to counters plus result_count
-// histograms, labelled by command, via, level, federated." Four sibling
-// streams under DATA_PATHS.retrieval share one reducer: queries, reads,
-// injections and shadow-injection. cache-health and session-start-pack live
+// histograms, labelled by command, via, level, federated." Three sibling
+// streams under DATA_PATHS.retrieval share one reducer: queries, reads and
+// shadow-injection, whose live records also give the injection counts. cache-health and session-start-pack live
 // in the same directory but are owned by other reducers, so the prefix match
 // below must stay precise.
 //
@@ -12,6 +12,7 @@
 // runs over the same files produce byte-identical output.
 
 import { DATA_PATHS } from '../../lib/paths.mjs';
+import { readInjectedEvents } from '../../lib/retrieval-usage.mjs';
 import {
   readRecords,
   monthlyFiles,
@@ -35,8 +36,8 @@ const RESULT_COUNT_BOUNDS = [0, 1, 2, 5, 10, 25];
 // magnitude wider than RESULT_COUNT_BOUNDS.
 const PROMPT_LENGTH_BOUNDS = [50, 200, 500, 1000, 2000, 5000];
 
-// One reducer, four streams, each contributing a `command` counted by the
-// same metric. Data-driven so four copy-pasted blocks are not needed (plan's
+// One reducer, three streams, each contributing a `command` counted by the
+// same metric. Data-driven so copy-pasted blocks are not needed (plan's
 // invariant 7 note: reducers stay under the 150 LOC script cap).
 const STREAMS = [{ prefix: 'queries-' }, { prefix: 'reads-' }, { prefix: 'shadow-injection-' }];
 
@@ -46,9 +47,10 @@ function readStream(pluginData, prefix) {
 }
 
 /**
- * Reduce the four retrieval streams (queries, reads, injections,
- * shadow-injection) to metric records: counts by command, counts by
- * via/level for injections, counts by federated (queries), a result_count
+ * Reduce the three retrieval streams (queries, reads, shadow-injection) to
+ * metric records: counts by command, counts by via/level for injected notes
+ * (readInjectedEvents, shared with the usage report), counts by federated
+ * (queries), a result_count
  * histogram across the query-shaped streams, and a latency_ms histogram
  * from shadow-injection, the only stream that records a duration today.
  *
@@ -64,7 +66,7 @@ function readStream(pluginData, prefix) {
 export function reduceRetrieval({ pluginData, timeUnixMs }) {
   const queries = readStream(pluginData, 'queries-');
   const commandRecords = STREAMS.flatMap(({ prefix }) => readStream(pluginData, prefix));
-  const injections = readStream(pluginData, 'injections-');
+  const injections = readInjectedEvents(pluginData);
   const startTimeUnixMs = earliestTimestamp([...commandRecords, ...injections], timeUnixMs);
 
   const metrics = [
