@@ -8,6 +8,12 @@ All notable changes to this project are documented here. The format is based on 
 
 - **Three more log writers name their monthly file by the local month (#141).** The cache-health statusline log (`retrieval/cache-health-*.jsonl`), the injections ledger (`retrieval/injections-*.jsonl`) and the federation retractions outbox (`federation/outbox/retractions-*.jsonl`) used the UTC month. East of UTC, a record from the first hours of a local month went into the previous month's file. `retrieval/` is swept on the local-month cutoff, so those hours lost a month of retention. The outbox isn't swept, but it split one stream across two calendars. All three now use `monthStr`, the injections ledger on the injection's own timestamp. Files already written keep their names.
 
+## ll-core v0.2.1 (2026-10-16)
+
+### Fixed
+
+- **`ort` is pinned to `=2.0.0-rc.12`.** 0.2.0's caret requirement let downstream builds resolve `ort` 2.0.0-rc.14, which ll-core does not compile against. Builds without a lockfile now resolve rc.12, as the workspace does.
+
 ## ll-core v0.2.0 (2026-10-15)
 
 ### Changed
