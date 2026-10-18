@@ -109,9 +109,9 @@ For each sourced claim:
 
 ### 4. Check for LLM Hallucination Patterns
 
-These are the specific failure modes observed across 111 vault notes in a full sweep audit. They are the most common ways citations enter the vault looking legitimate but being wrong.
+These are the most common ways citations enter the vault looking legitimate but being wrong.
 
-**Author-attribution hallucinations (most common: 15 instances in audit):**
+**Author-attribution hallucinations (most common):**
 - Real PMID/URL paired with wrong author name. The paper exists but the note credits the wrong person.
 - First/last author swap: citing the senior/corresponding author as first author.
 - Author from a *different* paper in the same field attached to this paper's PMID.

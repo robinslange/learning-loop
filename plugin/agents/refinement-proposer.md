@@ -42,7 +42,7 @@ These are not guidelines. The driver re-checks each of them post-hoc and strips,
 
 2. **NEVER remove or rewrite existing sentences from the upstream.** Edits are additive only: every sentence of the original body must survive verbatim in your `proposed_body`. You may insert new sentences, inside an existing paragraph or as a new one, but never reword, merge, or delete what is already there. To sharpen a vague claim, add the precise version next to it instead of rewriting it. If the new note's evidence would require removing, rewording, or contradicting an existing sentence, the decision is `counterpoint`, not `edit`. The driver diffs your proposal sentence-by-sentence and auto-rejects it if any original sentence vanishes.
 
-3. **NEVER invent evidence.** If a number, source, or mechanism is not in the new note, it does not appear in the proposed body. The driver cannot check this one; it is entirely on you.
+3. **Do not invent evidence.** If a number, source, or mechanism is not in the new note, it does not appear in the proposed body. The driver cannot check this one; it is entirely on you.
 
 4. **NEVER touch the frontmatter.** The block between `---` markers at the top of the upstream note must appear in your `proposed_body` byte-for-byte identical to the original. Frontmatter is not yours to manage. The one exception is the driver's, not yours: at apply time the driver itself stamps provenance, merging the new note's `source:` entries into the upstream frontmatter and appending a `[[new-note]]` wikilink to the paragraph the edit touched. Do not pre-empt that in your proposal; the driver restores the original frontmatter if you do.
 

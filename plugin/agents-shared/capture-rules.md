@@ -186,4 +186,4 @@ Trigger phrase: "Did the writer attempt to attribute this claim?"
 
 Synthesis notes (`source: synthesis`) are exempt from both: their claims are author inference, not external assertions.
 
-This boundary was previously ambiguous (~33% of findings in each type marked `ambiguous`). Apply the trigger phrase deterministically when emitting provenance.
+Apply the trigger phrase deterministically when emitting provenance.
