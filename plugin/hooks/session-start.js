@@ -18,10 +18,7 @@ import { run as runCacheCleanup } from './session-start/cache-cleanup.mjs';
 import { run as runUpdateCheck } from './session-start/update-check.mjs';
 import { run as runHealthDetector } from './session-start/health-detector.mjs';
 import { run as runVaultSnapshot } from './session-start/vault-snapshot.mjs';
-import {
-  run as runContextAssembly,
-  recordIntentionsShipped,
-} from './session-start/context-assembly.mjs';
+import { run as runContextAssembly } from './session-start/context-assembly.mjs';
 import { run as runWatchDaemon } from './session-start/watch-daemon.mjs';
 import { maybeSpawnOtelExport } from './session-start/otel-export.mjs';
 import { getPluginData, getVaultPath } from '../scripts/lib/config.mjs';
@@ -97,17 +94,6 @@ try {
   logError('session-start.episodic-prewarm', err);
 }
 
-const emitted = emitJson({
+emitJson({
   hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: ctx.context },
 });
-
-// After the emit, deliberately. The intentions row records what the session was
-// SHOWN, and emitJson's backstop trim is the last thing that can shorten that
-// and the only one context-assembly cannot see. Writing the row before this
-// point records the text we hoped to send. Best-effort: a telemetry row is not
-// worth failing a SessionStart over, and the hook has already written stdout.
-try {
-  recordIntentionsShipped(ctx, emitted, ctx.pluginData);
-} catch (err) {
-  logError('session-start.intentions-row', err);
-}

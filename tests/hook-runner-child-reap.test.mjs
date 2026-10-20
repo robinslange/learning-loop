@@ -1,6 +1,6 @@
 // tests/hook-runner-child-reap.test.mjs
 // Pins the detached-child reap seam: session-start's detached children
-// (dream-gate refresh, intentions worker, provenance emitter) can write into
+// (dream-gate refresh, provenance emitter) can write into
 // the sandbox while cleanup's rmSync walks it (ENOTEMPTY flake). The harness
 // records their pids via LL_CHILD_PID_FILE and reaps them before rm.
 
@@ -31,8 +31,8 @@ function seedUpdateCheck(pluginDataDir) {
 
 test('session-start records detached child pids and cleanup reaps them', { timeout: 12000 }, () => {
   // With a vault + CLAUDE_PLUGIN_DATA present, context-assembly spawns the
-  // intentions worker, the dream-gate refresh, and the provenance emitter
-  // unconditionally — at least one recorded pid is guaranteed.
+  // dream-gate refresh unconditionally — at least one recorded pid is
+  // guaranteed.
   const r = runHook(HOOK, {
     stdin: { session_id: 'child-reap-001' },
     env: { VAULT_PATH: VAULT },

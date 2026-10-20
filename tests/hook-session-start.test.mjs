@@ -284,12 +284,6 @@ test('session-start watch daemon not spawned when DB absent', { timeout: 12000 }
 });
 
 // ---------------------------------------------------------------------------
-// Test 6: Cached intentions marker — hook emits the intentions context block.
-// ---------------------------------------------------------------------------
-// (Test 6 is below; new Test 7 for dream-gate is appended at end of file.)
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
 // Test 7: Cached dream-gate marker — hook emits the dream consolidation block.
 // ---------------------------------------------------------------------------
 test(
@@ -316,40 +310,6 @@ test(
       const hso = parseOutput(r.stdout, 'dream-gate-cache');
       assert.match(hso.additionalContext, /## Dream Consolidation Due/);
       assert.match(hso.additionalContext, /test-dream-nudge/);
-    } finally {
-      r.cleanup();
-    }
-  },
-);
-
-// ---------------------------------------------------------------------------
-// (original Test 6 below)
-// ---------------------------------------------------------------------------
-test(
-  'session-start reads cached intentions marker and emits context block',
-  { timeout: 12000 },
-  () => {
-    const r = runHook(HOOK, {
-      stdin: { session_id: 'intentions-cache-session' },
-      env: { VAULT_PATH: VAULT },
-      seed: (pd) => {
-        seedUpdateCheck(pd);
-        // Write a pre-populated intentions marker at the canonical path.
-        // pluginData resolves to sandboxRoot/plugin-data; the hook reads from
-        // MARKER_PATHS.intentions(pluginData) = pluginData/session-start-cache/intentions.json
-        const cacheDir = join(pd, 'session-start-cache');
-        mkdirSync(cacheDir, { recursive: true });
-        writeFileSync(
-          join(cacheDir, 'intentions.json'),
-          JSON.stringify([{ context: 'test-ctx', count: 3 }]),
-        );
-      },
-    });
-    try {
-      assert.equal(r.exitCode, 0, `unexpected exit: ${r.exitCode}\nstderr: ${r.stderr}`);
-      const hso = parseOutput(r.stdout, 'intentions-cache');
-      assert.match(hso.additionalContext, /## Notes with active intentions:/);
-      assert.match(hso.additionalContext, /- test-ctx \(3 notes\)/);
     } finally {
       r.cleanup();
     }
@@ -794,8 +754,8 @@ test(
         const bin = join(pluginDataDir, 'bin', 'll-search');
         // The fake daemon writes its own pid where the real one would, so the
         // test can match it against the recorded detached-child pids. Guard on
-        // $1: vault-search.mjs invokes the same stub with 'intentions' and
-        // would otherwise clobber the pidfile with a grandchild pid.
+        // $1 so any other invocation of the stub cannot clobber the pidfile
+        // with a grandchild pid.
         writeFileSync(
           bin,
           `#!/bin/sh\n[ "$1" = watch ] && echo $$ > "${join(vsDir, 'watch.pid')}"\nexit 0\n`,
@@ -876,11 +836,11 @@ test(
 // Regression: when the assembled context exceeds the 8KB stdout cap, emitJson
 // trims from the TAIL. The retrieval protocol (behavior-defining) must be
 // assembled first, and the capped memory indexes must be assembled ahead of
-// the learned-patterns/intentions bulk, so the trim evicts the low-value tail
+// the learned-patterns bulk, so the trim evicts the low-value tail
 // — not the protocol and not the index lines.
 // ---------------------------------------------------------------------------
 test(
-  'session-start trim ordering: protocol and memory indexes survive oversized patterns + intentions',
+  'session-start trim ordering: protocol and memory indexes survive oversized patterns',
   { timeout: 12000 },
   () => {
     const projectDir = '/tmp/test-project-trim-order';
@@ -889,9 +849,9 @@ test(
       env: { VAULT_PATH: VAULT, CLAUDE_PROJECT_DIR: projectDir },
       seed: (pd, sb) => {
         seedUpdateCheck(pd);
-        // A small (~1KB) global memory index with a sentinel line at the END —
-        // if the index is even partially trimmed, the sentinel dies.
-        const memFiller = ('- [n](n.md) — ' + 'y'.repeat(80) + '\n').repeat(10);
+        // A global memory index just under the 3KB cap, with a sentinel line at
+        // the END — if the index is even partially trimmed, the sentinel dies.
+        const memFiller = ('- [n](n.md) — ' + 'y'.repeat(80) + '\n').repeat(31);
         const encodedVaultParent = encodeProjectDir(resolve(VAULT, '..'));
         const globalMemDir = join(sb, '.claude', 'projects', encodedVaultParent, 'memory');
         mkdirSync(globalMemDir, { recursive: true });
@@ -903,13 +863,6 @@ test(
         let patterns = '';
         for (let i = 1; i <= 80; i++) patterns += `${i}. pattern ${'p'.repeat(90)}\n`;
         writeFileSync(join(patternsDir, 'learned-patterns.md'), patterns);
-        // Oversized intentions marker (~8KB rendered).
-        const cacheDir = join(pd, 'session-start-cache');
-        mkdirSync(cacheDir, { recursive: true });
-        const intentions = [];
-        for (let i = 0; i < 80; i++)
-          intentions.push({ context: `context-${i}-${'c'.repeat(80)}`, count: i + 1 });
-        writeFileSync(join(cacheDir, 'intentions.json'), JSON.stringify(intentions));
       },
     });
     try {
@@ -928,14 +881,14 @@ test(
       );
       assert.ok(
         ctx.includes('GLOBAL-MEM-SENTINEL'),
-        'global memory index lines must survive: capped indexes must be assembled ahead of patterns/intentions bulk',
+        'global memory index lines must survive: capped indexes must be assembled ahead of patterns bulk',
       );
       // The oversized patterns section is the lowest-priority bulk: it must be
       // assembled AFTER the memory indexes (so it, not they, absorbs the tail
       // trim). When it survives, its content must be the byte-capped form (its
-      // own pointer), never injected wholesale. But because three 3KB-capped
-      // sections plus the protocol exceed the 8KB stdout budget by design, the
-      // patterns section is the expected casualty of the final tail trim — so
+      // own pointer), never injected wholesale. But because the index, the
+      // capped patterns and the protocol exceed the 8KB stdout budget by
+      // design, the patterns section is the expected casualty of the final tail trim — so
       // its cap-pointer only has to survive when the section itself wasn't the
       // trimmed tail.
       const patternsAt = ctx.indexOf('## Learned Patterns');
@@ -1028,54 +981,6 @@ test(
       const ctx = parseOutput(r.stdout, 'll-run-command').additionalContext;
       assert.match(ctx, /ll-run vault-search\.mjs search/);
       assert.doesNotMatch(ctx, /node \S+\/scripts\/vault-search\.mjs/);
-    } finally {
-      r.cleanup();
-    }
-  },
-);
-
-// ---------------------------------------------------------------------------
-// Intention summary: singleton contexts are noise, not signal.
-// ---------------------------------------------------------------------------
-// The marker holds one entry per distinct `context` string. In a real vault the
-// overwhelming majority have a count of 1, because cue-shaped sentences get
-// written into the context slot ("A dependency upgrade hits a resolution
-// problem..."), so each produces its own single-note "context". Rendering them
-// all blows past MEMORY_INDEX_MAX_BYTES and the section is truncated mid-list,
-// shipping an arbitrary prefix and dropping the contexts that group real work.
-test(
-  'session-start omits single-note intention contexts from the summary',
-  { timeout: 12000 },
-  () => {
-    const r = runHook(HOOK, {
-      stdin: { session_id: 'intentions-singleton-session' },
-      env: { VAULT_PATH: VAULT },
-      seed: (pd) => {
-        seedUpdateCheck(pd);
-        const cacheDir = join(pd, 'session-start-cache');
-        mkdirSync(cacheDir, { recursive: true });
-        writeFileSync(
-          join(cacheDir, 'intentions.json'),
-          JSON.stringify([
-            { context: 'a cue shaped sentence that only ever matched one note', count: 1 },
-            { context: 'real-grouping-ctx', count: 4 },
-            { context: 'another one-off cue', count: 1 },
-          ]),
-        );
-      },
-    });
-    try {
-      assert.equal(r.exitCode, 0, `unexpected exit: ${r.exitCode}\nstderr: ${r.stderr}`);
-      const hso = parseOutput(r.stdout, 'intentions-singleton');
-      assert.match(hso.additionalContext, /- real-grouping-ctx \(4 notes\)/);
-      assert.ok(
-        !hso.additionalContext.includes('a cue shaped sentence'),
-        'a single-note context must not reach the pack',
-      );
-      assert.ok(
-        !hso.additionalContext.includes('another one-off cue'),
-        'a single-note context must not reach the pack',
-      );
     } finally {
       r.cleanup();
     }
@@ -1181,41 +1086,6 @@ test(
       r.cleanup();
       rmSync(projectDir, { recursive: true, force: true });
       rmSync(bareVault, { recursive: true, force: true });
-    }
-  },
-);
-
-// When nothing survives the filter the heading must go too, rather than
-// shipping a section with no entries under it.
-test(
-  'session-start drops the intentions heading when every context is a singleton',
-  { timeout: 12000 },
-  () => {
-    const r = runHook(HOOK, {
-      stdin: { session_id: 'intentions-all-singleton-session' },
-      env: { VAULT_PATH: VAULT },
-      seed: (pd) => {
-        seedUpdateCheck(pd);
-        const cacheDir = join(pd, 'session-start-cache');
-        mkdirSync(cacheDir, { recursive: true });
-        writeFileSync(
-          join(cacheDir, 'intentions.json'),
-          JSON.stringify([
-            { context: 'lonely-ctx-one', count: 1 },
-            { context: 'lonely-ctx-two', count: 1 },
-          ]),
-        );
-      },
-    });
-    try {
-      assert.equal(r.exitCode, 0, `unexpected exit: ${r.exitCode}\nstderr: ${r.stderr}`);
-      const hso = parseOutput(r.stdout, 'intentions-all-singleton');
-      assert.ok(
-        !hso.additionalContext.includes('## Notes with active intentions:'),
-        'an empty list must not ship a bare heading',
-      );
-    } finally {
-      r.cleanup();
     }
   },
 );

@@ -1,7 +1,7 @@
 // tests/plugin-data-no-resurrect.test.mjs
 // Pins "never resurrect a deleted plugin-data" across every writer reachable
-// from session-start's DETACHED children (provenance emitter, intentions
-// refresh worker, dream-gate). Under suite load those children can finish
+// from session-start's DETACHED children (provenance emitter, dream-gate).
+// Under suite load those children can finish
 // after the test harness rmSync'd their sandbox; an unguarded recursive mkdir
 // re-creates the sandbox root (the ll-hook-sb-* leak of 2026-06). Writers may
 // create SUBdirs, but must no-op when the plugin-data ROOT is gone.
@@ -66,11 +66,11 @@ test('emitProvenance still appends when plugin-data exists', () => {
   }
 });
 
-// --- writeMarker (intentions worker, dream-gate — both spawned detached) ---
+// --- writeMarker (dream-gate, spawned detached) ---
 
 const WRITE_MARKER_CODE = `
 import { writeMarker, MARKER_PATHS } from ${JSON.stringify(MARKER_CACHE_URL)};
-writeMarker(MARKER_PATHS.intentions(process.env.CLAUDE_PLUGIN_DATA), { nudge: null });
+writeMarker(MARKER_PATHS.dreamGate(process.env.CLAUDE_PLUGIN_DATA), { nudge: null });
 `;
 
 test('writeMarker does not re-create a deleted plugin-data dir', () => {
@@ -85,7 +85,7 @@ test('writeMarker still writes when plugin-data exists', () => {
   try {
     const result = runModule(WRITE_MARKER_CODE, root);
     assert.equal(result.status, 0, `writeMarker must succeed, stderr: ${result.stderr}`);
-    const marker = join(root, 'session-start-cache', 'intentions.json');
+    const marker = join(root, 'session-start-cache', 'dream-gate.json');
     assert.ok(existsSync(marker), 'marker must be written under an existing root');
     assert.match(readFileSync(marker, 'utf-8'), /"nudge":null/);
   } finally {

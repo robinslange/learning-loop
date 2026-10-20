@@ -6,7 +6,7 @@ How skills chain together in practice. Each pattern below is a real workflow, no
 
 A typical session has three phases:
 
-1. **Context loads automatically.** The session-start hook injects your memory index, active intentions, and a pointer to recent captures. The UserPromptSubmit hook searches your vault on every prompt, injecting relevant context before Claude responds. You don't invoke anything for this.
+1. **Context loads automatically.** The session-start hook injects your memory index. The UserPromptSubmit hook searches your vault on every prompt, injecting relevant context before Claude responds. You don't invoke anything for this.
 
 2. **You work.** Research, capture, verify. Skills compose freely. Use what fits.
 
