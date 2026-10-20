@@ -8,7 +8,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 import { writeFileSync, mkdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { runHook } from './helpers/hook-runner.mjs';
 import { encodeProjectDir } from '../plugin/scripts/lib/paths.mjs';
 import { UNTRUSTED_NOTE } from '../plugin/scripts/lib/origin-envelope.mjs';
@@ -31,7 +31,13 @@ function contextWithMemory(memoryBody) {
     env: { VAULT_PATH: VAULT, CLAUDE_PROJECT_DIR: PROJECT },
     seed: (pd, sb) => {
       seedUpdateCheck(pd);
-      const memDir = join(sb, '.claude', 'projects', encodeProjectDir(PROJECT), 'memory');
+      const memDir = join(
+        sb,
+        '.claude',
+        'projects',
+        encodeProjectDir(resolve(VAULT, '..')),
+        'memory',
+      );
       mkdirSync(memDir, { recursive: true });
       writeFileSync(join(memDir, 'MEMORY.md'), memoryBody);
     },

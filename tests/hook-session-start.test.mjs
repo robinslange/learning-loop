@@ -369,7 +369,7 @@ test(
       env: { VAULT_PATH: VAULT, CLAUDE_PROJECT_DIR: '/tmp/test-project-stale' },
       seed: (pd, sb) => {
         seedUpdateCheck(pd);
-        const encoded = encodeProjectDir('/tmp/test-project-stale');
+        const encoded = encodeProjectDir(resolve(VAULT, '..'));
         const memDir = join(sb, '.claude', 'projects', encoded, 'memory');
         mkdirSync(memDir, { recursive: true });
         const memPath = join(memDir, 'MEMORY.md');
@@ -382,7 +382,7 @@ test(
       assert.equal(r.exitCode, 0);
       const hso = parseOutput(r.stdout, 'stale-mem');
       assert.ok(
-        !hso.additionalContext.includes('## Auto-memory index'),
+        !hso.additionalContext.includes('## Global memory index'),
         'stale MEMORY.md should not be injected',
       );
     } finally {
@@ -397,22 +397,35 @@ test('session-start memory: injects MEMORY.md when mtime within 7 days', { timeo
     env: { VAULT_PATH: VAULT, CLAUDE_PROJECT_DIR: '/tmp/test-project-fresh' },
     seed: (pd, sb) => {
       seedUpdateCheck(pd);
-      const encoded = encodeProjectDir('/tmp/test-project-fresh');
+      const encoded = encodeProjectDir(resolve(VAULT, '..'));
       const memDir = join(sb, '.claude', 'projects', encoded, 'memory');
       mkdirSync(memDir, { recursive: true });
       const memPath = join(memDir, 'MEMORY.md');
       writeFileSync(memPath, '- [test.md](test.md) — fresh entry\n');
       // Default mtime is now, no utimesSync needed.
+      const projMemDir = join(
+        sb,
+        '.claude',
+        'projects',
+        encodeProjectDir('/tmp/test-project-fresh'),
+        'memory',
+      );
+      mkdirSync(projMemDir, { recursive: true });
+      writeFileSync(join(projMemDir, 'MEMORY.md'), '- [p.md](p.md) — project entry\n');
     },
   });
   try {
     assert.equal(r.exitCode, 0);
     const hso = parseOutput(r.stdout, 'fresh-mem');
     assert.ok(
-      hso.additionalContext.includes('## Auto-memory index'),
+      hso.additionalContext.includes('## Global memory index'),
       'fresh MEMORY.md should be injected',
     );
     assert.ok(hso.additionalContext.includes('fresh entry'), 'memory content should be in context');
+    assert.ok(
+      !hso.additionalContext.includes('project entry'),
+      'the project MEMORY.md is loaded by Claude Code itself, not re-injected',
+    );
   } finally {
     r.cleanup();
   }
@@ -431,7 +444,7 @@ test(
       },
       seed: (pd, sb) => {
         seedUpdateCheck(pd);
-        const encoded = encodeProjectDir('/tmp/test-project-override');
+        const encoded = encodeProjectDir(resolve(VAULT, '..'));
         const memDir = join(sb, '.claude', 'projects', encoded, 'memory');
         mkdirSync(memDir, { recursive: true });
         const memPath = join(memDir, 'MEMORY.md');
@@ -820,12 +833,11 @@ test(
 );
 
 // ---------------------------------------------------------------------------
-// Regression: when the project directory IS the vault parent, the project and
-// global memory keys resolve to the SAME MEMORY.md. Pre-fix it was injected
-// twice (~3KB of duplicate index per session).
+// When the project directory IS the vault parent, the global memory key
+// resolves to the project's own MEMORY.md, which Claude Code already loads.
 // ---------------------------------------------------------------------------
 test(
-  'session-start memory: same MEMORY.md is injected once when project dir equals vault parent',
+  'session-start memory: the vault-parent MEMORY.md is not injected when it is the project index',
   { timeout: 12000 },
   () => {
     const vaultParent = resolve(VAULT, '..');
@@ -846,13 +858,10 @@ test(
       assert.equal(r.exitCode, 0, r.stderr);
       const hso = parseOutput(r.stdout, 'same-path-mem');
       const ctx = hso.additionalContext;
-      const occurrences = (ctx.match(/unique-dedupe-marker/g) || []).length;
-      assert.equal(
-        occurrences,
-        1,
-        `memory index must be injected exactly once, got ${occurrences}`,
+      assert.ok(
+        !ctx.includes('unique-dedupe-marker'),
+        'the project MEMORY.md is loaded by Claude Code itself, not re-injected',
       );
-      assert.ok(ctx.includes('## Auto-memory index for this project'), 'project section expected');
       assert.ok(
         !ctx.includes('## Global memory index'),
         'global section must be skipped when it resolves to the project MEMORY.md',
@@ -880,14 +889,9 @@ test(
       env: { VAULT_PATH: VAULT, CLAUDE_PROJECT_DIR: projectDir },
       seed: (pd, sb) => {
         seedUpdateCheck(pd);
-        // Small (~1KB) project and global memory indexes with unique sentinel
-        // lines at the END of each — if either index is even partially
-        // trimmed, its sentinel dies.
+        // A small (~1KB) global memory index with a sentinel line at the END —
+        // if the index is even partially trimmed, the sentinel dies.
         const memFiller = ('- [n](n.md) — ' + 'y'.repeat(80) + '\n').repeat(10);
-        const encodedProject = encodeProjectDir(projectDir);
-        const projMemDir = join(sb, '.claude', 'projects', encodedProject, 'memory');
-        mkdirSync(projMemDir, { recursive: true });
-        writeFileSync(join(projMemDir, 'MEMORY.md'), memFiller + '- PROJECT-MEM-SENTINEL\n');
         const encodedVaultParent = encodeProjectDir(resolve(VAULT, '..'));
         const globalMemDir = join(sb, '.claude', 'projects', encodedVaultParent, 'memory');
         mkdirSync(globalMemDir, { recursive: true });
@@ -923,10 +927,6 @@ test(
         'the protocol must survive the tail trim INTACT — it must be assembled before the variable-size sections',
       );
       assert.ok(
-        ctx.includes('PROJECT-MEM-SENTINEL'),
-        'project memory index lines must survive: capped indexes must be assembled ahead of patterns/intentions bulk',
-      );
-      assert.ok(
         ctx.includes('GLOBAL-MEM-SENTINEL'),
         'global memory index lines must survive: capped indexes must be assembled ahead of patterns/intentions bulk',
       );
@@ -941,7 +941,7 @@ test(
       const patternsAt = ctx.indexOf('## Learned Patterns');
       if (patternsAt !== -1) {
         assert.ok(
-          ctx.indexOf('## Auto-memory index for this project') < patternsAt,
+          ctx.indexOf('## Global memory index') < patternsAt,
           'memory indexes must be assembled before learned patterns',
         );
         const patternsIsTrimmedTail = ctx.trimEnd().endsWith('…[truncated]')

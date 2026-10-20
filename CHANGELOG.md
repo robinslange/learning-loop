@@ -4,6 +4,11 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+### Removed
+
+- **SessionStart no longer re-injects the project's `MEMORY.md`.** Claude Code loads that file into every session itself, so the hook's "Auto-memory index for this project" section was a second copy of up to 3 KB. The vault-parent index still ships when the session runs outside the vault parent, because Claude Code only loads the current project's file. Codex registers no SessionStart hook, so nothing changes there.
+- **Two static pointer lines are gone from SessionStart:** "Recent vault captures" and "To see notes for a specific context". Both repeated, every session, a command the retrieval-protocol line already names.
+
 ### Fixed
 
 - **A project with no memory dir no longer logs an error from the dream gate (#150).** `dream-gate.statMemoryDir` fired on every session in a cwd that had never written a memory, which is the normal state for a short-lived git worktree. On one install it was 84 of 218 errors in a month and kept the error-log health check red. Only a missing dir (`ENOENT`) is quiet now; any other `stat` failure still logs.
