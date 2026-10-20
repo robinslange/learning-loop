@@ -317,33 +317,17 @@ function injectDreamGate(ctx) {
   }
 }
 
-// 4. Project-specific auto-memory. Capped memory indexes come right after
-// the protocol so an oversized payload evicts later, lower-value sections
-// instead of the index lines. Stores the resolved path on state so section
-// 5 can skip re-injecting the same file when project and vault-parent match.
-function injectProjectMemory(ctx, state) {
-  const memoryDir = resolveMemoryDir(ctx.projectDir, ctx.home);
-  if (!memoryDir) return;
-  state.projectMemoryIndex = join(memoryDir, 'MEMORY.md');
-  if (!existsSync(state.projectMemoryIndex) || !memoryIsFresh(state.projectMemoryIndex)) return;
-  try {
-    const index = readMemoryIndexCapped(state.projectMemoryIndex);
-    if (index) {
-      state.retrieved += `\n## Auto-memory index for this project:\n${index}\n`;
-    }
-  } catch (err) {
-    logError('session-start.context-assembly.projectMemory', err);
-  }
-}
-
-// 5. Global memory (keyed to vault parent). When the project IS the vault
-// parent both keys resolve to the same MEMORY.md — skip the global section
-// rather than injecting the identical index twice.
+// 4. Global memory (keyed to vault parent). Claude Code loads the current
+// project's MEMORY.md itself, so the only index worth adding is the vault
+// parent's, and only when the session runs somewhere else. Capped and placed
+// right after the protocol so an oversized payload evicts later, lower-value
+// sections instead of the index lines.
 function injectGlobalMemory(ctx, state) {
   const vaultParent = resolve(ctx.vaultRoot, '..');
   const globalMemory = join(resolveMemoryDir(vaultParent, ctx.home), 'MEMORY.md');
+  const projectMemoryDir = resolveMemoryDir(ctx.projectDir, ctx.home);
   if (
-    globalMemory === state.projectMemoryIndex ||
+    (projectMemoryDir && globalMemory === join(projectMemoryDir, 'MEMORY.md')) ||
     !existsSync(globalMemory) ||
     !memoryIsFresh(globalMemory)
   ) {
@@ -389,14 +373,7 @@ function injectFederation(ctx, state) {
   }
 }
 
-// 8. On-demand vault captures pointer.
-function injectCapturesPointer(ctx, state, searchCmd) {
-  const VAULT_INBOX = join(ctx.vaultRoot, '0-inbox');
-  state.operatorTail += '\n## Recent vault captures\n';
-  state.operatorTail += `Run \`ls -t ${VAULT_INBOX} | head -5\` or \`${searchCmd} search "<topic>"\` for relevant notes.\n`;
-}
-
-// 8b. Newest session ledger for this repo: the "what did I do here last time"
+// 8. Newest session ledger for this repo: the "what did I do here last time"
 // answer in one line. Path only; the note itself is one Read away. Reads the
 // project the ledger hook already resolved (marker), rather than resolving it
 // again here. SessionStart must never spawn git.
@@ -410,7 +387,7 @@ function injectLedgerPointer(ctx, state) {
     if (typeof cached?.project === 'string') {
       const ledger = latestLedger(vaultRoot, cached.project);
       if (ledger) {
-        state.operatorTail += `Last session here: ${ledger.relPath} (${ledger.date}, ${ledger.status})\n`;
+        state.operatorTail += `\nLast session here: ${ledger.relPath} (${ledger.date}, ${ledger.status})\n`;
       }
     }
   } catch (err) {
@@ -446,7 +423,6 @@ function injectIntentions(ctx, state, searchCmd) {
       );
       state.retrieved += `\n${INTENTIONS_HEADING}\n`;
       state.retrieved += `${capped}\n`;
-      state.operatorTail += `\nTo see notes for a specific context: ${searchCmd} intentions "<context name>"\n`;
       // The pack has never had a surfaced->used join, so the value of this
       // block is unmeasured rather than low. The row that records it is NOT
       // written here: capSection above is only the first of two truncations,
@@ -499,13 +475,11 @@ export async function run(ctx) {
   // operatorTail so they stay outside the envelope, and the block is emitted
   // where section 4 began — keeping the capped indexes ahead of lower-value
   // sections for emitJson's tail trim.
-  const state = { retrieved: '', operatorTail: '', projectMemoryIndex: null };
+  const state = { retrieved: '', operatorTail: '' };
 
-  injectProjectMemory(ctx, state);
   injectGlobalMemory(ctx, state);
   injectLearnedPatterns(ctx, state);
   injectFederation(ctx, state);
-  injectCapturesPointer(ctx, state, searchCmd);
   injectLedgerPointer(ctx, state);
   injectIntentions(ctx, state, searchCmd);
 
