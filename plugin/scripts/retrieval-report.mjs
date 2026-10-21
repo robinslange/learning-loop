@@ -12,26 +12,12 @@
 import { join, sep } from 'path';
 import { getPluginData, getVaultPath } from './lib/config.mjs';
 import { readJsonlDir } from './lib/jsonl.mjs';
-import {
-  sessionSurfaced,
-  usageReport,
-  syncInjectionLedger,
-  memoryReadStats,
-} from './lib/retrieval-usage.mjs';
+import { sessionSurfaced, usageReport, memoryReadStats } from './lib/retrieval-usage.mjs';
 import { listVaultNotes } from './lib/vault-walk.mjs';
 import { encodeProjectDir } from './lib/paths.mjs';
 
 const PD = getPluginData();
 const dir = join(PD, 'retrieval');
-
-// Backfills injections-*.jsonl from whatever ephemeral dedupe state still
-// survives (entries older than ~3 minutes are pruned on every write). Live
-// injections are also read straight off shadow-injection-*.jsonl (never
-// pruned, see retrieval-usage.mjs), so the `via: 'injected'` join no longer
-// depends on this call alone -- it just recovers the dedupe-state bursts that
-// have not made it into the ledger yet. Idempotent: dedupes on
-// (session, path, ts), so running it per invocation is safe.
-syncInjectionLedger(PD);
 
 const args = process.argv.slice(2);
 
