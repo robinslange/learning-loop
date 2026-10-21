@@ -26,7 +26,7 @@ import { ortSpawnEnv, binaryPath } from './lib/binary.mjs';
 import { logError } from './lib/log.mjs';
 import { getVaultPath } from './lib/config.mjs';
 import { VAULT_PATHS } from './lib/paths.mjs';
-import { hasFlag, flagValue } from './lib/cli-args.mjs';
+import { hasFlag, flagValue, runCli } from './lib/cli-args.mjs';
 import { HookConfig } from './lib/hook-config.mjs';
 
 // The refinement band; see HookConfig for how it was tuned.
@@ -176,4 +176,4 @@ async function main() {
   if (pairsOutPath) writeFileSync(pairsOutPath, json);
 }
 
-await main();
+await runCli(main);

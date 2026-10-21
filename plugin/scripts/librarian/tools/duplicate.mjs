@@ -7,12 +7,12 @@
 //   tests pass { bodyOverride, neighboursOverride }.
 //
 // When bodyOverride is undefined (not null), readNoteBody falls back to reading
-// the file from VAULT_PATH (same behaviour as original librarian.mjs).
+// the file from the vault (same behaviour as original librarian.mjs).
 
 import { readFileSync, existsSync } from 'node:fs';
 import { join, basename } from 'node:path';
 import { appendItem, newItemId, loadState, saveState, incrementCounter } from '../queue.mjs';
-import { DB_PATH } from '../../lib/constants.mjs';
+import { indexPath } from './shared.mjs';
 import { stripFrontmatter } from '../../lib/markdown-parse.mjs';
 import { getVaultPath } from '../../lib/config.mjs';
 import { logError } from '../../lib/log.mjs';
@@ -78,7 +78,7 @@ export async function duplicateCheck(notePath, deps = {}) {
   } else {
     const { run } = await import('../../lib/binary.mjs');
     try {
-      neighbours = run(['similar', DB_PATH, notePath, '--top', '3']);
+      neighbours = run(['similar', indexPath(), notePath, '--top', '3']);
     } catch (err) {
       log('duplicateCheck similar error for ' + notePath + ': ' + err.message + '\n');
       return;
