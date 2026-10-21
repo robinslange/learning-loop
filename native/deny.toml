@@ -12,6 +12,11 @@ ignore = [
   # rand 0.8 unsoundness only triggers with a custom logger that calls
   # rand::rng(); we have none. Load-bearing use is CSPRNG-backed thread_rng.
   "RUSTSEC-2026-0097",
+  # webpki-roots 0.26.11 is a semver shim that re-exports webpki-roots 1, which
+  # the lockfile pins at the patched 1.0.10, so the emSign root is gone. The
+  # advisory still matches the shim's version. Cleared when ll-search and
+  # tokio-tungstenite depend on webpki-roots 1 directly.
+  "RUSTSEC-2026-0381",
 ]
 
 [licenses]
