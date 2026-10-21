@@ -55,17 +55,17 @@
 // First, records at or after INJECTION_LAYOUT_EPOCH. That is the slot LAYOUT
 // epoch, not the gate-calibration one, because every figure this file emits is
 // denominated in a payload shape — how many bodies, how many pointers — and
-// v2.1.0 changed that shape.
+// v2.1.0 changed that shape and the revert changed it back.
 //
 // Second, and this is the filter that actually holds: a burst whose shape is
 // unreachable under the shipped BODY_SLOTS/POINTER_SLOTS was produced by older
 // code and is dropped, whatever its timestamp. The epoch is the install moment,
 // and a session already running keeps executing the inject hook it loaded, so
 // old-shape bursts arrive AFTER the epoch: one 1-body/4-pointer burst was
-// recorded 20 hours past it, 12% of the window at the time.
+// recorded 20 hours past the v2.1.0 epoch, 12% of the window at the time.
 //
-// What this cannot do is certify a burst as new-layout. Under the old layout a
-// turn with few body-bearing hits could emit 1 body and 3 pointers, which is
+// What this cannot do is certify a burst as new-layout. Under the 2-body layout
+// a turn with one body-bearing hit could emit 1 body and 3 pointers, which is
 // also reachable now, so such a burst is admitted and is indistinguishable.
 // Shape proves old, never new; the epoch bounds how much of that can remain.
 //
@@ -87,17 +87,16 @@ import { isMainModule } from '../plugin/scripts/lib/is-main.mjs';
 import { hasFlag, flagValue } from '../plugin/scripts/lib/cli-args.mjs';
 
 // Derived from the injector's own constants rather than restated as 5: the
-// total has survived the layout change (v2.1.0 traded a pointer for a body) but
-// a future change need not, and a hardcoded bound would silently truncate the
+// total has survived both layout changes (v2.1.0 traded a pointer for a body,
+// the revert traded it back) but a future change need not, and a hardcoded bound would silently truncate the
 // per-rank table instead of growing with the payload.
 const MAX_RANK = BODY_SLOTS + POINTER_SLOTS;
 
 // A burst no version of the shipped injector could have produced. Under the
 // current constants a payload holds at most BODY_SLOTS bodies and at most
 // POINTER_SLOTS pointers, so exceeding either proves older code wrote it --
-// which is how a 1-body/4-pointer burst is caught 20 hours after the layout
-// epoch, emitted by a session still running the hook it loaded before the
-// upgrade. It is a one-way test: a shape reachable under both layouts says
+// which is how a 2-body burst is caught after the layout epoch, emitted by a
+// session still running the hook it loaded before the upgrade. It is a one-way test: a shape reachable under both layouts says
 // nothing, so this removes provable contamination rather than guaranteeing
 // purity.
 function isForeignLayout(paths) {
