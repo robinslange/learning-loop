@@ -1,6 +1,6 @@
 // tests/hook-session-start-untrusted-frame.test.mjs
 // SessionStart concatenates file-sourced content (memory indexes, learned
-// patterns, federation peer names, intentions) into the prompt. That content is
+// patterns, federation peer names) into the prompt. That content is
 // third-party text, so it must arrive inside the same untrusted-data envelope
 // the JSON retrieval path gets — while the plugin's own operator sections stay
 // outside it.

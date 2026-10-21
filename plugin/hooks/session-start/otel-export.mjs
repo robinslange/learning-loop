@@ -11,9 +11,8 @@ import { isExportEnabled } from '../../scripts/otel/export.mjs';
 import { spawnDetached } from '../lib/common.mjs';
 
 // One hour, passed explicitly at the call site per the plan. Never reuse or
-// mutate MARKER_TTL_MS: intentions, dreamGate and lastDream all default
-// through that shared 25h constant and changing it would silently alter
-// their cadence too.
+// mutate MARKER_TTL_MS: dreamGate and lastDream both default through that
+// shared 25h constant and changing it would silently alter their cadence too.
 // Exported so /doctor's staleness check thresholds against the SAME interval
 // the trigger uses. Two copies of this number would drift, and a check that
 // disagrees with the trigger is worse than no check.

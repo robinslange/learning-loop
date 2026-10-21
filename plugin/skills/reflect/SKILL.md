@@ -200,7 +200,7 @@ intentions:
 status: intentioned
 ```
 
-This ensures new notes with intentions appear in the next session's intention summary. Claude can drill into specific contexts on-demand.
+This makes the note reachable by context: `ll-run vault-search.mjs intentions "<context>"` returns it, and `/learning-loop:inbox` classifies it as intentioned rather than limbo.
 
 ### Step 4.6: Upstream Refinement
 

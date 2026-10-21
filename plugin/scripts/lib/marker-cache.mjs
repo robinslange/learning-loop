@@ -20,7 +20,6 @@ export const MARKER_TTL_MS = 25 * 60 * 60 * 1000;
 // Canonical marker paths. Hook and worker both call these — never construct
 // the path inline. Add a new marker by adding a new entry here.
 export const MARKER_PATHS = {
-  intentions: (pluginData) => join(DATA_PATHS.sessionStartCache(pluginData), 'intentions.json'),
   dreamGate: (pluginData) => join(DATA_PATHS.sessionStartCache(pluginData), 'dream-gate.json'),
   // last-dream stays under retrieval/ — existing installs already carry the
   // timestamp there (dream-gate's first-run write); moving it would reset

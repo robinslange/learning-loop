@@ -65,7 +65,7 @@ export function getPluginData() {
 
 /**
  * Never resurrect a deleted plugin-data: session-start spawns detached
- * workers (provenance emitter, intentions refresh, dream-gate) that can
+ * workers (provenance emitter, dream-gate) that can
  * outlive a test sandbox's cleanup, and an unguarded recursive mkdir would
  * re-create the rmSync'd sandbox root (the ll-hook-sb-* leak, 2026-06).
  * Writers may create SUBdirs, but must call this and no-op when the root is

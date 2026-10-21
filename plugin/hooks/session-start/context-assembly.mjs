@@ -1,6 +1,6 @@
 // hooks/session-start/context-assembly.mjs : build the additionalContext string.
-// Reads update-check cache, memory indices, intention summary, dream gate,
-// learned patterns, and federation status. Mutates ctx.context.
+// Reads update-check cache, memory indices, dream gate, learned patterns,
+// and federation status. Mutates ctx.context.
 
 import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs';
 import { join, basename, resolve } from 'node:path';
@@ -13,7 +13,6 @@ import { DATA_PATHS, FEDERATION_PATHS, home } from '../../scripts/lib/paths.mjs'
 import { resolveMemoryDir } from '../../scripts/lib/memory-paths.mjs';
 import { spawnDetached, emitProvenance } from '../lib/common.mjs';
 import { wrapRetrievalText } from '../../scripts/lib/origin-envelope.mjs';
-import { writeRetrieval } from '../../scripts/lib/retrieval.mjs';
 import { latestLedger } from '../../scripts/lib/session-ledger.mjs';
 
 const MEMORY_RECENCY_MS = 7 * 24 * 60 * 60 * 1000;
@@ -127,75 +126,6 @@ function capSection(text, pointer) {
   return `${head.trim()}\n${pointer}`;
 }
 
-// The block's heading, declared once because two things now depend on it: the
-// assembler that writes it and the reader below that finds it again in the
-// emitted payload. A literal in both places is a rename away from a reader
-// that silently matches nothing and reports every context as dropped.
-const INTENTIONS_HEADING = '## Notes with active intentions:';
-
-// What the intentions block SHIPPED, read back off the rendered text rather
-// than taken from the list that went in. capSection drops whole lines to fit
-// MEM_CAP, so the assembled set overstates what the session was shown, and a
-// join built on the assembled set would score impressions that never
-// happened. The count suffix is stripped from the right so a context whose
-// own name contains parentheses survives intact.
-export function shippedIntentionContexts(text) {
-  if (!text) return [];
-  const out = [];
-  for (const line of String(text).split('\n')) {
-    // One shape, checked once. Guarding on the raw line and matching on the
-    // trimmed one meant the trim could never change the outcome, and an
-    // indented row would be rejected by the guard before the trim it was
-    // there to survive.
-    const m = /^- (.+) \(\d+ notes?\)$/.exec(line.trim());
-    if (m) out.push(m[1]);
-  }
-  return out;
-}
-
-// Record what the intentions block shipped, against the payload emitJson says
-// it wrote.
-//
-// Two truncations stand between the assembled list and the model. capSection
-// is the first and is visible to the assembler. emitJson's backstop trim is
-// the second, fires only when the whole payload is oversized, and takes this
-// block first by design. Measured on a live install: 9,538 bytes assembled,
-// 8,054 emitted, 59 contexts recorded, 21 of them absent from what was sent.
-// Reading the emitted text instead makes the row true by construction rather
-// than by comment.
-//
-// A truncation that removes the heading removes every context with it, and
-// that is the right answer: nothing of the block reached the session.
-export function recordIntentionsShipped(ctx, emitted, pluginData) {
-  if (!ctx?.intentionsBlock) return null;
-  const text = String(emitted ?? '');
-  const start = text.indexOf(INTENTIONS_HEADING);
-  let section = '';
-  if (start !== -1) {
-    const rest = text.slice(start + INTENTIONS_HEADING.length);
-    const end = rest.indexOf('\n## ');
-    section = end === -1 ? rest : rest.slice(0, end);
-  }
-  const meta = {
-    // writeRetrieval stamps getSessionId(), the env/marker resolution.
-    // vault-snapshot already resolved the canonical id (the stdin payload
-    // first, M4) onto ctx.sessionId, and the used-side events key on that one.
-    // A row stamped the other way joins against nothing, which is its only job.
-    session_id: ctx.sessionId,
-    contexts: shippedIntentionContexts(section),
-    assembled_count: ctx.intentionsAssembledCount ?? 0,
-  };
-  writeRetrieval({
-    pluginData,
-    prefix: 'session-start-pack',
-    command: 'intentions',
-    query: '',
-    results: null,
-    meta,
-  });
-  return meta;
-}
-
 // Memory index injection. When the index fits under the cap, inject it whole —
 // every line carries signal. When it overflows, soft-truncate: keep the head up
 // to the last full line under the cap (still real, grep-able entries in raw
@@ -246,12 +176,12 @@ function injectProjectAndDeps(ctx) {
 }
 
 // 2. Retrieval protocol. Emitted BEFORE the variable-size sections (memory
-// indexes, learned patterns, intentions): emitJson trims oversized
+// indexes, learned patterns): emitJson trims oversized
 // additionalContext from the TAIL, so behavior-defining instructions must
 // sit ahead of the bulk that could push the payload past the stdout cap.
 // Every variable-size section below is byte-capped via capSection, and the
 // memory indexes are assembled first among them so a backstop trim evicts
-// the lower-value tail (patterns, intentions) before the index lines.
+// the lower-value tail (patterns) before the index lines.
 //
 // NOTE: this protocol mirrors the static "Learning Loop" section /init
 // installs into the user's CLAUDE.md. The template in
@@ -276,7 +206,7 @@ function injectRetrievalProtocol(ctx, searchCmd) {
 
   if (staticProtocolPresent && depsAllSatisfied) {
     ctx.context += '\n## Learning Loop — Retrieval Protocol\n';
-    ctx.context += `Follow the Learning Loop section in your CLAUDE.md. Vault search: \`${searchCmd} search "<topic>"\`; intentions drill-in: \`${searchCmd} intentions "<context>"\`.\n`;
+    ctx.context += `Follow the Learning Loop section in your CLAUDE.md. Vault search: \`${searchCmd} search "<topic>"\`.\n`;
   } else {
     ctx.context += '\n## Learning Loop — Retrieval Protocol\n';
     ctx.context +=
@@ -291,12 +221,11 @@ function injectRetrievalProtocol(ctx, searchCmd) {
         '2. (Skipped — episodic memory plugin not installed. Run /learning-loop:init to set up.)\n';
     }
     ctx.context += `3. Search the Obsidian vault — use \`${searchCmd} search "<topic>"\` for semantic matches, \`Grep\` for keyword matches.\n`;
-    ctx.context += `4. Check the intention summary below (if present). For relevant contexts, drill in with \`${searchCmd} intentions "<context>"\` to see specific notes and cues.\n`;
     ctx.context +=
-      "5. Surface relevant findings in a single line prefixed with 'Recall:' or 'Transfer:'\n";
-    ctx.context += '6. When corrected, immediately save to auto-memory as feedback. No delay.\n';
+      "4. Surface relevant findings in a single line prefixed with 'Recall:' or 'Transfer:'\n";
+    ctx.context += '5. When corrected, immediately save to auto-memory as feedback. No delay.\n';
     ctx.context +=
-      '7. After substantial work, suggest /learning-loop:reflect to consolidate learnings.\n';
+      '6. After substantial work, suggest /learning-loop:reflect to consolidate learnings.\n';
     ctx.context += 'Keep retrieval lightweight — one line per insight, not a wall of text.\n';
   }
 }
@@ -343,7 +272,7 @@ function injectGlobalMemory(ctx, state) {
   }
 }
 
-// 6. Learned patterns — capped like the memory indexes.
+// 5. Learned patterns — capped like the memory indexes.
 function injectLearnedPatterns(ctx, state) {
   if (!ctx.pluginData) return;
   const patternsFile = join(DATA_PATHS.provenance(ctx.pluginData), 'learned-patterns.md');
@@ -360,7 +289,7 @@ function injectLearnedPatterns(ctx, state) {
   }
 }
 
-// 7. Federation status — a line only when there is something wrong.
+// 6. Federation status — a line only when there is something wrong.
 function injectFederation(ctx, state) {
   if (!ctx.pluginData) return;
   try {
@@ -373,7 +302,7 @@ function injectFederation(ctx, state) {
   }
 }
 
-// 8. Newest session ledger for this repo: the "what did I do here last time"
+// 7. Newest session ledger for this repo: the "what did I do here last time"
 // answer in one line. Path only; the note itself is one Read away. Reads the
 // project the ledger hook already resolved (marker), rather than resolving it
 // again here. SessionStart must never spawn git.
@@ -395,58 +324,7 @@ function injectLedgerPointer(ctx, state) {
   }
 }
 
-// 9. Intention summary — read cached marker; refresh in background. The
-// rendered list is capped: the marker array is unbounded (one line per
-// intention context), and an oversized list must not evict earlier sections.
-// pluginData required: the worker resolves PLUGIN_DATA from the same source
-// (config.mjs reads CLAUDE_PLUGIN_DATA). A fallback to pluginDir would
-// produce a different path than the worker writes to.
-function injectIntentions(ctx, state, searchCmd) {
-  const { pluginData, pluginDir } = ctx;
-  if (!pluginData) return;
-  try {
-    const cached = readMarker(MARKER_PATHS.intentions(pluginData));
-    // One marker entry per distinct `context` string, and most group a single
-    // note: cue-shaped sentences get written into the context slot, so each
-    // produces its own one-note "context". Rendering them all overruns
-    // MEMORY_INDEX_MAX_BYTES, so the list is cut mid-way and ships an
-    // arbitrary prefix while dropping the contexts that group real work.
-    const grouped = Array.isArray(cached) ? cached.filter((item) => item.count > 1) : [];
-    if (grouped.length > 0) {
-      let list = '';
-      for (const item of grouped) {
-        list += `- ${item.context} (${item.count} notes)\n`;
-      }
-      const capped = capSection(
-        list,
-        `[truncated — run \`${searchCmd} intentions\` for the full list]`,
-      );
-      state.retrieved += `\n${INTENTIONS_HEADING}\n`;
-      state.retrieved += `${capped}\n`;
-      // The pack has never had a surfaced->used join, so the value of this
-      // block is unmeasured rather than low. The row that records it is NOT
-      // written here: capSection above is only the first of two truncations,
-      // and this block is deliberately positioned to be the first victim of
-      // the second one (emitJson's backstop trim, see the section order at
-      // :210). Reading back off `capped` therefore records impressions the
-      // model never received, which is the exact error this feature exists
-      // to prevent. session-start.js emits the row after emitJson, against
-      // the text emitJson says it actually wrote.
-      ctx.intentionsBlock = capped;
-      ctx.intentionsAssembledCount = grouped.length;
-    }
-    // Kick off detached refresh; the worker derives the marker path from PLUGIN_DATA itself.
-    spawnDetached('session-start.context-assembly.intentions', process.execPath, [
-      join(pluginDir, 'scripts', 'vault-search.mjs'),
-      'intentions',
-      '--session-start-refresh',
-    ]);
-  } catch (err) {
-    logError('session-start.context-assembly.intentions', err);
-  }
-}
-
-// 10. Emit session-start provenance event inline: one JSONL append is
+// 8. Emit session-start provenance event inline: one JSONL append is
 // cheaper than a detached node child (see modules/provenance.mjs, which
 // made the same call for the post-tool hot path).
 function emitSessionStartProvenance() {
@@ -466,22 +344,20 @@ export async function run(ctx) {
   injectRetrievalProtocol(ctx, searchCmd);
   injectDreamGate(ctx);
 
-  // Sections 4-7 and the intention list are read off disk — memory indexes,
-  // learned patterns, peer names, note frontmatter. All of it is third-party
-  // text that lands in a prompt, so it is gathered here and emitted inside one
-  // untrusted-data envelope (the prose sibling of wrapRetrieval's JSON one)
-  // rather than concatenated raw next to the plugin's own instructions. The
-  // operator lines that used to sit between those sections move to
-  // operatorTail so they stay outside the envelope, and the block is emitted
-  // where section 4 began — keeping the capped indexes ahead of lower-value
-  // sections for emitJson's tail trim.
+  // Sections 4-6 are read off disk — memory indexes, learned patterns, peer
+  // names. All of it is third-party text that lands in a prompt, so it is
+  // gathered here and emitted inside one untrusted-data envelope (the prose
+  // sibling of wrapRetrieval's JSON one) rather than concatenated raw next to
+  // the plugin's own instructions. The operator lines that used to sit between
+  // those sections move to operatorTail so they stay outside the envelope, and
+  // the block is emitted where section 4 began — keeping the capped indexes
+  // ahead of lower-value sections for emitJson's tail trim.
   const state = { retrieved: '', operatorTail: '' };
 
   injectGlobalMemory(ctx, state);
   injectLearnedPatterns(ctx, state);
   injectFederation(ctx, state);
   injectLedgerPointer(ctx, state);
-  injectIntentions(ctx, state, searchCmd);
 
   const framed = wrapRetrievalText(state.retrieved, { origin: 'session-start' });
   if (framed) ctx.context += `\n${framed}\n`;
