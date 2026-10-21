@@ -4,6 +4,18 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+### Changed
+
+- **The JIT injection is back to one body slot and four pointers.** v2.1.0 moved to two bodies and three pointers with a pre-registered criterion: revert if the used-note rate does not move. It did not. Main-session telemetry, joined to `/reflect` note-usage and vault edits, shape-guarded per layout, sessions with usage only:
+
+  | window                    | layout | bursts (sessions) | used notes / burst      | body hits / burst  | tokens / burst | used notes / 1k tokens |
+  | ------------------------- | ------ | ----------------- | ----------------------- | ------------------ | -------------- | ---------------------- |
+  | 09-08 → 09-17             | 1 / 4  | 215 (50)          | 0.72 [0.55, 0.87]       | 0.45 [0.35, 0.55]  | 516            | 1.39 [1.06, 1.71]      |
+  | 09-17 → 10-03 (same span) | 2 / 3  | 211 (68)          | 0.62 [0.47, 0.80]       | 0.47 [0.35, 0.62]  | 723            | 0.86 [0.66, 1.10]      |
+  | 09-17 → 10-21             | 2 / 3  | 638 (171)         | 0.54 [0.46, 0.62]       | 0.42 [0.36, 0.49]  | 698            | 0.77 [0.67, 0.89]      |
+
+  Brackets are 95% session-bootstrap intervals. The cleanest slot-level comparison is rank 1, the same ordinal candidate in two formats: it converted 17.5% as a pointer (35/200) and 16.8% as a body (99/591), so the 2.5x within-note format effect that justified the change did not show up at the margin. The second body cost ~220 tokens per burst (median 555 for 1 body + 4 pointers, 775 for 2 + 3) and burned body-suppressed notes from the dedupe corpus at 1.9 per burst instead of 1.0. Two caveats, both pointing the same way: v2.1.0 also added the prompt-impact gate and took the reranker out of the ordering, both meant to raise the used rate, so the two windows differ in more than slots; and the old window has more bursts per session (4.3 against 3.7), which mechanically lowers its hits per burst. `INJECTION_LAYOUT_EPOCH` moves to 2026-10-21 so `injection-precision.mjs` windows on the restored layout, and until data accumulates its default window will be thin.
+
 ### Removed
 
 - **SessionStart no longer re-injects the project's `MEMORY.md`.** Claude Code loads that file into every session itself, so the hook's "Auto-memory index for this project" section was a second copy of up to 3 KB. The vault-parent index still ships when the session runs outside the vault parent, because Claude Code only loads the current project's file. Codex registers no SessionStart hook, so nothing changes there.

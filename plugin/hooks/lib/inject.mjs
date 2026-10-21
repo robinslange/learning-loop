@@ -211,19 +211,20 @@ export function enrichVaultHits(hits, vaultRoot) {
 // pointer — the note still qualifies for body injection (the model has only
 // seen a one-line title, not the content). A plain Set (legacy callers) is
 // treated as all-body.
-// Measured on 206 live turns: a body-slot note is used 31.6% of the time, a
-// pointer 5.1%. Controlling for the note (74 notes appeared at both levels)
-// the format alone is worth 2.5x, 30.7% against 12.2%. The slot count is the
-// lever, so it is a constant rather than whatever findIndex happened to land
-// on. Total stays at five notes: this trades a pointer for a body, so format
-// is the only variable.
+// One body, four pointers. v2.1.0 tried two bodies on a within-note format
+// effect (74 notes seen at both levels converted 30.7% as a body against 12.2%
+// as a pointer) and was reverted on its own pre-registered criterion: the
+// rank-1 note converted 16.8% as a body (99/591) against 17.5% as a pointer
+// before (35/200), used notes per burst did not rise, and each burst cost ~220
+// more tokens. A second body also burns the dedupe corpus twice as fast, since
+// a body-injected note is suppressed from later turns and a pointer is not.
 //
 // Exported because bench/injection-precision.mjs needs the shipped layout to
 // tell a burst this code produced from one an older version produced: the two
 // are not commensurable, and a second copy of these two numbers would drift
 // from this one, which is the bug that measurement tool exists to avoid.
-export const BODY_SLOTS = 2;
-export const POINTER_SLOTS = 3;
+export const BODY_SLOTS = 1;
+export const POINTER_SLOTS = 4;
 
 export function buildInjection({ vaultHits, query, alreadyInjected }) {
   const levelOf = (path) => alreadyInjected.get(path);
