@@ -411,11 +411,17 @@ function injectIntentions(ctx, state, searchCmd) {
     // produces its own one-note "context". Rendering them all overruns
     // MEMORY_INDEX_MAX_BYTES, so the list is cut mid-way and ships an
     // arbitrary prefix while dropping the contexts that group real work.
-    const grouped = Array.isArray(cached) ? cached.filter((item) => item.count > 1) : [];
+    const grouped = Array.isArray(cached)
+      ? cached.filter((item) => item.count > 1).sort((a, b) => b.count - a.count)
+      : [];
     if (grouped.length > 0) {
+      const shown = grouped.slice(0, HookConfig.INTENTIONS_MAX_CONTEXTS);
       let list = '';
-      for (const item of grouped) {
+      for (const item of shown) {
         list += `- ${item.context} (${item.count} notes)\n`;
+      }
+      if (grouped.length > shown.length) {
+        list += `- …${grouped.length - shown.length} more: \`${searchCmd} intentions\`\n`;
       }
       const capped = capSection(
         list,
@@ -433,7 +439,7 @@ function injectIntentions(ctx, state, searchCmd) {
       // to prevent. session-start.js emits the row after emitJson, against
       // the text emitJson says it actually wrote.
       ctx.intentionsBlock = capped;
-      ctx.intentionsAssembledCount = grouped.length;
+      ctx.intentionsAssembledCount = shown.length;
     }
     // Kick off detached refresh; the worker derives the marker path from PLUGIN_DATA itself.
     spawnDetached('session-start.context-assembly.intentions', process.execPath, [

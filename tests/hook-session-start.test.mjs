@@ -1082,6 +1082,35 @@ test(
   },
 );
 
+test(
+  'session-start ships only the largest intention contexts and points at the rest',
+  { timeout: 12000 },
+  () => {
+    const r = runHook(HOOK, {
+      stdin: { session_id: 'intentions-cap-session' },
+      env: { VAULT_PATH: VAULT },
+      seed: (pd) => {
+        seedUpdateCheck(pd);
+        const cacheDir = join(pd, 'session-start-cache');
+        mkdirSync(cacheDir, { recursive: true });
+        const items = [];
+        for (let i = 0; i < 20; i++) items.push({ context: `ctx-${i}`, count: i + 2 });
+        writeFileSync(join(cacheDir, 'intentions.json'), JSON.stringify(items));
+      },
+    });
+    try {
+      assert.equal(r.exitCode, 0, `unexpected exit: ${r.exitCode}\nstderr: ${r.stderr}`);
+      const ctx = parseOutput(r.stdout, 'intentions-cap').additionalContext;
+      assert.match(ctx, /- ctx-19 \(21 notes\)/);
+      assert.match(ctx, /- ctx-5 \(7 notes\)/);
+      assert.ok(!ctx.includes('- ctx-4 '), 'contexts past the cap must not ship');
+      assert.match(ctx, /…5 more: `[^`]+ intentions`/);
+    } finally {
+      r.cleanup();
+    }
+  },
+);
+
 // ---------------------------------------------------------------------------
 // 8b: newest session ledger for this repo.
 // ---------------------------------------------------------------------------

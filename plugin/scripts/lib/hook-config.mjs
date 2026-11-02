@@ -166,6 +166,9 @@ export const HookConfig = Object.freeze({
   SESSION_SIZE_THRESHOLD_BYTES: 512_000,
   HOOK_STDOUT_MAX_BYTES: 8192,
   MEMORY_INDEX_MAX_BYTES: 3072,
+  // The intentions list is a menu for drill-in, not content: the long tail
+  // of a large vault cost ~3 KB a session while the drill-in command lists it all.
+  INTENTIONS_MAX_CONTEXTS: 15,
 
   // --- Stop-nudge message count threshold (JSONL transcript lines) ---
   STOP_NUDGE_MESSAGE_COUNT: 200,
