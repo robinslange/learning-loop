@@ -34,7 +34,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { resolve, basename } from 'node:path';
 import { isMainModule } from './lib/is-main.mjs';
-import { hasFlag, flagValue } from './lib/cli-args.mjs';
+import { hasFlag, flagValue, runCli } from './lib/cli-args.mjs';
 import { logError } from './lib/log.mjs';
 import { safeLoad } from './lib/safe-load.mjs';
 import { stripFrontmatter, splitRawFrontmatter } from './lib/markdown-parse.mjs';
@@ -505,6 +505,4 @@ function main() {
   process.stdout.write(JSON.stringify({ summary, decisions: validated }, null, 2) + '\n');
 }
 
-if (isMainModule(import.meta.url)) {
-  main();
-}
+if (isMainModule(import.meta.url)) await runCli(main);

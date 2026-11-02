@@ -16,17 +16,17 @@ import { readFileSync } from 'fs';
 import { basename, sep } from 'path';
 import { isMainModule } from './lib/is-main.mjs';
 import { logError } from './lib/log.mjs';
-import { PLUGIN_DATA, VAULT_PATH } from './lib/constants.mjs';
+import { getPluginData, getVaultPath } from './lib/config.mjs';
 import { DATA_FILES } from './lib/paths.mjs';
 import { openEdgeDb, addEdge, removeOutgoingEdges, saveDb } from './lib/edges.mjs';
 import { acquireLock, releaseLock } from './lib/file-lock.mjs';
 import { classifyNoteEdges, buildVaultIndex, makeResolver } from './lib/edge-classifier.mjs';
-import { hasFlag, flagValue } from './lib/cli-args.mjs';
+import { hasFlag, flagValue, runCli } from './lib/cli-args.mjs';
 import { listVaultNotes } from './lib/vault-walk.mjs';
 
 const VAULT_DIRS = ['0-inbox', '1-fleeting', '2-literature', '3-permanent', '4-projects', '5-maps'];
 
-// CLI-only state is resolved inside main(), never at module scope. PLUGIN_DATA
+// CLI-only state is resolved inside main(), never at module scope. Plugin data
 // is null wherever plugin-data isn't configured, and `DATA_FILES.edgesDb(null)`
 // throws — so computing it here crashed every importer of the pure exports
 // below on any machine without plugin-data, CI included.
@@ -89,11 +89,13 @@ export function isScopedRun({ folderFilter, limit }) {
 }
 
 async function main() {
-  if (!VAULT_PATH) {
+  const vaultPath = getVaultPath();
+  const pluginData = getPluginData();
+  if (!vaultPath) {
     console.error('VAULT_PATH not configured');
     process.exit(1);
   }
-  if (!PLUGIN_DATA) {
+  if (!pluginData) {
     console.error('plugin data dir not configured');
     process.exit(1);
   }
@@ -102,15 +104,15 @@ async function main() {
   const dryRun = hasFlag(args, '--dry-run');
   const folderFilter = flagValue(args, '--folder');
   const limit = parseInt(flagValue(args, '--limit') || '0', 10);
-  const DB_FILE = DATA_FILES.edgesDb(PLUGIN_DATA);
+  const DB_FILE = DATA_FILES.edgesDb(pluginData);
 
   const folders = folderFilter ? [folderFilter] : VAULT_DIRS;
-  const files = walkVault(VAULT_PATH, folders, limit);
+  const files = walkVault(vaultPath, folders, limit);
   const scoped = isScopedRun({ folderFilter, limit });
   console.error(`Scanning ${files.length} notes from ${folders.join(', ')}...`);
 
   console.error('Building vault index for link resolution...');
-  const resolver = makeResolver(buildVaultIndex(VAULT_PATH));
+  const resolver = makeResolver(buildVaultIndex(vaultPath));
 
   const stats = {
     notes_scanned: 0,
@@ -123,7 +125,7 @@ async function main() {
   const walkedSourceRels = new Set(
     files.map((fp) =>
       fp
-        .slice(VAULT_PATH.length + 1)
+        .slice(vaultPath.length + 1)
         .split(sep)
         .join('/'),
     ),
@@ -154,7 +156,7 @@ async function main() {
 
       const sourceName = basename(filePath, '.md');
       const sourceRel = filePath
-        .slice(VAULT_PATH.length + 1)
+        .slice(vaultPath.length + 1)
         .split(sep)
         .join('/');
       const classified = classifyNoteEdges(content, sourceName, resolver);
@@ -208,9 +210,4 @@ async function main() {
   console.log(JSON.stringify({ ...stats, dry_run: dryRun }, null, 2));
 }
 
-if (isMainModule(import.meta.url)) {
-  main().catch((err) => {
-    console.error(err.stack || err.message);
-    process.exit(1);
-  });
-}
+if (isMainModule(import.meta.url)) await runCli(main);

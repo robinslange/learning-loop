@@ -5,7 +5,7 @@
 
 import { statSync, readFileSync, existsSync } from 'node:fs';
 import { join, basename } from 'node:path';
-import { VAULT_PATH, DB_PATH } from '../lib/constants.mjs';
+import { getVaultPath } from '../lib/config.mjs';
 import { appendItem, newItemId } from './queue.mjs';
 import { logError } from '../lib/log.mjs';
 import { stripFrontmatter } from '../lib/markdown-parse.mjs';
@@ -27,7 +27,7 @@ export function pickNote(allPaths, checked) {
 
 export function mtimeOf(notePath) {
   try {
-    return statSync(join(VAULT_PATH, notePath)).mtimeMs;
+    return statSync(join(getVaultPath(), notePath)).mtimeMs;
   } catch {
     return null;
   }
@@ -38,7 +38,7 @@ export function mtimeOf(notePath) {
  * @returns {boolean} true if a suspect was queued.
  */
 export function checkStaleness(notePath) {
-  const fullPath = join(VAULT_PATH, notePath);
+  const fullPath = join(getVaultPath(), notePath);
   const mtime = statSync(fullPath).mtimeMs;
   const ageMs = Date.now() - mtime;
   if (ageMs < 60 * 24 * 60 * 60 * 1000) return false;
@@ -122,7 +122,7 @@ export async function getTagVocabulary(db, structuralTags) {
  * Read note body, stripping frontmatter and capping at maxChars.
  */
 export function readNoteBody(notePath, maxChars = 500) {
-  const fullPath = join(VAULT_PATH, notePath);
+  const fullPath = join(getVaultPath(), notePath);
   if (!existsSync(fullPath)) return null;
   const content = stripFrontmatter(readFileSync(fullPath, 'utf-8'));
   return content.trim().slice(0, maxChars);

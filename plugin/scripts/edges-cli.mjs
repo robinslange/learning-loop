@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { PLUGIN_DATA } from './lib/constants.mjs';
+import { getPluginData } from './lib/config.mjs';
 import { DATA_FILES } from './lib/paths.mjs';
 import { findContradictionCycles } from './lib/cycle-detect.mjs';
 import { acquireLock, releaseLock } from './lib/file-lock.mjs';
@@ -23,7 +23,7 @@ import {
   findMatchingSupersessions,
 } from './lib/edges.mjs';
 
-const DB_FILE = DATA_FILES.edgesDb(PLUGIN_DATA);
+const DB_FILE = DATA_FILES.edgesDb(getPluginData());
 const args = process.argv.slice(2);
 const cmd = args[0];
 
