@@ -7,9 +7,10 @@ import { join } from 'node:path';
 
 // ygrep's walker excludes paths under /tmp by default. That is os.tmpdir() on
 // Linux, but also on any machine where TMPDIR points under /tmp (e.g. the agent
-// harness sets TMPDIR=/tmp/claude-<uid>). Anchor fixtures under $HOME whenever
-// tmpdir() resolves under /tmp, so the indexer actually walks the fixture.
-const fixtureRoot = tmpdir().startsWith('/tmp') ? homedir() : tmpdir();
+// harness sets TMPDIR=/tmp/claude-<uid>). The test run's HOME is itself made
+// under tmpdir() (helpers/isolate-env.mjs), so fall back to the checkout when
+// both are under /tmp, so the indexer actually walks the fixture.
+const fixtureRoot = [tmpdir(), homedir(), process.cwd()].find((d) => !d.startsWith('/tmp'));
 
 function ygrepAvailable() {
   try {

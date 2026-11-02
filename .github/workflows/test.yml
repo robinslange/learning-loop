@@ -104,7 +104,7 @@ jobs:
           test ! -e node_modules
           suites=$(find tests -name '*.test.mjs' | xargs grep -LE 'helpers/(msw|ollama-mock)\.mjs' | sort)
           echo "$(echo "$suites" | wc -l) suites"
-          node --test $suites
+          node --import ./tests/helpers/isolate-env.mjs --test $suites
 
   cargo:
     runs-on: ubuntu-latest
