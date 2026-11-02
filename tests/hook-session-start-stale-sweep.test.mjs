@@ -4,7 +4,7 @@
 //   1. bin/ll-search.*-bak — orphaned backups from the old delta-patch updater.
 //   2. convergence/*.json older than CONVERGENCE_TTL_MS — regenerable telemetry.
 //
-// vault-snapshot.mjs runs the TTL sweep: retrieval/session-dedupe + markers/
+// vault-snapshot.mjs runs the TTL sweep: retrieval/session-dedupe, markers/, fetch-budget/
 // (7d), edges.db.<pid>.tmp orphans (1h), tmp per-session/legacy markers (7d,
 // never the live learning-loop-session-id fallback), plus retrieval log AND
 // logs/log-YYYY-MM.jsonl month-pruning (drop months older than the
@@ -447,6 +447,47 @@ test('sweep: librarian queue.jsonl.bak.* older than 7 days removed, fresh backup
     );
     assert.ok(existsSync(freshBak), 'queue.jsonl.bak.* within 7 days must survive');
     assert.ok(existsSync(liveQueue), 'the live queue.jsonl must never be swept');
+  });
+
+  rmSync(isolatedTmp, { recursive: true, force: true });
+});
+
+test('sweep: fetch-budget session dirs and legacy .count files older than 7 days removed, fresh ones survive', async () => {
+  const fx = makeFixture();
+  const budgetDir = join(fx.ctx.pluginData, 'fetch-budget');
+  const staleDir = join(budgetDir, 'stale-sid');
+  const freshDir = join(budgetDir, 'fresh-sid');
+  const staleCount = join(budgetDir, 'legacy-sid.count');
+  mkdirSync(staleDir, { recursive: true });
+  mkdirSync(freshDir, { recursive: true });
+  writeFileSync(join(staleDir, '1'), '');
+  writeFileSync(join(freshDir, '1'), '');
+  writeFileSync(staleCount, '3');
+  const eightDaysAgo = 8 * 24 * 60 * 60 * 1000;
+  ageFile(staleDir, eightDaysAgo);
+  ageFile(staleCount, eightDaysAgo);
+
+  const isolatedTmp = mkdtempSync(join(realpathSync(tmpdir()), 'll-sweep-budget-tmp-'));
+  await withSandbox(fx, async () => {
+    await run({
+      ...fx.ctx,
+      tmp: isolatedTmp,
+      projectDir: null,
+      home: join(fx.sandbox, 'memdir'),
+      payload: { session_id: 'fetch-budget-test-sid' },
+    });
+
+    assert.equal(
+      existsSync(staleDir),
+      false,
+      'a fetch-budget dir older than 7 days must be removed',
+    );
+    assert.equal(
+      existsSync(staleCount),
+      false,
+      'a legacy <sid>.count older than 7 days must be removed',
+    );
+    assert.ok(existsSync(join(freshDir, '1')), 'a fresh fetch-budget dir must survive');
   });
 
   rmSync(isolatedTmp, { recursive: true, force: true });

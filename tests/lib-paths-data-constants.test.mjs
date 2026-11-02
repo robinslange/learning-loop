@@ -44,6 +44,7 @@ const PERSISTED = {
   'DATA_PATHS.markers': 'markers',
   'DATA_PATHS.provenance': 'provenance',
   'DATA_PATHS.federation': 'federation',
+  'DATA_PATHS.fetchBudget': 'fetch-budget',
   'DATA_PATHS.sessionStartCache': 'session-start-cache',
   'DATA_PATHS.dreamEval': 'dream-eval',
   'DATA_PATHS.dreamEvalProbes': 'dream-eval/probes.jsonl',
