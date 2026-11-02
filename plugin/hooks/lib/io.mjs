@@ -50,13 +50,6 @@ function writeRaw(text) {
  * shrunk by trimming hookSpecificOutput.additionalContext (the one
  * variable-length field hooks emit); a payload that cannot be shrunk that way
  * is dropped with a logged error — corrupt JSON is never written.
- *
- * Returns the additionalContext as EMITTED, which is not the string that came
- * in whenever the backstop below fired, and `null` when nothing was written or
- * there was no additionalContext to report. A caller that records what the
- * session was shown has to read this rather than the value it passed: the
- * assembled text is what it hoped to send, and the difference is exactly the
- * part the model never saw. Every other caller ignores the return.
  */
 export function emitJson(obj) {
   let text;
@@ -64,12 +57,11 @@ export function emitJson(obj) {
     text = JSON.stringify(obj);
   } catch (err) {
     logError('hooks/lib/io.emitJson.stringify', err);
-    return null;
+    return;
   }
   if (Buffer.byteLength(text, 'utf8') <= MAX) {
     writeRaw(text);
-    const whole = obj?.hookSpecificOutput?.additionalContext;
-    return typeof whole === 'string' ? whole : null;
+    return;
   }
 
   const ctx = obj?.hookSpecificOutput?.additionalContext;
@@ -103,7 +95,7 @@ export function emitJson(obj) {
       const tail = ctx.charCodeAt(keep - 1);
       if (keep > 0 && tail >= 0xd800 && tail <= 0xdbff) keep -= 1;
       writeRaw(build(keep));
-      return ctx.slice(0, keep) + FIELD_TRUNC;
+      return;
     }
   }
 
@@ -113,5 +105,4 @@ export function emitJson(obj) {
       `payload ${Buffer.byteLength(text, 'utf8')}B exceeds ${MAX}B with no trimmable additionalContext; emitted nothing`,
     ),
   );
-  return null;
 }

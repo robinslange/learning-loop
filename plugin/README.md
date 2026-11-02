@@ -26,7 +26,7 @@ The names are the hook script basenames in `${CLAUDE_PLUGIN_ROOT}/hooks/`:
 
 | Name                  | Event           | What turning it off costs                            |
 | --------------------- | --------------- | ---------------------------------------------------- |
-| `session-start`        | SessionStart    | No retrieval protocol, memory indexes, or intentions |
+| `session-start`        | SessionStart    | No retrieval protocol or memory indexes              |
 | `session-label`        | UserPromptSubmit| No just-in-time vault injection or session labelling  |
 | `pre-write-check`      | PreToolUse      | No duplicate/frontmatter gate before a vault write    |
 | `web-guard`            | PreToolUse      | Web research is no longer routed through the gateway  |

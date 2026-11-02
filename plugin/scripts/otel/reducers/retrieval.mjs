@@ -4,9 +4,9 @@
 // signal mapping: "retrieval streams to counters plus result_count
 // histograms, labelled by command, via, level, federated." Four sibling
 // streams under DATA_PATHS.retrieval share one reducer: queries, reads,
-// injections and shadow-injection. cache-health and session-start-pack live
-// in the same directory but are owned by other reducers, so the prefix match
-// below must stay precise.
+// injections and shadow-injection. cache-health lives in the same directory
+// but is owned by another reducer, so the prefix match below must stay
+// precise.
 //
 // Follows reduce.mjs's contract: whole-corpus re-derive, no watermark. Two
 // runs over the same files produce byte-identical output.

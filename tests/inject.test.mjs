@@ -273,7 +273,7 @@ describe('buildInjection', () => {
     assert.ok(!result.additionalContext.includes('Note B'), 'pointer must not repeat');
     assert.deepEqual(result.injectedVault, [
       { path: 'a.md', level: 'body', score: 0.95 },
-      { path: 'c.md', level: 'body', score: 0.85 },
+      { path: 'c.md', level: 'pointer', score: 0.85 },
     ]);
   });
 
@@ -334,7 +334,7 @@ describe('buildInjection', () => {
     assert.ok(!result.additionalContext.includes('## From past conversations'));
   });
 
-  it('fills two body slots and three pointer slots, dropping the 6th note', () => {
+  it('fills one body slot and four pointer slots, dropping the 6th note', () => {
     const vaultHits = [{ title: 'Top', path: 'top.md', body: 'Top body.', score: 0.99 }];
     for (let i = 0; i < 5; i++) {
       vaultHits.push({ title: `Related ${i}`, path: `r${i}.md`, body: 'x', score: 0.5 - i * 0.01 });
@@ -344,16 +344,16 @@ describe('buildInjection', () => {
     const pointerPaths = result.injectedVault
       .filter((v) => v.level === 'pointer')
       .map((v) => v.path);
-    assert.deepEqual(bodyPaths, ['top.md', 'r0.md']);
-    assert.deepEqual(pointerPaths, ['r1.md', 'r2.md', 'r3.md']);
+    assert.deepEqual(bodyPaths, ['top.md']);
+    assert.deepEqual(pointerPaths, ['r0.md', 'r1.md', 'r2.md', 'r3.md']);
     assert.equal(result.injectedVault.length, 5, 'total stays at five notes');
     assert.ok(!result.additionalContext.includes('Related 4'), '6th note must be dropped');
   });
 
-  it('gives the second body-bearing hit a body, not a title line', () => {
-    // Measured on live turns: a body slot converts at 31.6% against a pointer's
-    // 5.1%, and 2.5x of that survives controlling for the note itself. The
-    // second slot is the lever, so it is pinned.
+  it('gives the second body-bearing hit a title line, not a body', () => {
+    // A second body slot was tried in v2.1.0 and reverted: the rank-1 note
+    // converted no better as a body than it had as a pointer, at ~220 more
+    // tokens per burst. The single slot is the measured layout, so it is pinned.
     const result = buildInjection({
       vaultHits: [
         { title: 'First', path: 'a.md', body: 'Body A content here.', score: 0.9 },
@@ -363,28 +363,27 @@ describe('buildInjection', () => {
       alreadyInjected: new Map(),
     });
     assert.ok(result.additionalContext.includes('Body A content here.'));
-    assert.ok(result.additionalContext.includes('Body B content here.'));
+    assert.ok(!result.additionalContext.includes('Body B content here.'));
     assert.deepEqual(result.injectedVault, [
       { path: 'a.md', level: 'body', score: 0.9 },
-      { path: 'b.md', level: 'body', score: 0.8 },
+      { path: 'b.md', level: 'pointer', score: 0.8 },
     ]);
   });
 
   it('promotes a pointer-seen note into a body slot', () => {
     // The dedupe map records 'pointer' when the model saw only a title line, so
-    // the note still owes it a body. This was reachable only at rank 0 before a
-    // second slot existed.
+    // the note still owes it a body.
     const result = buildInjection({
       vaultHits: [
-        { title: 'Fresh', path: 'a.md', body: 'Body A content here.', score: 0.9 },
-        { title: 'Seen', path: 'b.md', body: 'Body B content here.', score: 0.8 },
+        { title: 'Seen', path: 'b.md', body: 'Body B content here.', score: 0.9 },
+        { title: 'Fresh', path: 'a.md', body: 'Body A content here.', score: 0.8 },
       ],
       query: 'test',
       alreadyInjected: new Map([['b.md', 'pointer']]),
     });
     assert.deepEqual(result.injectedVault, [
-      { path: 'a.md', level: 'body', score: 0.9 },
-      { path: 'b.md', level: 'body', score: 0.8 },
+      { path: 'b.md', level: 'body', score: 0.9 },
+      { path: 'a.md', level: 'pointer', score: 0.8 },
     ]);
   });
 

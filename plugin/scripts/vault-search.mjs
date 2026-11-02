@@ -103,7 +103,7 @@ function intentions(context) {
   // A vault nobody has indexed yet has no intentions to report. That is an
   // expected state, not a fault, so it never reaches the catch below: the
   // binary's "database file does not exist" would otherwise be logged as an
-  // error on every session start before the first index.
+  // error on every call before the first index.
   if (!hasVaultIndex(VAULT_PATH)) return [];
   try {
     ensureBinary();
@@ -290,19 +290,7 @@ try {
     }
 
     case 'intentions': {
-      // The context is the first non-flag positional. Taking args[1] blindly
-      // handed `--session-start-refresh` to the binary as the context, which
-      // clap rejects; intentions() swallowed the error and returned [], so the
-      // refresh wrote an empty marker every time and the session-start
-      // intentions block never rendered.
-      const context = args.slice(1).find((a) => !a.startsWith('--')) || null;
-      const data = intentions(context);
-      if (args.includes('--session-start-refresh')) {
-        const { writeMarker, MARKER_PATHS } = await import('./lib/marker-cache.mjs');
-        writeMarker(MARKER_PATHS.intentions(PLUGIN_DATA), data);
-      } else {
-        out(data);
-      }
+      out(intentions(args.slice(1).find((a) => !a.startsWith('--')) || null));
       break;
     }
 

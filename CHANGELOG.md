@@ -4,19 +4,29 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+### Changed
+
+- **The JIT injection is back to one body slot and four pointers.** v2.1.0 moved to two bodies and three pointers with a pre-registered criterion: revert if the used-note rate does not move. It did not. Main-session telemetry, joined to `/reflect` note-usage and vault edits, shape-guarded per layout, sessions with usage only:
+
+  | window                    | layout | bursts (sessions) | used notes / burst      | body hits / burst  | tokens / burst | used notes / 1k tokens |
+  | ------------------------- | ------ | ----------------- | ----------------------- | ------------------ | -------------- | ---------------------- |
+  | 09-08 → 09-17             | 1 / 4  | 215 (50)          | 0.72 [0.55, 0.87]       | 0.45 [0.35, 0.55]  | 516            | 1.39 [1.06, 1.71]      |
+  | 09-17 → 10-03 (same span) | 2 / 3  | 211 (68)          | 0.62 [0.47, 0.80]       | 0.47 [0.35, 0.62]  | 723            | 0.86 [0.66, 1.10]      |
+  | 09-17 → 10-21             | 2 / 3  | 638 (171)         | 0.54 [0.46, 0.62]       | 0.42 [0.36, 0.49]  | 698            | 0.77 [0.67, 0.89]      |
+
+  Brackets are 95% session-bootstrap intervals. The cleanest slot-level comparison is rank 1, the same ordinal candidate in two formats: it converted 17.5% as a pointer (35/200) and 16.8% as a body (99/591), so the 2.5x within-note format effect that justified the change did not show up at the margin. The second body cost ~220 tokens per burst (median 555 for 1 body + 4 pointers, 775 for 2 + 3) and burned body-suppressed notes from the dedupe corpus at 1.9 per burst instead of 1.0. Two caveats, both pointing the same way: v2.1.0 also added the prompt-impact gate and took the reranker out of the ordering, both meant to raise the used rate, so the two windows differ in more than slots; and the old window has more bursts per session (4.3 against 3.7), which mechanically lowers its hits per burst. `INJECTION_LAYOUT_EPOCH` moves to 2026-10-21 so `injection-precision.mjs` windows on the restored layout, and until data accumulates its default window will be thin.
+
 ### Removed
 
 - **SessionStart no longer re-injects the project's `MEMORY.md`.** Claude Code loads that file into every session itself, so the hook's "Auto-memory index for this project" section was a second copy of up to 3 KB. The vault-parent index still ships when the session runs outside the vault parent, because Claude Code only loads the current project's file. Codex registers no SessionStart hook, so nothing changes there.
 - **Two static pointer lines are gone from SessionStart:** "Recent vault captures" and "To see notes for a specific context". Both repeated, every session, a command the retrieval-protocol line already names.
-
-### Changed
-
-- **The SessionStart intentions list ships the 15 largest contexts, not the whole list.** On a large vault it ran to ~100 contexts and ~3 KB a session; the rest are one line away (`ll-run vault-search.mjs intentions`), named in a closing pointer row.
+- **SessionStart no longer injects the "Notes with active intentions" list.** Between 2026-09-17 and 2026-10-21 it was shown in 540 of 2,120 Claude Code sessions, about 3.3 KB each (the 3,072-byte `MEMORY_INDEX_MAX_BYTES` cap plus heading and pointer), and a session acted on it with `vault-search.mjs intentions "<context>"` in 5. With it go what existed only to serve it: the detached `vault-search.mjs intentions --session-start-refresh` worker and its `session-start-cache/intentions.json` marker, the `session-start-pack` telemetry row (nothing read it), `emitJson`'s return value (its only caller was that row), and the intentions step in the retrieval protocol. The `intentions:` frontmatter, `/learning-loop:inbox`'s intention-status triage and `vault-search.mjs intentions "<context>"` are unchanged. Existing installs keep a stale `intentions.json` that nothing reads; old `retrieval/session-start-pack-*.jsonl` files age out with the monthly log sweep.
 - **Missing optional dependencies are one line at SessionStart.** Each check used to ship its detail and fix command, ~1 KB on a vault with three warnings. The names stay; the detail and fixes live in `/learning-loop:doctor`. Required dependencies keep their full text.
 
 ### Fixed
 
 - **A project with no memory dir no longer logs an error from the dream gate (#150).** `dream-gate.statMemoryDir` fired on every session in a cwd that had never written a memory, which is the normal state for a short-lived git worktree. On one install it was 84 of 218 errors in a month and kept the error-log health check red. Only a missing dir (`ENOENT`) is quiet now; any other `stat` failure still logs.
+- **An Ollama HTTP error now carries Ollama's reason (#149).** `chat()` threw `ollama HTTP 400` and dropped the response body, so 111 librarian `link_check` failures in a month all read the same and none said why. On `gemma3:12b` the reason is `does not support tools`. The message is now `ollama HTTP 400: <error>`; the `OLLAMA_HTTP_ERROR` code and `status` are unchanged. This does not fix `link_check` itself on a model without tool support, which #149 still tracks.
 - **Three more log writers name their monthly file by the local month (#141).** The cache-health statusline log (`retrieval/cache-health-*.jsonl`), the injections ledger (`retrieval/injections-*.jsonl`) and the federation retractions outbox (`federation/outbox/retractions-*.jsonl`) used the UTC month. East of UTC, a record from the first hours of a local month went into the previous month's file. `retrieval/` is swept on the local-month cutoff, so those hours lost a month of retention. The outbox isn't swept, but it split one stream across two calendars. All three now use `monthStr`, the injections ledger on the injection's own timestamp. Files already written keep their names.
 - **A note written in one session no longer lands in another session's /reflect marker (#122).** The post-tool hook keyed the marker with the resolver alone. Without `CLAUDE_CODE_SESSION_ID` in the hook's env, that resolver reads the machine-wide session id, which names whichever session started last. On Claude Code the hook now uses the session id from its own payload, which is the id the /reflect shell sees. Codex gives shells no session id, so there the hook keeps the machine-wide id the skill also resolves.
 

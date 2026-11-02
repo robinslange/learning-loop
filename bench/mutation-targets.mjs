@@ -69,17 +69,13 @@ export const TARGETS = {
     tests: ['tests/lib-frontmatter-schema.test.mjs'],
     break: 62,
   },
-  // Only the pure exports: federationLine (with its hubText helper) and
-  // shippedIntentionContexts. The rest of the file is I/O.
+  // Only the pure export: federationLine (with its hubText helper). The rest
+  // of the file is I/O.
   'context-assembly': {
     mutate: [
       functionLines(CONTEXT_ASSEMBLY, 'function hubText(', 'export function federationLine('),
-      functionLines(CONTEXT_ASSEMBLY, 'export function shippedIntentionContexts('),
     ],
-    tests: [
-      'tests/session-start-federation-line.test.mjs',
-      'tests/session-start-pack-telemetry.test.mjs',
-    ],
+    tests: ['tests/session-start-federation-line.test.mjs'],
     break: 82,
   },
   'retrieval-usage': {

@@ -137,8 +137,7 @@ function reapPidfile(pidPath) {
 /**
  * Reap every pid recorded in the sandbox's LL_CHILD_PID_FILE (one pid per
  * line, written by recordDetachedChild in hooks/lib/common.mjs). Detached
- * session-start children (dream-gate refresh, intentions worker, provenance
- * emitter) can still be writing inside the sandbox while cleanup's rmSync
+ * session-start children (dream-gate refresh, provenance emitter) can still be writing inside the sandbox while cleanup's rmSync
  * walks it — a mid-walk mkdir resurrects a just-deleted subdir and the
  * parent rmdir fails with ENOTEMPTY. SIGTERM, brief wait, SIGKILL survivors.
  *

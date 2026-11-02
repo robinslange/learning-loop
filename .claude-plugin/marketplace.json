@@ -5,8 +5,8 @@
     "displayName": "Learning Loop"
   },
   "owner": {
-    "name": "Robin Lange",
-    "url": "https://github.com/robinslange"
+    "name": "omit",
+    "url": "https://omit.nz"
   },
   "plugins": [
     {
@@ -32,8 +32,8 @@
       ],
       "categories": ["knowledge-management", "productivity", "search"],
       "author": {
-        "name": "Robin Lange",
-        "url": "https://github.com/robinslange"
+        "name": "omit",
+        "url": "https://omit.nz"
       }
     }
   ]

@@ -111,7 +111,8 @@ export async function chat({
   });
 
   if (!res.ok) {
-    const err = new Error(`ollama HTTP ${res.status}`);
+    const reason = (await res.json().catch(() => null))?.error;
+    const err = new Error(`ollama HTTP ${res.status}${reason ? `: ${reason}` : ''}`);
     err.code = 'OLLAMA_HTTP_ERROR';
     err.status = res.status;
     throw err;

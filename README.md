@@ -6,7 +6,7 @@ Episodic memory gives Claude recall. Learning-loop gives Claude judgment. It ver
 
 ## Why
 
-Most note-taking systems decay. The vault grows, but old notes go unread, contradictions accumulate, and new sessions repeat work the last session already did. Learning-loop closes that loop. Every session starts by recalling what you already know. Every capture earns its place against quality gates. Every belief that changes gets traced through everything that depends on it.
+Most note-taking systems decay. The vault grows, but old notes go unread, contradictions accumulate, and new sessions repeat work the last session already did. Learning-loop closes that loop. Every session starts by recalling what you already know. Every capture earns its place against quality gates. Every belief that changes gets traced through everything that depends on it. Capture everything, then subtract until only the load-bearing remains.
 
 The outcome is a vault that gets sharper, not heavier. Two layers wire the discipline into the runtime. Ten lifecycle hook handlers across seven Claude Code event types fire regardless of what the model decides: retrieval before you ask, a duplicate-and-frontmatter gate before every vault write, and web research routed through a config-selected gateway. The capture agents enforce the rest, verifying citations against academic APIs before a note is written, gating promotion on quality scores, and propagating corrections when a belief changes. The full hook roster lives in [guide/configuration.md](guide/configuration.md).
 
@@ -52,7 +52,7 @@ claude plugin install learning-loop@learning-loop-marketplace
 
 ## Uninstall
 
-Full removal (or run `/learning-loop:uninstall` for a guided version):
+Run `/learning-loop:uninstall` for a guided removal, or by hand:
 
 ```
 /plugin                                    # remove via marketplace UI
@@ -60,112 +60,21 @@ claude mcp remove episodic-memory          # only if no other plugin uses it —
 rm -rf ~/.claude/plugins/data/learning-loop-learning-loop-marketplace/  # purge captured indexes
 ```
 
-### Disabling parts without uninstalling
+To turn off single hooks instead, list them under `hooks.disabled` in the plugin's `config.json`. The per-hook table, with what each one costs to turn off, is in [plugin/README.md](plugin/README.md#disabling-parts-without-uninstalling).
 
-To turn off individual hooks, list their names under `hooks.disabled` in
-`~/.claude/plugins/data/learning-loop-learning-loop-marketplace/config.json`:
+## Your data
 
-```json
-{ "hooks": { "disabled": ["session-label", "post-search-tracking"] } }
-```
+Everything stays on your machine. learning-loop reads and writes three places:
 
-The names are the hook script basenames in `${CLAUDE_PLUGIN_ROOT}/hooks/`. A
-disabled hook exits before reading its input and emits nothing, which every
-registered event reads as "no opinion" — a disabled `PreToolUse` hook allows
-the tool rather than blocking it. The config lives in plugin data, so it
-survives updates; hand-editing `hooks.json` in the plugin cache does not.
+| Location | Content |
+| --- | --- |
+| your vault (set by `/learning-loop:init`) | notes you author; read on retrieval, written by capture skills |
+| `~/.claude/plugins/data/learning-loop-learning-loop-marketplace/` | edges database, provenance and retrieval logs, hook-error logs, session markers |
+| `~/.claude/projects/<project>/memory/` | auto-memory files written when you approve a capture |
 
-To silence hooks from every plugin at once, use `"disableAllHooks": true` in
-`~/.claude/settings.json`. That is the blunt instrument — it is not
-learning-loop-specific — but it is the mechanism Claude Code itself exposes.
-Claude Code's `permissions.deny` array accepts tool-name rules (`Bash(...)`,
-`Read(...)`, `WebFetch`, etc.); there is no documented per-hook deny matcher at
-this Claude Code version. See the
-[permissions documentation](https://docs.anthropic.com/en/docs/claude-code/settings)
-for the current syntax if you want finer control.
+Captured artefacts inherit the trust of their source: a secret pasted into chat can land in plugin data or auto-memory. `/learning-loop:doctor --redact` scans for them. Retrieved notes re-enter context wrapped as untrusted data, so an instruction planted in a note cannot run silently, but anyone who can write to your vault can still try.
 
-The per-hook table, with what each one costs to turn off, ships with the plugin
-at `${CLAUDE_PLUGIN_ROOT}/README.md` so it is readable without network access.
-
-## Capture surface & trust model
-
-learning-loop persists derived indexes locally, and sends nothing off the machine unless you explicitly enable the OTEL export (see below). What it reads and writes:
-
-| Location                                                                     | Content                                                                                                                                      |
-| ---------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| your vault path (configured via `/learning-loop:init`, e.g. `~/brain/brain`) | Notes you author; read on retrieval, written by capture skills                                                                               |
-| `~/.claude/plugins/data/learning-loop-learning-loop-marketplace/`            | Edges database (backlinks, justification graph, supersession index), provenance logs, retrieval query logs, hook-error logs, session markers |
-| `~/.claude/projects/<project>/memory/`                                       | Auto-memory files (preferences, project context) written when you approve a capture                                                          |
-
-The edges database (`edges.db`) stores note-to-note relationships (backlinks, inferred semantic links, supersessions). The `retrieval/` subdirectory holds JSONL logs of every vault and episodic search query. The `provenance/` subdirectory records agent-spawn, skill-invoke, and vault-write events. Hook errors land in `hook-errors-<YYYY-MM>.jsonl` at the plugin data root.
-
-**Trust posture.** Captured artefacts inherit the trust of their source tools. If a secret is pasted into chat or returned by a misbehaving tool, it can land in plugin data or auto-memory. Run `/learning-loop:doctor --redact` to scan for likely secrets. Do not paste credentials into chat.
-
-**Vault as trust boundary.** Retrieved note content is re-emitted into agent context wrapped as untrusted data (Domain 06), so a prompt-injection attempt in a note cannot silently execute. However, operators who let third parties write to their vault inherit prompt-injection risk at the source — the wrapping only contains the blast radius.
-
-**Network egress: off by default.** Everything above is local. The optional
-OTEL export is the one path that sends anything off the machine, and it stays
-off unless you set BOTH `OTEL_EXPORTER_OTLP_ENDPOINT` and
-`otel.export_enabled: true` in the plugin's `config.json`. Neither alone
-enables it.
-
-What it sends is counts, durations and bounded labels: how many events of each
-action, per agent, per skill, per folder; token totals and cache hit rates;
-hook latencies; queue depth; error counts by scope. Metrics are named
-`ll.<stream>.<field>`. `session_id` is allowlisted as a label, but the export
-is whole-corpus aggregates and no reducer currently stamps it: the exported
-data does not support per-session correlation across streams. Token totals
-are attributed per model and plugin version, not per session.
-
-What it never sends is free text. Query text, prompt slices, note titles, vault
-paths, tags, agent task descriptions, research topics and error messages are
-all rejected at the export boundary by an inclusion allowlist that throws on
-any unlisted field, and every label value must be identifier shaped (no
-whitespace, no slashes, at most 128 characters) or it is replaced with
-`invalid` before it leaves. Note that `agent` and `skill` labels are tool
-identifiers: a project-local skill or agent name, which can encode a project or
-client name, does leave the machine, and each distinct name is one time series.
-Worth weighing if your endpoint is not somewhere you control.
-
-Audit exactly what would leave before enabling anything:
-
-```bash
-CLAUDE_PLUGIN_DATA=~/.claude/plugins/data/learning-loop-learning-loop-marketplace \
-  node "$CLAUDE_PLUGIN_ROOT/scripts/otel/run-export.mjs" --dry-run
-```
-
-`--dry-run` prints the payload and sends nothing, even with an endpoint
-configured.
-
-`/learning-loop:doctor` reports whether export is active, how long ago the last
-one succeeded, and flags it as failing once that age passes three trigger
-intervals, so a dead endpoint does not sit unnoticed. A failed POST is also
-written to the durable error log, where the same report counts it by scope, so
-a wrong endpoint or an unreachable host names itself rather than going quiet.
-
-The endpoint is a BASE url and `/v1/metrics` is appended, per the OTLP spec, so
-a path prefix such as `http://raspberrypi.local:4318/otlp` becomes
-`/otlp/v1/metrics`. If your receiver is mounted somewhere that suffix does not
-reach, set `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` to the full url instead and it
-is used verbatim.
-
-### Air-gapped / update-controlled deployment
-
-Set `LL_OFFLINE=1` to suppress every network call the plugin initiates on its own. With it set:
-
-- the SessionStart GitHub update poll (`api.github.com`) does not fire;
-- the binary auto-update download (`github.com/<repo>/releases/...`) does not run — including the manual `/init` and `/doctor` fetch paths;
-- web-research source fetches (`/verify`, `/research`, `/discovery`, the source-resolver and claim-checker) short-circuit cleanly instead of attempting an external request and timing out.
-
-Localhost is never gated — the Ollama daemon I use for local offload still works, so an air-gapped box keeps its local model. `/doctor` reports an **Offline mode: ON** line so I can confirm the suppression is actually engaged rather than silently skipped.
-
-`LL_OFFLINE` is orthogonal to `LL_REPO` (which only repoints the binary download mirror and matters when _not_ offline). One caveat: if I deliberately configure the librarian to use a remote OpenAI-compatible provider (`provider.kind: "openai"` with a `base_url`), that is an explicit opt-in egress and is not gated by `LL_OFFLINE` — the default librarian provider is localhost Ollama, which stays local.
-
-### Hook scope
-
-The `PostToolUse: Write|Edit|Task|Skill` matcher is intentionally broad. For `Write` and `Edit` events the handler runs the full vault-enrichment pipeline (autolink, edge inference, reflect tracking). For `Task` and `Skill` events it runs only lightweight provenance tracking — no vault read, no snapshot load. The matcher breadth is the feature: agent-spawn and skill-invoke events are recorded for auditability, cheaply, by the same dispatcher.
-
-To disable hook tracking entirely without uninstalling, see [Disabling parts without uninstalling](#disabling-parts-without-uninstalling).
+Network egress is off by default. The one outbound path, an optional OTEL metrics export, needs both an endpoint and `otel.export_enabled: true`, sends counts and durations only, and never sends free text. `LL_OFFLINE=1` also stops update polls, binary downloads and web-research fetches. Details: [OTEL export](guide/configuration.md#otel-export) and [network egress](plugin/README.md#network-egress-ll_offline).
 
 ## What it looks like
 
@@ -240,7 +149,7 @@ your-vault/
 
 ## About
 
-Built by [omit.nz](https://omit.nz). This plugin is what happens when we codify our own knowledge work. We do the same thing for teams.
+learning-loop is an [omit](https://omit.nz) product, built and maintained by omit. It stays a Claude Code plugin; omit's desktop app reads the same vault and indexes it with the same search engine ([`ll-core`](https://crates.io/crates/ll-core)).
 
 ## License
 

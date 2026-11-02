@@ -3,7 +3,7 @@
   "version": "2.4.0",
   "description": "Self-improving learning loop across Claude sessions: retrieval, capture, consolidation, and cross-project transfer",
   "author": {
-    "name": "Robin Lange",
+    "name": "omit",
     "url": "https://omit.nz"
   },
   "repository": "https://github.com/robinslange/learning-loop",

@@ -88,7 +88,7 @@ intentions:
 
 `cue` is optional; `context` is not. An entry with no `context` is dropped from the index entirely.
 
-Keep `context` short and reusable, a project or domain handle such as `learning-loop`, `product design`, `any-codebase`. It is a grouping key: the session-start summary lists contexts with note counts, and `vault-search.mjs intentions "<context>"` drills in. A context that reads as a full sentence is a cue that landed in the wrong key, and it fragments the index into buckets of one.
+Keep `context` short and reusable, a project or domain handle such as `learning-loop`, `product design`, `any-codebase`. It is a grouping key: `vault-search.mjs intentions "<context>"` returns every note filed under it. A context that reads as a full sentence is a cue that landed in the wrong key, and it fragments the index into buckets of one.
 
 **Do not write the flat string form.** `parse_intentions` splits a flat string on an em dash and on nothing else, so `- "web development: when implementing X"` files the entire string as the context and loses the cue. `- "web development — when implementing X"` still parses, but it is legacy and collides with the no-em-dash voice rule. Write the mapping.
 

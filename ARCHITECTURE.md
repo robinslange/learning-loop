@@ -572,7 +572,7 @@ These are tracked issues, not defects -- the code works, but the structure is no
 
 A complete session runs like this. The total wall time for session-start (target p95: 500 ms) covers all steps below:
 
-1. **SessionStart** -- `session-start.js` fires. It: checks for plugin updates, verifies dependencies, takes a vault snapshot, starts the ll-search daemon if not running, assembles memory context (memory index, learned patterns, a recent-captures pointer, intention summary), and writes the context to stdout for Claude Code to inject.
+1. **SessionStart** -- `session-start.js` fires. It: checks for plugin updates, verifies dependencies, takes a vault snapshot, starts the ll-search daemon if not running, assembles memory context (the vault-parent memory index, learned patterns, the last-session ledger pointer), and writes the context to stdout for Claude Code to inject.
 
 2. **Prompts** -- `session-label.js` fires on every `UserPromptSubmit`. It runs a vault search — and, when the query was padded with prior-message context, a second concurrent vault query on the prompt alone — both under one race cap. In shadow mode it logs the result; in live mode it injects the top context block into the prompt before the model sees it. The label extracted from the conversation is stored for episodic memory retrieval.
 

@@ -55,7 +55,7 @@ test('hasVaultIndex is false for an unindexed vault, true once the file exists',
 });
 
 // The no-index behaviour of intentions() itself is pinned in
-// vault-search-session-start-refresh.test.mjs, which also asserts the binary is
+// vault-search-intentions.test.mjs, which also asserts the binary is
 // never invoked. Not restated here.
 
 const JS_EXT = /\.(js|mjs)$/;
