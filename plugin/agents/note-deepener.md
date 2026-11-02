@@ -2,7 +2,7 @@
 name: note-deepener
 description: Strengthens a single vault note. Assesses maturity, researches gaps scaled to need, rewrites in persona voice, verifies sources, promotes when ready. Splits multi-idea notes.
 model: sonnet
-effort: xhigh
+effort: high
 tools: Read, Grep, Glob, Write, Edit, Bash, mcp__plugin_episodic-memory_episodic-memory__search
 ---
 
