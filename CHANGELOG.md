@@ -32,6 +32,12 @@ All notable changes to this project are documented here. The format is based on 
 - **A flag with no value gets a usage line, not a stack trace (#124).** `backfill-edges`, `cache-health-report`, `normalise-frontmatter`, `refinement-candidates`, `refinement-validate`, `supersede-note` and `vault-search` now print `--flag needs a value` and exit 2, as `sweep-hook-replay` already did.
 - **The vault and plugin-data paths are resolved per call (#128).** `lib/constants.mjs` fixed them when it was first imported. The librarian daemon kept the vault it started with until it restarted, and tests that changed the environment after import still wrote through the first path. The module is gone, and each caller resolves the path where it uses it. The daemon also rereads `config.json` on each idle pass, so a re-pointed vault reaches it without a restart. The `ll-search` binary's location is still found once per process.
 
+## ll-core v0.2.2 (2026-11-11)
+
+### Security
+
+- **rusqlite moves to 0.41, which bundles libsqlite3-sys 0.39.** 0.2.1 required rusqlite 0.40, whose bundled SQLite carries CVE-2026-119375 (RUSTSEC-2026-0459). Because only one crate in a build may link `sqlite3`, any downstream crate on ll-core 0.2.1 was held on the vulnerable SQLite. ll-search moves to rusqlite 0.41 with it. ll-core's API is unchanged.
+
 ## ll-core v0.2.1 (2026-10-16)
 
 ### Fixed
