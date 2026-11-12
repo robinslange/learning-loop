@@ -271,9 +271,9 @@ All model calls go through `scripts/lib/model-client.mjs` (`chatJSON`), a provid
 
 | Subsystem                    | Primary files                                                          | Convention doc                   | Inventory artefact                            |
 | ---------------------------- | ---------------------------------------------------------------------- | -------------------------------- | --------------------------------------------- |
-| ll-core scoring              | `native/crates/ll-core/src/scoring.rs`                                 | `docs/baseline/rust.md`          | `.planning/inventory/ll-core-api.md`          |
-| ll-core embeddings           | `native/crates/ll-core/src/embed.rs`, `store.rs`                       | `docs/baseline/rust.md`          | `.planning/inventory/ll-core-api.md`          |
-| ll-core graph                | `native/crates/ll-core/src/graph.rs`                                   | `docs/baseline/rust.md`          | `.planning/inventory/ll-core-api.md`          |
+| ll-core scoring              | ll-core (crates.io) `src/scoring.rs`                                 | `docs/baseline/rust.md`          | `.planning/inventory/ll-core-api.md`          |
+| ll-core embeddings           | ll-core (crates.io) `src/embed.rs`, `store.rs`                       | `docs/baseline/rust.md`          | `.planning/inventory/ll-core-api.md`          |
+| ll-core graph                | ll-core (crates.io) `src/graph.rs`                                   | `docs/baseline/rust.md`          | `.planning/inventory/ll-core-api.md`          |
 | ll-search query pipeline     | `native/crates/ll-search/src/search/`                                  | `docs/baseline/rust.md`          | `.planning/inventory/rust-audit.md`           |
 | ll-search database           | `native/crates/ll-search/src/db/`                                      | `docs/baseline/rust.md`          | `.planning/inventory/rust-audit.md`           |
 | ll-search daemon lifecycle   | `native/crates/ll-search/src/main.rs`, `app/`                          | `docs/baseline/rust.md`          | `.planning/inventory/rust-audit.md`           |
@@ -378,7 +378,7 @@ Claude Code
   |           |
   |           +-- [execFileSync] ll-search <subcommand> (per-call subprocess)
   |                   |
-  |                   +-- native/crates/ll-core  (scoring, graph, embeddings)
+  |                   +-- ll-core from crates.io (scoring, graph, embeddings; maintained in omit's private monorepo; source is on crates.io)
   |                   +-- SQLite (notes, embeddings, links; bundled)
   |                   +-- ONNX Runtime (BGE-small embed + reranker; load-dynamic dylib)
   |
@@ -406,7 +406,7 @@ SQLite bundles into the binary (`rusqlite` with `bundled` feature), requires no 
 
 **Why ONNX Runtime is `load-dynamic` rather than statically linked?**
 
-Both inference paths (the bge-small embedder in ll-search and the cross-encoder reranker in ll-core) build `ort` (`2.0.0-rc.12`) with `default-features = false` and the `load-dynamic` feature. The ONNX Runtime is therefore not compiled into the binary; it is loaded from a shared library at startup. The version is pinned in `native/crates/ll-core/src/dylib.rs` (`ORT_VERSION = "1.24.2"`, matching what `ort 2.0.0-rc.12` expects). `ensure_dylib` resolves the library before the first `ort::Session` is built: it downloads the official Microsoft CPU bundle for the host target on first run, verifies the SHA-256 of both the archive and the extracted library (so a swapped or truncated staged file is caught on every load), and stages it. The plugin also points the binary at a co-located library by injecting `ORT_DYLIB_PATH`/`ORT_LIB_LOCATION` when it spawns `ll-search` (`ortSpawnEnv` in `scripts/lib/binary.mjs:29`).
+Both inference paths (the bge-small embedder in ll-search and the cross-encoder reranker in ll-core) build `ort` (`2.0.0-rc.12`) with `default-features = false` and the `load-dynamic` feature. The ONNX Runtime is therefore not compiled into the binary; it is loaded from a shared library at startup. The version is pinned in ll-core's `src/dylib.rs` (crates.io) (`ORT_VERSION = "1.24.2"`, matching what `ort 2.0.0-rc.12` expects). `ensure_dylib` resolves the library before the first `ort::Session` is built: it downloads the official Microsoft CPU bundle for the host target on first run, verifies the SHA-256 of both the archive and the extracted library (so a swapped or truncated staged file is caught on every load), and stages it. The plugin also points the binary at a co-located library by injecting `ORT_DYLIB_PATH`/`ORT_LIB_LOCATION` when it spawns `ll-search` (`ortSpawnEnv` in `scripts/lib/binary.mjs:29`).
 
 This replaced static linking via `ort`'s `download-binaries` build feature (workstream F), which dropped the openssl/ureq build-time dependencies and made the runtime fetch explicit, pinned, and checksummed. Caveat: there is no `osx-x64` ONNX Runtime asset for 1.24.2 (Microsoft dropped Intel macOS), so x86_64 macOS is intentionally unsupported under `load-dynamic` (such a host must set `ORT_DYLIB_PATH` to a self-provided `libonnxruntime`).
 

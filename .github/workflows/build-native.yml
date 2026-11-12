@@ -51,8 +51,8 @@ jobs:
           restore-keys: |
             ${{ matrix.target }}-cargo-
 
-      # Keyed on a manual version tag, NOT ll-core/build.rs's hash: editing
-      # build.rs (e.g. adding download retry) must not bust the cache and force
+      # Keyed on a manual version tag, NOT the hash of ll-core's build.rs: editing
+      # it (e.g. adding download retry) must not bust the cache and force
       # a fresh HuggingFace fetch. Bump `v6` only when the pinned model/SHA changes.
       - name: Cache models
         uses: actions/cache@v4

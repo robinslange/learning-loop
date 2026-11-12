@@ -1,5 +1,5 @@
 {
-  "$comment": "Provenance + integrity manifest for the ONNX Runtime native library the search binary loads at runtime (ort load-dynamic). Under Opt-1 of the dependency-security hardening, ll-search/ll-core build with ort's load-dynamic feature instead of download-binaries: this removes openssl/native-tls/ureq and the cdn.pyke.io fetch from the build graph, and the runtime dynamically loads an official Microsoft libonnxruntime. The library is fetched and SHA-256-verified at runtime (native/crates/ll-core/src/dylib.rs), staged under ~/.learning-loop/lib, or supplied by the operator via ORT_DYLIB_PATH. To upgrade, bump the ort crate, set version to the version ort pins (ort-sys dist.txt `ms@<version>`), and refresh the per-target SHA-256 hashes from the GitHub release.",
+  "$comment": "Provenance + integrity manifest for the ONNX Runtime native library the search binary loads at runtime (ort load-dynamic). Under Opt-1 of the dependency-security hardening, ll-search/ll-core build with ort's load-dynamic feature instead of download-binaries: this removes openssl/native-tls/ureq and the cdn.pyke.io fetch from the build graph, and the runtime dynamically loads an official Microsoft libonnxruntime. The library is fetched and SHA-256-verified at runtime (ll-core src/dylib.rs, from crates.io), staged under ~/.learning-loop/lib, or supplied by the operator via ORT_DYLIB_PATH. To upgrade, bump the ort crate, set version to the version ort pins (ort-sys dist.txt `ms@<version>`), and refresh the per-target SHA-256 hashes from the GitHub release.",
   "runtime": {
     "id": "onnxruntime",
     "role": "ONNX inference engine (loaded via ort load-dynamic)",
@@ -8,7 +8,7 @@
     "license": "MIT",
     "upstream": "microsoft/onnxruntime (official release binaries)",
     "fetch": "runtime",
-    "verified_in": "native/crates/ll-core/src/dylib.rs",
+    "verified_in": "ll-core src/dylib.rs (crates.io), checked by native/crates/ll-search/tests/provenance.rs",
     "url_base": "https://github.com/microsoft/onnxruntime/releases/download/v1.24.2",
     "targets": {
       "aarch64-apple-darwin": {

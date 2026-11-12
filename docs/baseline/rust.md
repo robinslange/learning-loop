@@ -1,6 +1,6 @@
 # rust baseline conventions
 
-Conventions for `native/crates/ll-core/` and `native/crates/ll-search/`. Read this before touching any Rust file. See `docs/baseline/plugin.md` for JS/MJS hooks and scripts, `docs/baseline/cross-cutting.md` for versioning, perf budgets, and observability.
+Conventions for `native/crates/ll-search/`. ll-core is maintained in omit's private monorepo; source is on crates.io. Read this before touching any Rust file. See `docs/baseline/plugin.md` for JS/MJS hooks and scripts, `docs/baseline/cross-cutting.md` for versioning, perf budgets, and observability.
 
 *Phase status: Phase 0 establishes these rules as documented expectations. Phase 1 adds enforcement gates (clippy deny, grep CI, `cargo doc -D missing_docs`). After track 1I merges, CI rejects violations.*
 
@@ -79,7 +79,7 @@ mod tests {
 
 ### MSRV pinned
 
-`native/crates/ll-core/Cargo.toml` carries `rust-version = "1.88"`. Keep it. Don't use nightly features or stabilised-after-1.88 APIs without bumping and announcing the MSRV change. ll-search inherits the same floor.
+ll-search's floor is the `rust-version` of the ll-core it depends on, 1.89 as of ll-core 0.2.3 (rusqlite 0.41 needs it). Don't use nightly features or APIs stabilised after that floor without bumping and announcing the MSRV change.
 
 ---
 

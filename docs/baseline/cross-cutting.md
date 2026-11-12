@@ -231,15 +231,7 @@ All JSON read from disk goes through `safeLoad` (after 0C). All user-controlled 
 
 ## release checklist
 
-Before publishing ll-core `0.2.0` (track 2R):
-
-1. `cargo semver-checks -p ll-core` -- confirms only additive changes since 0.1.3.
-2. `cargo test --workspace` -- all tests green.
-3. `cargo doc --no-deps -p ll-core` -- no missing docs warnings.
-4. `cargo audit` -- no known vulnerabilities.
-5. Review `ort` version -- aim to be on a stable release before publishing.
-6. Update `CHANGELOG.md` with all changes since last publish.
-7. Tag `ll-core-v0.2.0` in git before `cargo publish`.
+ll-core is maintained in omit's private monorepo; source is on crates.io. Its releases follow that repo's `crates/ll-core/README.md`.
 
 For plugin releases, bump `package.json` version, update `CHANGELOG.md`, and ensure the ll-search binary version matches.
 
@@ -379,8 +371,6 @@ After track 1I, `.github/workflows/baseline.yml` will enforce:
 # check: no unwrap/expect outside main.rs and tests
 - run: cargo clippy --workspace -- -D clippy::unwrap_used -D clippy::expect_used
 
-# check: ll-core public API additive
-- run: cargo semver-checks -p ll-core
 ```
 
 This workflow does not exist yet. The baseline docs describe the intended state after phase 2.
