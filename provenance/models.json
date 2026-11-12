@@ -9,7 +9,7 @@
       "license": "MIT",
       "upstream": "BAAI/bge-small-en-v1.5 (ONNX export by Xenova)",
       "fetch": "runtime",
-      "verified_in": "native/crates/ll-core/src/models/bge_small.rs",
+      "verified_in": "ll-core src/models/bge_small.rs (crates.io)",
       "artifacts": {
         "model_quantized.onnx": "6c9c6101a956d62dfb5e7190c538226c0c5bb9cb27b651234b6df063ee7dbfe4",
         "tokenizer.json": "d241a60d5e8f04cc1b2b3e9ef7a4921b27bf526d9f6050ab90f9267a1f9e5c66"
@@ -23,7 +23,7 @@
       "license": "Apache-2.0",
       "upstream": "cross-encoder/ms-marco-MiniLM-L-6-v2 (ONNX export by Xenova)",
       "fetch": "build-time (include_bytes!)",
-      "verified_in": "native/crates/ll-core/build.rs",
+      "verified_in": "ll-core build.rs (crates.io)",
       "artifacts": {
         "model_quantized.onnx": "e9d8ebf845c413e981c175bfe49a3bfa9b3dcce2a3ba54875ee5df5a58639fbe",
         "tokenizer.json": "d241a60d5e8f04cc1b2b3e9ef7a4921b27bf526d9f6050ab90f9267a1f9e5c66"

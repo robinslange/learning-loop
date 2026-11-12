@@ -322,22 +322,16 @@ const QUALITY_BASELINE_PATH = join(BASELINES_DIR, 'quality.json');
 // ---------------------------------------------------------------------------
 
 /**
- * Extract the pinned HF model revision from ll-core's models/bge_small.rs.
- *
- * The revision is the authoritative single source of truth for which model
- * bytes were used to compute the stored quality baseline. CI runners fetch
- * from this exact commit hash; the baseline checker can compare revisions
- * and warn when the local cache predates the pin.
+ * The pinned HF model revision of bge-small, the model whose bytes computed the
+ * stored quality baseline. provenance/models.json records it, and ll-search's
+ * provenance test keeps it equal to ll-core's BGE_SMALL_REVISION, so the bench
+ * needs no Rust toolchain to read it.
  */
-function readModelRevision() {
-  const loaderPath = join(NATIVE_DIR, 'crates', 'll-core', 'src', 'models', 'bge_small.rs');
-  try {
-    const src = readFileSync(loaderPath, 'utf8');
-    const m = src.match(/BGE_SMALL_REVISION:\s*&str\s*=\s*"([0-9a-f]{40})"/);
-    return m ? m[1] : 'unknown';
-  } catch {
-    return 'unknown';
-  }
+export function readModelRevision() {
+  const models = JSON.parse(readFileSync(join(REPO_ROOT, 'provenance', 'models.json'), 'utf8')).models;
+  const revision = models.find(m => m.id === 'bge-small-en-v1.5')?.revision;
+  if (!/^[0-9a-f]{40}$/.test(revision ?? '')) throw new Error('provenance/models.json has no bge-small-en-v1.5 revision');
+  return revision;
 }
 
 /**

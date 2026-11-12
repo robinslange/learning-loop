@@ -76,7 +76,6 @@ Tick what applies. Items map to a rule in `docs/baseline/`.
 - [ ] No `.clone()` introduced in `search/{query,context,federation,graph,reflect}.rs` hot paths
 - [ ] Tests added for new module or hook
 - [ ] If hot path touched, bench numbers re-run
-- [ ] If `ll-core` public API added, `cargo public-api -p ll-core` shows additive-only diff
 
 ## Plans and skills
 

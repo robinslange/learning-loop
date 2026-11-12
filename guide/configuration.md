@@ -367,6 +367,5 @@ learning-loop/
     hooks/lib/inject.mjs            Shared helpers for the injection pipeline
     plugins/omc-cache-health/       oh-my-claude cache statusline plugin
   native/                           Cargo workspace
-  native/crates/ll-core/            Search library: embed, graph, score, rerank, store
   native/crates/ll-search/          CLI binary, sync client, preprocess, model loader
 ```

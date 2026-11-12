@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/ll-core", "crates/ll-search"]
+members = ["crates/ll-search"]
 resolver = "2"
 
 [workspace.package]
