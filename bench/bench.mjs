@@ -322,23 +322,16 @@ const QUALITY_BASELINE_PATH = join(BASELINES_DIR, 'quality.json');
 // ---------------------------------------------------------------------------
 
 /**
- * Extract the pinned HF model revision from ll-core's models/bge_small.rs, as cargo resolved the crate.
- *
- * The revision is the authoritative single source of truth for which model
- * bytes were used to compute the stored quality baseline. CI runners fetch
- * from this exact commit hash; the baseline checker can compare revisions
- * and warn when the local cache predates the pin.
+ * The pinned HF model revision of bge-small, the model whose bytes computed the
+ * stored quality baseline. provenance/models.json records it, and ll-search's
+ * provenance test keeps it equal to ll-core's BGE_SMALL_REVISION, so the bench
+ * needs no Rust toolchain to read it.
  */
 export function readModelRevision() {
-  // ll-core comes from crates.io, so its source is wherever cargo resolved it.
-  const meta = spawnSync('cargo', ['metadata', '--format-version', '1', '--manifest-path', join(NATIVE_DIR, 'Cargo.toml')], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
-  if (meta.status !== 0) throw new Error(`cargo metadata failed: ${meta.error?.message ?? meta.stderr}`);
-  const llCore = JSON.parse(meta.stdout).packages.find(p => p.name === 'll-core');
-  if (!llCore) throw new Error('ll-core is not a dependency of the native workspace');
-  const loaderPath = join(llCore.manifest_path, '..', 'src', 'models', 'bge_small.rs');
-  const m = readFileSync(loaderPath, 'utf8').match(/BGE_SMALL_REVISION:\s*&str\s*=\s*"([0-9a-f]{40})"/);
-  if (!m) throw new Error(`no BGE_SMALL_REVISION in ${loaderPath}`);
-  return m[1];
+  const models = JSON.parse(readFileSync(join(REPO_ROOT, 'provenance', 'models.json'), 'utf8')).models;
+  const revision = models.find(m => m.id === 'bge-small-en-v1.5')?.revision;
+  if (!/^[0-9a-f]{40}$/.test(revision ?? '')) throw new Error('provenance/models.json has no bge-small-en-v1.5 revision');
+  return revision;
 }
 
 /**

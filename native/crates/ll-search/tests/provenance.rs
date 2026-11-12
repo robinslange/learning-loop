@@ -62,3 +62,22 @@ fn runtime_manifest_hashes_are_the_ones_ll_core_verifies() {
         }
     }
 }
+
+#[test]
+fn models_manifest_revision_is_the_one_ll_core_pins() {
+    let path = native_dir().join("../provenance/models.json");
+    let manifest: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).expect("provenance/models.json"))
+            .expect("models.json is JSON");
+    let bge = manifest["models"]
+        .as_array()
+        .expect("models")
+        .iter()
+        .find(|m| m["id"] == "bge-small-en-v1.5")
+        .expect("models.json lists bge-small-en-v1.5");
+    assert_eq!(
+        bge["revision"].as_str(),
+        Some(ll_core::models::bge_small::BGE_SMALL_REVISION),
+        "models.json's bge-small revision is not the one ll-core pins"
+    );
+}
