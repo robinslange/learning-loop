@@ -318,11 +318,7 @@ export function formatMissingDeps(result) {
   }
   if (optional.length > 0) {
     out += '\n## Missing Optional Dependencies\n';
-    out += 'Recommended but not required.\n\n';
-    for (const c of optional) {
-      out += `- **${c.name}**: ${c.detail}\n`;
-      if (c.fix) out += `  Fix: \`${c.fix}\`\n`;
-    }
+    out += `Recommended but not required: ${optional.map((c) => c.name).join(', ')}.\n`;
   }
   out += '\nRun /learning-loop:doctor for details.\n';
   return out;

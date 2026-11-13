@@ -1804,6 +1804,8 @@ test('formatMissingDeps: warn-severity issues go under optional heading', () => 
   };
   const md = formatMissingDeps(result);
   assert.match(md, /Missing Optional Dependencies/);
+  assert.match(md, /~\/.local\/bin on PATH/);
+  assert.ok(!md.includes('add to your shell rc'), 'optional fixes belong to /learning-loop:doctor');
 });
 
 test('formatMissingDeps: injection-shadow-gate readiness is not a missing dependency', () => {
